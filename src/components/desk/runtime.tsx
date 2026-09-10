@@ -23,7 +23,7 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
   const q = useQuery({
     queryKey: ["desk-snapshot"],
     queryFn: () => getDeskSnapshot(),
-    refetchInterval: mode === "live" ? 8_000 : 45_000,
+    refetchInterval: mode === "live" ? 8_000 : mode === "ict" ? 12_000 : 45_000,
   });
 
   const quotes = useQuery({
@@ -36,8 +36,8 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
   const books = useQuery({
     queryKey: ["ict-books"],
     queryFn: () => getIctBooks(),
-    refetchInterval: mode === "ict" ? 20_000 : 60_000,
-    staleTime: 15_000,
+    refetchInterval: mode === "ict" ? 5_000 : 60_000,
+    staleTime: 2_000,
   });
 
   useLayoutEffect(() => {
@@ -103,7 +103,7 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!running) return;
-    const ms = mode === "live" ? 1000 : Math.max(70, 480 / Math.max(1, speed));
+    const ms = mode === "live" || mode === "ict" ? 1000 : Math.max(70, 480 / Math.max(1, speed));
     const id = window.setInterval(() => step(), ms);
     return () => window.clearInterval(id);
   }, [running, speed, step, mode]);

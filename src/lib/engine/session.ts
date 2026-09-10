@@ -214,7 +214,8 @@ function revalue(s: EngineState, p: Position, next: number): Position {
     });
     pnlUsd = sell.proceedsUsd - finite(p.grossUsd) - finite(p.jitoUsd);
   } else {
-    pnlUsd = ((mark - entry) / entry) * finite(p.sizeUsd, 1);
+    const dir = p.side === "short" ? -1 : 1;
+    pnlUsd = ((mark - entry) / entry) * finite(p.sizeUsd, 1) * dir;
   }
   return {
     ...p,
@@ -254,7 +255,8 @@ function closePos(
     s.stats.feesUsd += sell.feeUsd;
     s.stats.jitoUsd += sell.jitoUsd;
   } else {
-    pnlUsd = ((exitUsd - p.entryUsd) / Math.max(1e-9, finite(p.entryUsd, 1))) * finite(p.sizeUsd);
+    const dir = p.side === "short" ? -1 : 1;
+    pnlUsd = ((exitUsd - p.entryUsd) / Math.max(1e-9, finite(p.entryUsd, 1))) * finite(p.sizeUsd) * dir;
     s.cashUsd = finite(s.cashUsd) + finite(p.sizeUsd) + finite(pnlUsd);
   }
   const pnlSol = finite(pnlUsd) / Math.max(1e-6, s.solUsd);
@@ -601,49 +603,93 @@ function tickZostaff(s: EngineState) {
 
 function tickIct(s: EngineState, market: MarketSnapshot | null) {
   if (market) ingestIct(s, market);
-  if (s.ictCursor >= s.ictTrades.length) {
+  markIct(s, market);
+  while (s.ictCursor < s.ictTrades.length) {
+    const tr = s.ictTrades[s.ictCursor]!;
+    s.ictCursor += 1;
+    s.stats.scanned += 4;
+    s.stats.taken += 1;
+    s.cashUsd += tr.pnlUsd;
+    if (tr.pnlUsd >= 0) s.stats.wins += 1;
+    else {
+      s.stats.losses += 1;
+      s.dayLoss += Math.abs(tr.pnlUsd);
+    }
+    bumpSpark(s, "timing", tr.pnlUsd);
+    pushTape(s, {
+      t: tr.openedAt,
+      kind: "open",
+      agent: "timing",
+      symbol: tr.symbol,
+      text: `${tr.side} ${tr.symbol} @ ${tr.entryUsd.toFixed(tr.entryUsd < 2 ? 5 : 2)}  ${tr.note}`,
+      tone: "mute",
+    });
+    pushTape(s, {
+      t: tr.closedAt,
+      kind: tr.reason === "stop" ? "stop" : "close",
+      agent: "timing",
+      symbol: tr.symbol,
+      text: `${reasonLabel(tr.reason)} ${tr.side} ${tr.symbol}  ${tr.pnlUsd >= 0 ? "+" : ""}${tr.pnlUsd.toFixed(2)} usd  ${tr.rMultiple.toFixed(2)}R  ${tr.setup}`,
+      tone: tr.pnlUsd >= 0 ? "up" : "down",
+    });
+    s.closed = [tr, ...s.closed];
+    s.gauges.follow = s.stats.taken ? s.stats.wins / s.stats.taken : 0;
+    s.gauges.fill = 0.8;
+    s.gauges.decay = 0.35;
     setAgent(s, "timing", {
-      status: s.ictTrades.length ? "caught up · waiting next 15m" : "no A+ yet · waiting NY window",
+      status: `${tr.symbol} ${tr.setup} ${tr.side} ${tr.rMultiple.toFixed(2)}R`,
+      lastScore: Math.max(0, Math.min(1, (tr.rMultiple + 1) / 3)),
+      busy: true,
+    });
+  }
+  if (s.open.some((p) => p.origin === "ict")) {
+    setAgent(s, "timing", {
+      status: `live · ${s.open.filter((p) => p.origin === "ict").length} open · waiting 15m`,
+      busy: true,
+    });
+  } else if (s.ictCursor >= s.ictTrades.length) {
+    setAgent(s, "timing", {
+      status: "live forward · waiting next 15m A+",
       busy: false,
     });
-    return;
   }
-  const tr = s.ictTrades[s.ictCursor]!;
-  s.ictCursor += 1;
-  s.stats.scanned += 12;
-  s.stats.taken += 1;
-  s.cashUsd += tr.pnlUsd;
-  if (tr.pnlUsd >= 0) s.stats.wins += 1;
-  else {
-    s.stats.losses += 1;
-    s.dayLoss += Math.abs(tr.pnlUsd);
+}
+
+function markIct(s: EngineState, market: MarketSnapshot | null) {
+  const books = market?.books ?? [];
+  for (const p of s.open) {
+    if (p.origin !== "ict") continue;
+    const b = books.find((x) => x.symbol === p.symbol || x.id === p.symbol);
+    const last = b?.last || b?.candles15[b.candles15.length - 1]?.c;
+    if (!last) continue;
+    const c = b?.candles15[b.candles15.length - 1];
+    const hi = c ? Math.max(c.h, last) : last;
+    const lo = c ? Math.min(c.l, last) : last;
+    const stopPx = p.side === "long" ? p.entryUsd * (1 - p.stopPct) : p.entryUsd * (1 + p.stopPct);
+    const tgtPx = p.side === "long" ? p.entryUsd * (1 + p.stopPct * p.targetR) : p.entryUsd * (1 - p.stopPct * p.targetR);
+    if (p.side === "long" && lo <= stopPx) {
+      s.open = s.open.filter((x) => x.id !== p.id);
+      closePos(s, p, stopPx, "stop");
+      continue;
+    }
+    if (p.side === "short" && hi >= stopPx) {
+      s.open = s.open.filter((x) => x.id !== p.id);
+      closePos(s, p, stopPx, "stop");
+      continue;
+    }
+    if (p.side === "long" && hi >= tgtPx) {
+      s.open = s.open.filter((x) => x.id !== p.id);
+      closePos(s, p, tgtPx, "target");
+      continue;
+    }
+    if (p.side === "short" && lo <= tgtPx) {
+      s.open = s.open.filter((x) => x.id !== p.id);
+      closePos(s, p, tgtPx, "target");
+      continue;
+    }
+    s.open = s.open.map((x) => (x.id === p.id ? revalue(s, x, last) : x));
   }
-  bumpSpark(s, "timing", tr.pnlUsd);
-  pushTape(s, {
-    t: tr.openedAt,
-    kind: "open",
-    agent: "timing",
-    symbol: tr.symbol,
-    text: `${tr.side} ${tr.symbol} @ ${tr.entryUsd.toFixed(tr.entryUsd < 2 ? 5 : 2)}  ${tr.note}`,
-    tone: "mute",
-  });
-  pushTape(s, {
-    t: tr.closedAt,
-    kind: tr.reason === "stop" ? "stop" : "close",
-    agent: "timing",
-    symbol: tr.symbol,
-    text: `${reasonLabel(tr.reason)} ${tr.side} ${tr.symbol}  ${tr.pnlUsd >= 0 ? "+" : ""}${tr.pnlUsd.toFixed(2)} usd  ${tr.rMultiple.toFixed(2)}R  ${tr.setup}`,
-    tone: tr.pnlUsd >= 0 ? "up" : "down",
-  });
-  s.closed = [tr, ...s.closed];
-  s.gauges.follow = s.stats.taken ? s.stats.wins / s.stats.taken : 0;
-  s.gauges.fill = 0.8;
-  s.gauges.decay = 0.35;
-  setAgent(s, "timing", {
-    status: `${tr.symbol} ${tr.setup} ${tr.side} ${tr.rMultiple.toFixed(2)}R`,
-    lastScore: Math.max(0, Math.min(1, (tr.rMultiple + 1) / 3)),
-    busy: true,
-  });
+  s.stats.openCount = s.open.length;
 }
 
 function reasonLabel(r: ClosedTrade["reason"]) {
@@ -669,10 +715,12 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const btc = books.find((b) => b.id === "BTC");
   const eth = books.find((b) => b.id === "ETH");
   const risk = Math.max(1, s.startUsd * 0.01);
+  const liveFrom = (s.wallStarted || Date.now()) - 20 * 60_000;
   let added = 0;
   const fresh: ClosedTrade[] = [];
   for (const b of filtered) {
     if (b.candles15.length < 40) continue;
+    const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
     const corr = b.id === "BTC" ? eth : btc;
     const extra =
       corr && corr.id !== b.id ? scanSmt(b.candles15, corr.candles15, corr.symbol) : [];
@@ -683,23 +731,73 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       pnlSol: t.pnlUsd / Math.max(1e-6, s.solUsd),
     }));
     for (const t of sim) {
+      if (t.openedAt < liveFrom) continue;
       const key = `${t.symbol}-${t.setup}-${t.openedAt}`;
       if (s.ictSeen.includes(key)) continue;
       s.ictSeen = [...s.ictSeen, key];
+      const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
+      if (stillOpen) {
+        if (s.open.some((p) => p.id === t.id) || s.open.length >= MAX_OPEN) continue;
+        const stopDist = Math.abs(t.entryUsd - t.stop);
+        const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
+        const sizeUsd = risk / Math.max(1e-6, stopPct);
+        s.cashUsd -= sizeUsd;
+        const mark = b.last || t.entryUsd;
+        const dir = t.side === "short" ? -1 : 1;
+        const pnlUsd = ((mark - t.entryUsd) / Math.max(1e-9, t.entryUsd)) * sizeUsd * dir;
+        s.open = [
+          ...s.open,
+          {
+            id: t.id,
+            symbol: t.symbol,
+            name: t.name,
+            mint: `ict:${t.symbol}`,
+            setup: t.setup,
+            side: t.side,
+            openedAt: t.openedAt,
+            entryUsd: t.entryUsd,
+            sizeSol: sizeUsd / Math.max(1e-6, s.solUsd),
+            sizeUsd,
+            stopPct,
+            targetR: 2,
+            markUsd: mark,
+            pnlSol: pnlUsd / Math.max(1e-6, s.solUsd),
+            pnlUsd,
+            peakUsd: mark,
+            agent: "timing",
+            note: t.note,
+            origin: "ict",
+          },
+        ];
+        s.stats.taken += 1;
+        s.stats.openCount = s.open.length;
+        pushTape(s, {
+          t: s.simT,
+          kind: "open",
+          agent: "timing",
+          symbol: t.symbol,
+          text: `live ${t.side} ${t.symbol} @ ${t.entryUsd.toFixed(t.entryUsd < 2 ? 5 : 2)} · ${t.note}`,
+          tone: "up",
+        });
+        added += 1;
+        continue;
+      }
       fresh.push(t);
       added += 1;
     }
   }
-  if (!fresh.length) return;
+  if (!fresh.length && added === 0) return;
   fresh.sort((a, b) => a.openedAt - b.openedAt);
   s.ictTrades = [...s.ictTrades, ...fresh];
-  pushTape(s, {
-    t: s.simT,
-    kind: "note",
-    symbol: s.ictFilter,
-    text: `ICT ${s.ictFilter} · +${added} fills · CISD / OB / FVG / div / SMT · sweep alone is not a trade`,
-    tone: "mute",
-  });
+  if (added) {
+    pushTape(s, {
+      t: s.simT,
+      kind: "note",
+      symbol: s.ictFilter,
+      text: `ICT live · +${added} since session start · history stays on the chart, not the $ book`,
+      tone: "mute",
+    });
+  }
 }
 
 function nextUnseen(s: EngineState): Launch | null {
@@ -808,7 +906,7 @@ export function applyMarket(s: EngineState, m: MarketSnapshot) {
 export function tick(s: EngineState, market: MarketSnapshot | null): EngineState {
   if (!s.running) return s;
   s.tickN += 1;
-  if (s.mode === "live") {
+  if (s.mode === "live" || s.mode === "ict") {
     s.simT = Date.now();
   } else {
     const stepMs = 8_000 * Math.max(1, 8 / s.speed);
@@ -887,7 +985,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} · TTrades SB / AMD / OB / Unicorn / FVG / RSI+SMT · 15m NY · CISD required`,
+      text: `ICT ${ictFilter} live from $${s.startUsd.toFixed(0)} · only new 15m fills after now · boxes on the chart are history`,
       tone: "mute",
     });
   }

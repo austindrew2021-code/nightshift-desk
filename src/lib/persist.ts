@@ -4,7 +4,7 @@ import {
 } from "@/lib/engine/session";
 import type { DeskMode, TapeEvent } from "@/lib/engine/types";
 
-const KEY = "nightshift.engine.v1";
+const KEY = "nightshift.engine.v2";
 const START_KEY = "nightshift.startUsd";
 const MODES: DeskMode[] = ["watch", "live", "ict", "zostaff"];
 

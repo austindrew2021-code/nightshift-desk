@@ -64,6 +64,19 @@ function candlesFromKucoin(data: unknown): Candle[] {
   return parsed.slice(-200);
 }
 
+function stampForming(book: IctBook): IctBook {
+  const lastPx = book.last;
+  if (!lastPx || lastPx <= 0 || book.candles15.length < 2) return book;
+  const cs = book.candles15.slice();
+  const i = cs.length - 1;
+  const c = { ...cs[i]! };
+  c.c = lastPx;
+  c.h = Math.max(c.h, lastPx, c.o);
+  c.l = Math.min(c.l, lastPx, c.o);
+  cs[i] = c;
+  return { ...book, candles15: cs };
+}
+
 async function fetchOkxBook(instId: string, symbol: string, name: string, id: string): Promise<IctBook> {
   const [ticker, candles] = await Promise.all([
     getJson(`https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(instId)}`),
@@ -276,7 +289,7 @@ export const getIctBooks = createServerFn({ method: "GET" }).handler(async (): P
   );
   return settled.map((r, i) => {
     const a = ICT_ASSETS[i]!;
-    if (r.status === "fulfilled" && r.value.candles15.length > 10) return r.value;
+    if (r.status === "fulfilled" && r.value.candles15.length > 10) return stampForming(r.value);
     return {
       id: a.id,
       symbol: a.symbol,

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { fmtUsd, fmtClock, fmtSigned } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useDesk } from "@/lib/store";
@@ -33,6 +33,7 @@ export function Desk() {
   const setIctFilter = useDesk((s) => s.setIctFilter);
   const setGrok = useDesk((s) => s.setGrok);
   const bumpGrok = useDesk((s) => s.bumpGrokCalls);
+  const [chartFs, setChartFs] = useState(false);
 
   const startUsd = engine.startUsd;
   const sessionPnlUsd = engine.equityUsd - startUsd;
@@ -44,7 +45,7 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} from $${startUsd.toFixed(0)} · TTrades CISD + OB/Unicorn + FVG CE + RSI/hidden/SMT. Chart draws the boxes. NY clock.`;
+        return `ICT ${engine.ictFilter} live from $${startUsd.toFixed(0)} · new 15m fills only. History is boxes, not PnL. FULL = realtime chart.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
@@ -135,6 +136,7 @@ export function Desk() {
             books={market?.books ?? []}
             filter={engine.mode === "ict" ? engine.ictFilter : "SOL"}
             fallback={market?.candles15}
+            onToggleFs={() => setChartFs(true)}
           />
         </section>
 
@@ -248,6 +250,18 @@ export function Desk() {
       )}
 
       <InstallHint />
+
+      {chartFs && (
+        <div className="fixed inset-0 z-[80] flex flex-col bg-bg">
+          <LiveChart
+            books={market?.books ?? []}
+            filter={engine.mode === "ict" ? engine.ictFilter : "SOL"}
+            fallback={market?.candles15}
+            fullscreen
+            onToggleFs={() => setChartFs(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }

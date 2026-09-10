@@ -42,10 +42,14 @@ export function LiveChart({
   books,
   filter,
   fallback,
+  fullscreen,
+  onToggleFs,
 }: {
   books: IctBook[];
   filter: string;
   fallback?: Candle[];
+  fullscreen?: boolean;
+  onToggleFs?: () => void;
 }) {
   const [sym, setSym] = useState(filter === "ALL" ? "SOL" : filter);
   const [hover, setHover] = useState<number | null>(null);
@@ -392,7 +396,7 @@ export function LiveChart({
   }
 
   return (
-    <div className="flex h-full min-h-[20rem] flex-col md:min-h-[24rem]">
+    <div className={cn("flex h-full flex-col", fullscreen ? "min-h-0" : "min-h-[20rem] md:min-h-[24rem]")}>
       <div className="flex flex-wrap items-center gap-2 px-3 pt-2">
         <p className="font-mono text-[10px] tracking-[0.18em] text-subtle uppercase">15m · NY</p>
         <div className="flex flex-wrap gap-1">
@@ -459,6 +463,15 @@ export function LiveChart({
           >
             END
           </button>
+          {onToggleFs && (
+            <button
+              type="button"
+              className="h-6 rounded px-1.5 font-mono text-[10px] text-phosphor"
+              onClick={onToggleFs}
+            >
+              {fullscreen ? "CLOSE" : "FULL"}
+            </button>
+          )}
         </div>
       </div>
       <div className="flex flex-wrap items-baseline gap-3 px-3 pt-1 font-mono text-[11px] tabular">

@@ -68,8 +68,8 @@ function PlaybookPage() {
               d: "Set $100 (or $1k). Tap Live paper. Leave it running. Max 10 fills/day, 0.1 SOL cap, 50% stop. Many hours can pass with 0 fills — the filter is supposed to skip almost everything. Overnight is a start. A week is a real sample.",
             },
             {
-              t: "3. ICT · majors — TTrades on live 15m",
-              d: "Tap ICT · majors. It first replays the last ~2 days of 15m on BTC ETH SOL XRP XLM TAO NPC + BNB DOGE AVAX LINK HYPE. Then it stays on and picks up new Silver Bullet / AMD signals as 15m bars print. Leave it through at least one NY 10–11 ET window. Five sessions is a real sample.",
+              t: "3. ICT · majors — live 15m",
+              d: "Tap ICT · majors. The chart draws 2 days of boxes. The $ book only takes new 15m fills after you press it — Reset will not reprint old +$60. Leave it through a NY 10–11 window. FULL opens the chart.",
             },
             {
               t: "4. What “accurate” means",
