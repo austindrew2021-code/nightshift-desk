@@ -5,9 +5,13 @@ import { cn } from "@/lib/utils";
 export function EquityChart({
   series,
   start,
+  pnlUsd,
+  pnlSol,
 }: {
   series: EquityPoint[];
   start: number;
+  pnlUsd?: number;
+  pnlSol?: number;
 }) {
   const w = 640;
   const h = 220;
@@ -74,6 +78,13 @@ export function EquityChart({
         <p className={cn("font-mono text-3xl tabular leading-none", up ? "text-phosphor" : "text-loss")}>
           {fmtUsd(lastV, 0)}
         </p>
+        {pnlUsd != null && (
+          <p className={cn("mt-1 font-mono text-[11px] tabular", up ? "text-phosphor" : "text-loss")}>
+            {pnlUsd > 0 ? "+" : ""}
+            {fmtUsd(pnlUsd, 0)} from start
+            {pnlSol != null ? ` · ${pnlSol >= 0 ? "+" : ""}${pnlSol.toFixed(2)} SOL` : ""}
+          </p>
+        )}
       </div>
     </div>
   );

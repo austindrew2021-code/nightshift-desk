@@ -139,7 +139,12 @@ export function Desk() {
         </section>
 
         <section className="relative bg-surface p-3 md:col-span-4">
-          <EquityChart series={engine.equity} start={startUsd} />
+          <EquityChart
+            series={engine.equity}
+            start={startUsd}
+            pnlUsd={sessionPnlUsd}
+            pnlSol={sessionPnlSol}
+          />
           <Multiplier equity={engine.equityUsd} start={startUsd} />
         </section>
 
