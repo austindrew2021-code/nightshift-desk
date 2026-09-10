@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #070b09;
+  --color-surface: #0c1410;
+  --color-surface-2: #111a15;
+  --color-panel: #0a100d;
+  --color-fg: #d7efe0;
+  --color-muted: #7a9a86;
+  --color-subtle: #4d6558;
+  --color-line: #1b2a22;
+  --color-line-strong: #2a4034;
+  --color-phosphor: #3dff8a;
+  --color-phosphor-dim: #1a6b3c;
+  --color-phosphor-ink: #06210f;
+  --color-loss: #ff6b6b;
+  --color-warn: #c4b48a;
+  --color-hunter: #3dff8a;
+  --color-auditor: #5aa8ff;
+  --color-narrative: #7ee0c3;
+  --color-timing: #8ea2ff;
+  --color-checker: #ff7a6e;
+  --color-ring: #3dff8a;
+
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
+
+  --shadow-border: 0 0 0 1px rgba(61, 255, 138, 0.08);
+  --shadow-border-hover: 0 0 0 1px rgba(61, 255, 138, 0.16);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+  body {
+    min-height: 100dvh;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    overflow-x: hidden;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.desk-shell {
+  overflow-x: hidden;
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgba(61, 255, 138, 0.05), transparent 60%),
+    var(--color-bg);
+}
+
+.panel {
+  background: var(--color-surface);
+  box-shadow: var(--shadow-border);
+}
+
+.floor-grid {
+  background-image:
+    linear-gradient(rgba(61, 255, 138, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(61, 255, 138, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+  transform: rotateX(62deg) scale(1.04);
+  transform-origin: center top;
+}
+
+@keyframes ns-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@keyframes ns-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.ns-enter {
+  animation: ns-rise 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
