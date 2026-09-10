@@ -280,6 +280,8 @@ function closePos(
       score: 0.7,
       note: p.note,
       origin: p.origin,
+      stopUsd: p.stopUsd,
+      targetUsd: p.targetUsd,
       quotedEntryUsd: p.quotedEntryUsd,
       quotedExitUsd: exitUsd,
       feeUsd,
@@ -759,7 +761,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             sizeSol: sizeUsd / Math.max(1e-6, s.solUsd),
             sizeUsd,
             stopPct,
-            targetR: 2,
+            targetR: Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
             markUsd: mark,
             pnlSol: pnlUsd / Math.max(1e-6, s.solUsd),
             pnlUsd,
@@ -767,6 +769,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             agent: "timing",
             note: t.note,
             origin: "ict",
+            stopUsd: t.stop,
+            targetUsd: t.target,
           },
         ];
         s.stats.taken += 1;
@@ -782,7 +786,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         added += 1;
         continue;
       }
-      fresh.push(t);
+      fresh.push({
+        ...t,
+        stopUsd: t.stop,
+        targetUsd: t.target,
+      });
       added += 1;
     }
   }

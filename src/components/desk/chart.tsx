@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { chartLayers, nyHour, scanIct, type ChartZone, type IctSignal } from "@/lib/engine/ict";
-import type { Candle } from "@/lib/engine/types";
+import type { Candle, ClosedTrade, Position } from "@/lib/engine/types";
 import type { IctBook } from "@/lib/engine/universe";
 import { ICT_ASSETS } from "@/lib/engine/universe";
 import { cn } from "@/lib/utils";
@@ -29,14 +29,76 @@ function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-const TOGGLES: { id: ChartZone["kind"]; label: string }[] = [
+const TOGGLES: { id: ChartZone["kind"] | "orders"; label: string }[] = [
   { id: "fvg", label: "FVG" },
   { id: "ob", label: "OB" },
   { id: "asia", label: "ASIA" },
   { id: "nine", label: "9AM" },
   { id: "kill", label: "KZ" },
   { id: "entry", label: "FILLS" },
+  { id: "orders", label: "ORDERS" },
 ];
+
+export interface ChartOrder {
+  id: string;
+  symbol: string;
+  side: "long" | "short";
+  setup: string;
+  entry: number;
+  stop?: number;
+  target?: number;
+  exit?: number;
+  openedAt: number;
+  closedAt?: number;
+  live: boolean;
+  pending?: boolean;
+  pnlUsd?: number;
+  reason?: string;
+}
+
+function posLevels(p: Position): { stop: number; target: number } {
+  const stop =
+    p.stopUsd ??
+    (p.side === "long" ? p.entryUsd * (1 - p.stopPct) : p.entryUsd * (1 + p.stopPct));
+  const target =
+    p.targetUsd ??
+    (p.side === "long" ? p.entryUsd * (1 + p.stopPct * p.targetR) : p.entryUsd * (1 - p.stopPct * p.targetR));
+  return { stop, target };
+}
+
+export function deskOrders(open: Position[], closed: ClosedTrade[]): ChartOrder[] {
+  const live: ChartOrder[] = open.map((p) => {
+    const lv = posLevels(p);
+    return {
+      id: p.id,
+      symbol: p.symbol,
+      side: p.side,
+      setup: p.setup,
+      entry: p.entryUsd,
+      stop: lv.stop,
+      target: lv.target,
+      openedAt: p.openedAt,
+      live: true,
+      pnlUsd: p.pnlUsd,
+    };
+  });
+  const done: ChartOrder[] = closed.slice(0, 12).map((t) => ({
+    id: t.id,
+    symbol: t.symbol,
+    side: t.side,
+    setup: t.setup,
+    entry: t.entryUsd,
+    stop: t.stopUsd,
+    target: t.targetUsd,
+    exit: t.exitUsd,
+    openedAt: t.openedAt,
+    closedAt: t.closedAt,
+    live: false,
+    pnlUsd: t.pnlUsd,
+    reason: t.reason,
+  }));
+  return [...live, ...done];
+}
 
 export function LiveChart({
   books,
@@ -44,12 +106,14 @@ export function LiveChart({
   fallback,
   fullscreen,
   onToggleFs,
+  orders = [],
 }: {
   books: IctBook[];
   filter: string;
   fallback?: Candle[];
   fullscreen?: boolean;
   onToggleFs?: () => void;
+  orders?: ChartOrder[];
 }) {
   const [sym, setSym] = useState(filter === "ALL" ? "SOL" : filter);
   const [hover, setHover] = useState<number | null>(null);
@@ -65,6 +129,7 @@ export function LiveChart({
     entry: true,
     stop: true,
     target: true,
+    orders: true,
   });
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -90,6 +155,33 @@ export function LiveChart({
   const signals = useMemo(() => (candles.length >= 48 ? scanIct(candles) : []), [candles]);
   const zones = useMemo(() => chartLayers(view.length ? view : candles, signals), [view, candles, signals]);
   const stale = book?.source === "fallback" || (!book && (fallback?.length ?? 0) > 0);
+  const lastPx = book?.last || view[view.length - 1]?.c || 0;
+  const mine = useMemo(() => {
+    const here = orders.filter((o) => o.symbol === (book?.symbol ?? sym) || o.symbol === (book?.id ?? sym));
+    const pending: ChartOrder[] = [];
+    const lastC = view[view.length - 1];
+    if (lastC) {
+      for (const s of signals) {
+        if (s.i < candles.length - 16) continue;
+        if (here.some((o) => o.live && o.side === s.side && Math.abs(o.entry - s.entry) / s.entry < 0.004)) continue;
+        const waiting = s.side === "long" ? lastC.c > s.entry : lastC.c < s.entry;
+        if (!waiting) continue;
+        pending.push({
+          id: `lmt-${s.setup}-${s.i}`,
+          symbol: book?.symbol ?? sym,
+          side: s.side,
+          setup: s.setup,
+          entry: s.entry,
+          stop: s.stop,
+          target: s.target,
+          openedAt: s.t,
+          live: true,
+          pending: true,
+        });
+      }
+    }
+    return [...here, ...pending.slice(0, 3)];
+  }, [orders, book?.symbol, book?.id, sym, signals, candles.length, view]);
 
   useEffect(() => {
     if (follow && nAll > 0) setStart(Math.max(0, nAll - visN));
@@ -119,7 +211,7 @@ export function LiveChart({
         return;
       }
 
-      const pad = { l: 6, r: 52, t: 6, b: 20 };
+      const pad = { l: 6, r: on.orders !== false && mine.length ? 92 : 52, t: 6, b: 20 };
       const innerW = w - pad.l - pad.r;
       const innerH = h - pad.t - pad.b;
       const hi = Math.max(...view.map((c) => c.h));
@@ -282,13 +374,106 @@ export function LiveChart({
         ctx.lineTo(x, pad.t + innerH);
         ctx.stroke();
       }
+
+      if (on.orders !== false && lastPx > 0) {
+        const yLast = yAt(lastPx);
+        ctx.setLineDash([2, 3]);
+        ctx.strokeStyle = "rgba(215,239,224,0.55)";
+        ctx.beginPath();
+        ctx.moveTo(pad.l, yLast);
+        ctx.lineTo(w - pad.r, yLast);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#d7efe0";
+        ctx.font = "9px ui-monospace, monospace";
+        ctx.fillText(`LAST ${px(lastPx)}`, w - pad.r + 4, clamp(yLast + 3, pad.t + 8, h - pad.b - 8));
+      }
+
+      if (on.orders !== false) {
+        const xTime = (t: number) => {
+          if (t <= view[0]!.t) return pad.l;
+          if (t >= view[view.length - 1]!.t) return pad.l + innerW;
+          return xAt(t);
+        };
+        const tag = (y: number, text: string, color: string, bg: string) => {
+          const yy = clamp(y, pad.t + 8, h - pad.b - 8);
+          ctx.fillStyle = bg;
+          ctx.fillRect(w - pad.r + 2, yy - 8, pad.r - 6, 15);
+          ctx.fillStyle = color;
+          ctx.font = "9px ui-monospace, monospace";
+          ctx.textAlign = "left";
+          ctx.fillText(text, w - pad.r + 5, yy + 3);
+        };
+        for (const o of mine) {
+          const x0 = xTime(o.openedAt);
+          const x1 = o.closedAt ? xTime(o.closedAt) : pad.l + innerW;
+          const yE = yAt(o.entry);
+          ctx.setLineDash(o.pending ? [3, 3] : []);
+          ctx.strokeStyle = o.side === "long" ? UP : DN;
+          ctx.lineWidth = o.live ? 1.6 : 1;
+          ctx.beginPath();
+          ctx.moveTo(x0, yE);
+          ctx.lineTo(x1, yE);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = o.side === "long" ? UP : DN;
+          ctx.beginPath();
+          if (o.side === "long") {
+            ctx.moveTo(x0, yE + 8);
+            ctx.lineTo(x0 - 5, yE);
+            ctx.lineTo(x0 + 5, yE);
+          } else {
+            ctx.moveTo(x0, yE - 8);
+            ctx.lineTo(x0 - 5, yE);
+            ctx.lineTo(x0 + 5, yE);
+          }
+          ctx.closePath();
+          ctx.fill();
+          if (o.stop) {
+            const yS = yAt(o.stop);
+            ctx.setLineDash([5, 4]);
+            ctx.strokeStyle = DN;
+            ctx.beginPath();
+            ctx.moveTo(x0, yS);
+            ctx.lineTo(x1, yS);
+            ctx.stroke();
+            tag(yS, `SL ${px(o.stop)}`, DN, "rgba(255,107,107,0.18)");
+          }
+          if (o.target) {
+            const yT = yAt(o.target);
+            ctx.setLineDash([5, 4]);
+            ctx.strokeStyle = UP;
+            ctx.beginPath();
+            ctx.moveTo(x0, yT);
+            ctx.lineTo(x1, yT);
+            ctx.stroke();
+            tag(yT, `TP ${px(o.target)}`, UP, "rgba(61,255,138,0.16)");
+          }
+          ctx.setLineDash([]);
+          const kind = o.pending ? `${o.side === "long" ? "BUY" : "SELL"} LMT` : o.live ? "ENTRY" : "FILL";
+          tag(yE, `${kind} ${px(o.entry)}`, o.side === "long" ? UP : DN, "rgba(12,20,16,0.92)");
+          if (o.exit && o.closedAt) {
+            const yX = yAt(o.exit);
+            const xX = xTime(o.closedAt);
+            ctx.strokeStyle = o.reason === "stop" ? DN : UP;
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.moveTo(xX - 5, yX - 5);
+            ctx.lineTo(xX + 5, yX + 5);
+            ctx.moveTo(xX + 5, yX - 5);
+            ctx.lineTo(xX - 5, yX + 5);
+            ctx.stroke();
+            tag(yX, `${(o.reason ?? "exit").toUpperCase()} ${px(o.exit)}`, o.reason === "stop" ? DN : UP, "rgba(12,20,16,0.92)");
+          }
+        }
+      }
     };
 
     draw();
     const ro = new ResizeObserver(() => draw());
     ro.observe(el);
     return () => ro.disconnect();
-  }, [view, zones, on, hover]);
+  }, [view, zones, on, hover, mine, lastPx]);
 
   useEffect(() => {
     const el = wrap.current;
@@ -386,6 +571,7 @@ export function LiveChart({
   const last = view[view.length - 1];
   const chg = last && view[0] ? (last.c - view[0]!.c) / view[0]!.c : 0;
   const liveSigs: IctSignal[] = signals.filter((s) => view[0] && s.t >= view[0].t).slice(-4);
+  const working = mine.filter((o) => o.live);
 
   function zoom(factor: number) {
     const next = clamp(Math.round(visN * factor), 20, Math.max(20, nAll));
@@ -500,8 +686,14 @@ export function LiveChart({
         <canvas ref={canvas} className="absolute inset-0 h-full w-full" />
       </div>
       <p className="truncate px-3 pb-2 font-mono text-[10px] text-subtle">
-        drag to pan · pinch or +/− to zoom · ALL / END
-        {liveSigs.length ? ` · ${liveSigs.map((s) => `${s.setup} ${s.side} @ ${px(s.entry)}`).join(" · ")}` : ""}
+        {working.length
+          ? working
+              .map((o) => {
+                const kind = o.pending ? `${o.side === "long" ? "BUY LMT" : "SELL LMT"}` : `${o.side.toUpperCase()} ${o.setup}`;
+                return `${kind}  EN ${px(o.entry)}  SL ${o.stop ? px(o.stop) : "—"}  TP ${o.target ? px(o.target) : "—"}`;
+              })
+              .join(" · ")
+          : `drag · pinch · FULL · ORDERS = live entry / SL / TP${liveSigs.length ? ` · ${liveSigs.map((s) => `${s.setup} ${s.side}`).join(" · ")}` : ""}`}
       </p>
     </div>
   );

@@ -7,7 +7,7 @@ import { TopBar } from "./shell";
 import { AgentFloor, Heatmap } from "./floor";
 import { EquityChart, GaugeRow, Multiplier, SparkRow } from "./widgets";
 import { Button } from "@/components/ui/button";
-import { LiveChart } from "./chart";
+import { LiveChart, deskOrders } from "./chart";
 import { InstallHint } from "./install";
 import { zostaffScale } from "@/lib/engine/zostaff";
 import { ICT_ASSETS } from "@/lib/engine/universe";
@@ -34,6 +34,10 @@ export function Desk() {
   const setGrok = useDesk((s) => s.setGrok);
   const bumpGrok = useDesk((s) => s.bumpGrokCalls);
   const [chartFs, setChartFs] = useState(false);
+  const chartOrders = useMemo(
+    () => deskOrders(engine.open, engine.closed),
+    [engine.open, engine.closed],
+  );
 
   const startUsd = engine.startUsd;
   const sessionPnlUsd = engine.equityUsd - startUsd;
@@ -136,6 +140,7 @@ export function Desk() {
             books={market?.books ?? []}
             filter={engine.mode === "ict" ? engine.ictFilter : "SOL"}
             fallback={market?.candles15}
+            orders={chartOrders}
             onToggleFs={() => setChartFs(true)}
           />
         </section>
@@ -257,6 +262,7 @@ export function Desk() {
             books={market?.books ?? []}
             filter={engine.mode === "ict" ? engine.ictFilter : "SOL"}
             fallback={market?.candles15}
+            orders={chartOrders}
             fullscreen
             onToggleFs={() => setChartFs(false)}
           />

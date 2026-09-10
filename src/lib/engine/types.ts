@@ -107,6 +107,8 @@ export interface Position {
   agent: AgentId;
   note: string;
   origin: FillOrigin;
+  stopUsd?: number;
+  targetUsd?: number;
   quotedEntryUsd?: number;
   grossUsd?: number;
   feeUsd?: number;
@@ -134,6 +136,8 @@ export interface ClosedTrade {
   score: number;
   note: string;
   origin: FillOrigin;
+  stopUsd?: number;
+  targetUsd?: number;
   quotedEntryUsd?: number;
   quotedExitUsd?: number;
   feeUsd?: number;
