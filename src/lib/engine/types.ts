@@ -10,6 +10,8 @@ export type SetupKind =
   | "amd"
   | "fvg"
   | "sweep"
+  | "ob"
+  | "div"
   | "published";
 
 export type TapeKind =

@@ -17,11 +17,11 @@ const AGENTS = [
 ];
 
 const ICT = [
-  { t: "Bias first", d: "TTrades: daily / 5h slope first. No long into a sell day, no short into a buy day." },
-  { t: "Power of 3", d: "Asia accumulates, London puts the daily wick (manipulation), NY is the body (distribution). Video: ICT Power Of 3 — AMD." },
-  { t: "CISD", d: "A sweep alone is not a trade. Need a close through the candles that made the raid, then FVG." },
-  { t: "Silver Bullet", d: "10:00–11:00 NY only. Sweep the 9:00 hour high or low, displacement back in, FVG, target the other side of that hour." },
-  { t: "Risk", d: "Stop beyond the raid. Target opposing liquidity or 2R. One setup per pair per day." },
+  { t: "Bias first", d: "TTrades: 5h slope first. No long into a sell day, no short into a buy day." },
+  { t: "Power of 3", d: "Asia accumulates, London puts the daily wick, NY is the body. Drawn as the Asia box on the 15m chart." },
+  { t: "CISD + Silver Bullet", d: "Sweep alone is not a trade. SB is 10–11 NY on the 9am hour, CISD, FVG, other side of that hour." },
+  { t: "Order block / Unicorn", d: "Last opposite candle before displacement. Unicorn = that OB overlapping the FVG. Boxes on the chart." },
+  { t: "FVG + divergence", d: "FVG entry at CE in premium/discount. Regular + hidden RSI. SMT: BTC vs ETH failed swing." },
 ];
 
 function PlaybookPage() {

@@ -25,7 +25,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { scanIct, simulateIct } from "./ict";
+import { scanIct, scanSmt, simulateIct } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -666,19 +666,24 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           },
         ];
   const filtered = s.ictFilter === "ALL" ? books : books.filter((b) => b.id === s.ictFilter);
+  const btc = books.find((b) => b.id === "BTC");
+  const eth = books.find((b) => b.id === "ETH");
   const risk = Math.max(1, s.startUsd * 0.01);
   let added = 0;
   const fresh: ClosedTrade[] = [];
   for (const b of filtered) {
     if (b.candles15.length < 40) continue;
-    const sigs = scanIct(b.candles15);
+    const corr = b.id === "BTC" ? eth : btc;
+    const extra =
+      corr && corr.id !== b.id ? scanSmt(b.candles15, corr.candles15, corr.symbol) : [];
+    const sigs = [...scanIct(b.candles15), ...extra];
     const sim = simulateIct(b.candles15, sigs, risk, b.symbol, b.name).map((t) => ({
       ...t,
       origin: "ict" as const,
       pnlSol: t.pnlUsd / Math.max(1e-6, s.solUsd),
     }));
     for (const t of sim) {
-      const key = `${t.symbol}-${t.openedAt}`;
+      const key = `${t.symbol}-${t.setup}-${t.openedAt}`;
       if (s.ictSeen.includes(key)) continue;
       s.ictSeen = [...s.ictSeen, key];
       fresh.push(t);
@@ -692,7 +697,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     t: s.simT,
     kind: "note",
     symbol: s.ictFilter,
-    text: `ICT ${s.ictFilter} · +${added} fills after HTF bias + CISD · sweep alone is not a trade`,
+    text: `ICT ${s.ictFilter} · +${added} fills · CISD / OB / FVG / div / SMT · sweep alone is not a trade`,
     tone: "mute",
   });
 }
@@ -735,7 +740,7 @@ function tickMeme(s: EngineState, market: MarketSnapshot | null) {
     return;
   }
 
-  const burst = 2;
+  const burst = s.speed >= 8 ? 6 : 4;
   let processed = 0;
   for (let i = 0; i < burst; i++) {
     const l = nextUnseen(s);
@@ -806,7 +811,7 @@ export function tick(s: EngineState, market: MarketSnapshot | null): EngineState
   if (s.mode === "live") {
     s.simT = Date.now();
   } else {
-    const stepMs = 12_000 * Math.max(1, 8 / s.speed);
+    const stepMs = 8_000 * Math.max(1, 8 / s.speed);
     s.simT += stepMs;
   }
 
@@ -882,7 +887,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} · TTrades Silver Bullet 10–11 NY on 9am range · AMD London wick · CISD required · NY clock`,
+      text: `ICT ${ictFilter} · TTrades SB / AMD / OB / Unicorn / FVG / RSI+SMT · 15m NY · CISD required`,
       tone: "mute",
     });
   }

@@ -7,6 +7,7 @@ import { TopBar } from "./shell";
 import { AgentFloor, Heatmap } from "./floor";
 import { EquityChart, GaugeRow, Multiplier, SparkRow } from "./widgets";
 import { Button } from "@/components/ui/button";
+import { LiveChart } from "./chart";
 import { InstallHint } from "./install";
 import { zostaffScale } from "@/lib/engine/zostaff";
 import { ICT_ASSETS } from "@/lib/engine/universe";
@@ -43,7 +44,7 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} from $${startUsd.toFixed(0)} · TTrades: HTF bias, CISD, Silver Bullet 10–11 NY on the 9am hour, AMD London wick. Times are New York. Mechanical, not scripted.`;
+        return `ICT ${engine.ictFilter} from $${startUsd.toFixed(0)} · TTrades CISD + OB/Unicorn + FVG CE + RSI/hidden/SMT. Chart draws the boxes. NY clock.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
@@ -129,6 +130,14 @@ export function Desk() {
       )}
 
       <div className="grid gap-px bg-line md:grid-cols-12">
+        <section className="bg-surface md:col-span-12">
+          <LiveChart
+            books={market?.books ?? []}
+            filter={engine.mode === "ict" ? engine.ictFilter : "SOL"}
+            fallback={market?.candles15}
+          />
+        </section>
+
         <section className="relative bg-surface p-3 md:col-span-4">
           <EquityChart series={engine.equity} start={startUsd} />
           <Multiplier equity={engine.equityUsd} start={startUsd} />
