@@ -299,7 +299,9 @@ export interface IctSignal {
  * TTrades stack on 15m:
  *  HTF bias, AMD London wick, Silver Bullet 10–11 on the 9am hour,
  *  CISD, order-block / unicorn (OB∩FVG), FVG CE, RSI regular + hidden divergence.
- *  Sweep alone is not a trade. Max 3 per NY day, 6 bars apart.
+ *  Sweep alone is not a trade.
+ *  Per NY day: Silver Bullet and AMD always kept; plus up to 2 continuation
+ *  (OB / FVG / div). Weak London OBs no longer block the 10–11 NY bullet.
  */
 export function scanIct(cs: Candle[]): IctSignal[] {
   if (cs.length < 48) return [];
@@ -310,19 +312,11 @@ export function scanIct(cs: Candle[]): IctSignal[] {
   const sw = swings(cs, 3, 2);
   const signals: IctSignal[] = [];
   const londonRaid = new Map<string, "high" | "low">();
-  const dayN = new Map<string, number>();
-  const lastI = new Map<string, number>();
 
   const add = (sig: IctSignal | null) => {
     if (!sig) return;
-    const day = nyParts(sig.t).day;
-    if ((dayN.get(day) ?? 0) >= 3) return;
-    const prev = lastI.get(day) ?? -99;
-    if (sig.i - prev < 6) return;
-    if (signals.some((x) => Math.abs(x.i - sig.i) < 4 && x.side === sig.side)) return;
+    if (signals.some((x) => Math.abs(x.i - sig.i) < 4 && x.side === sig.side && x.setup === sig.setup)) return;
     signals.push(sig);
-    dayN.set(day, (dayN.get(day) ?? 0) + 1);
-    lastI.set(day, sig.i);
   };
 
   for (let i = 24; i < cs.length - 2; i++) {
@@ -542,7 +536,54 @@ export function scanIct(cs: Candle[]): IctSignal[] {
       }
     }
   }
-  return signals;
+  return pickDay(signals);
+}
+
+const SETUP_RANK: Record<SetupKind, number> = {
+  silver: 0,
+  amd: 1,
+  sweep: 2,
+  ob: 3,
+  fvg: 4,
+  div: 5,
+  curve: 8,
+  published: 9,
+};
+
+/** Keep the session models; don't let early OBs spend the day's budget. */
+function pickDay(raw: IctSignal[]): IctSignal[] {
+  const byDay = new Map<string, IctSignal[]>();
+  for (const s of raw) {
+    const d = nyParts(s.t).day;
+    const arr = byDay.get(d) ?? [];
+    arr.push(s);
+    byDay.set(d, arr);
+  }
+  const out: IctSignal[] = [];
+  for (const daySigs of byDay.values()) {
+    const uniq: IctSignal[] = [];
+    for (const s of [...daySigs].sort((a, b) => a.i - b.i)) {
+      if (uniq.some((x) => Math.abs(x.i - s.i) < 4 && x.side === s.side)) continue;
+      uniq.push(s);
+    }
+    const sb = uniq.find((s) => s.setup === "silver");
+    const amd = uniq.find((s) => s.setup === "amd");
+    const kept: IctSignal[] = [];
+    if (sb) kept.push(sb);
+    if (amd && amd !== sb) kept.push(amd);
+    const rest = uniq
+      .filter((s) => s.setup !== "silver" && s.setup !== "amd")
+      .sort((a, b) => SETUP_RANK[a.setup] - SETUP_RANK[b.setup] || a.i - b.i);
+    let extra = 0;
+    for (const s of rest) {
+      if (extra >= 2) break;
+      if (kept.some((k) => Math.abs(k.i - s.i) < 6)) continue;
+      kept.push(s);
+      extra += 1;
+    }
+    out.push(...kept.sort((a, b) => a.i - b.i));
+  }
+  return out;
 }
 
 /** SMT: correlated pair fails to confirm a swing. Trade the weak one with HTF. */
