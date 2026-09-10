@@ -4,6 +4,7 @@ node_modules/
 .output/
 .tanstack/
 .grok/
+.netlify/
 dist/
 coverage/
 *.log
