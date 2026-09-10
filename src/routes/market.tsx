@@ -47,6 +47,33 @@ function MarketPage() {
 
             <Spark candles={market.candles15} />
 
+            {market.books.length > 0 && (
+              <>
+                <h2 className="mt-8 font-sans text-lg text-fg">ICT majors</h2>
+                <p className="mb-3 font-mono text-[11px] text-subtle">
+                  Live 15m books · OKX (NPC = KuCoin) · same candles the ICT desk trades
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {market.books.map((b) => (
+                    <article
+                      key={b.id}
+                      className="rounded-xl bg-surface p-3 shadow-[0_0_0_1px_rgba(61,255,138,0.08)]"
+                    >
+                      <p className="font-mono text-[10px] tracking-[0.16em] text-subtle uppercase">
+                        {b.symbol} · {b.source} · {b.candles15.length} bars
+                      </p>
+                      <p className="mt-1 font-mono text-lg tabular text-fg">
+                        {b.last >= 10 ? fmtUsd(b.last, 2) : b.last.toPrecision(4)}
+                      </p>
+                      <p className={cn("font-mono text-xs tabular", b.change24h >= 0 ? "text-phosphor" : "text-loss")}>
+                        {fmtPct(b.change24h)}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
+
             <h2 className="mt-8 font-sans text-lg text-fg">Live pump.fun</h2>
             <p className="mb-3 font-mono text-[11px] text-subtle">Newest mints · hunter feed · not a buy list</p>
             <div className="overflow-x-auto rounded-xl bg-surface shadow-[0_0_0_1px_rgba(61,255,138,0.08)]">

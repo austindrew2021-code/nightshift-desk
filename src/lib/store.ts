@@ -5,12 +5,14 @@ import {
   applyQuotes,
   clampStart,
   createEngine,
+  ingestIct,
   ingestLaunches,
   resetEngine,
   tick,
   type EngineState,
 } from "@/lib/engine/session";
 import { buildZostaffPlan } from "@/lib/engine/zostaff";
+import type { IctBook } from "@/lib/engine/universe";
 
 const START_KEY = "nightshift.startUsd";
 
@@ -33,6 +35,8 @@ interface DeskStore {
   installedHint: boolean;
   hydrateMarket: (m: MarketSnapshot) => void;
   hydrateQuotes: (q: Record<string, number>) => void;
+  hydrateBooks: (books: IctBook[]) => void;
+  setIctFilter: (id: string) => void;
   setMarketError: (e: string | null) => void;
   setLoading: (v: boolean) => void;
   play: () => void;
@@ -61,19 +65,22 @@ export const useDesk = create<DeskStore>((set, get) => ({
   installedHint: true,
   hydrateMarket: (m) =>
     set((s) => {
+      const books = m.books?.length ? m.books : s.market?.books ?? [];
+      const merged = { ...m, books };
       const engine = s.engine;
-      applyMarket(engine, m);
-      ingestLaunches(engine, m.launches);
+      applyMarket(engine, merged);
+      ingestLaunches(engine, merged.launches);
+      if (engine.mode === "ict" && books.length) ingestIct(engine, merged);
       if (engine.mode === "zostaff" && engine.tickN < 4) {
         engine.zPlan = buildZostaffPlan(
           engine.startUsd,
           engine.solUsd,
-          m.launches.map((l) => l.symbol).filter(Boolean),
+          merged.launches.map((l) => l.symbol).filter(Boolean),
         );
         engine.zCursor = 0;
         engine.zDone = false;
       }
-      return { market: m, engine: { ...engine }, loadingMarket: false, marketError: null };
+      return { market: merged, engine: { ...engine }, loadingMarket: false, marketError: null };
     }),
   hydrateQuotes: (q) =>
     set((s) => {
@@ -81,6 +88,26 @@ export const useDesk = create<DeskStore>((set, get) => ({
       applyQuotes(engine, q);
       return { engine: { ...engine } };
     }),
+  hydrateBooks: (books) =>
+    set((s) => {
+      const market = s.market ? { ...s.market, books } : s.market;
+      const engine = s.engine;
+      if (engine.mode === "ict" && market) ingestIct(engine, market);
+      return { market, engine: { ...engine } };
+    }),
+  setIctFilter: (id) => {
+    const market = get().market;
+    const sol = market?.solUsd ?? get().engine.solUsd;
+    const start = get().engine.startUsd;
+    const launches = market?.launches ?? [];
+    const engine = resetEngine("ict", sol, start, launches, id);
+    engine.mode = "ict";
+    if (market) {
+      if (market.books?.length) ingestIct(engine, market);
+      applyMarket(engine, market);
+    }
+    set({ engine, grokNote: null });
+  },
   setMarketError: (e) => set({ marketError: e, loadingMarket: false }),
   setLoading: (v) => set({ loadingMarket: v }),
   play: () =>
@@ -104,8 +131,9 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const sol = market?.solUsd ?? get().engine.solUsd;
     const start = get().engine.startUsd;
     const launches = market?.launches ?? [];
-    const engine = resetEngine(m, sol, start, launches);
+    const engine = resetEngine(m, sol, start, launches, get().engine.ictFilter);
     if (market) applyMarket(engine, market);
+    if (m === "ict" && market?.books?.length) ingestIct(engine, market);
     set({ engine, grokNote: null });
   },
   setStartUsd: (n) => {
@@ -115,8 +143,9 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const sol = market?.solUsd ?? get().engine.solUsd;
     const mode = get().engine.mode;
     const launches = market?.launches ?? [];
-    const engine = resetEngine(mode, sol, start, launches);
+    const engine = resetEngine(mode, sol, start, launches, get().engine.ictFilter);
     if (market) applyMarket(engine, market);
+    if (mode === "ict" && market?.books?.length) ingestIct(engine, market);
     set({ engine, grokNote: null });
   },
   step: () =>
@@ -127,8 +156,9 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const sol = market?.solUsd ?? get().engine.solUsd;
     const start = get().engine.startUsd;
     const launches = market?.launches ?? [];
-    const engine = resetEngine(m, sol, start, launches);
+    const engine = resetEngine(m, sol, start, launches, get().engine.ictFilter);
     if (market) applyMarket(engine, market);
+    if (m === "ict" && market?.books?.length) ingestIct(engine, market);
     set({ engine });
   },
   setGrok: (busy, note) => set({ grokBusy: busy, grokNote: note ?? null }),

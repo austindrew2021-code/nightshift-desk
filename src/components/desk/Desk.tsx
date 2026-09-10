@@ -9,6 +9,7 @@ import { EquityChart, GaugeRow, Multiplier, SparkRow } from "./widgets";
 import { Button } from "@/components/ui/button";
 import { InstallHint } from "./install";
 import { zostaffScale } from "@/lib/engine/zostaff";
+import { ICT_ASSETS } from "@/lib/engine/universe";
 
 const TONE: Record<string, string> = {
   up: "text-phosphor",
@@ -28,6 +29,7 @@ export function Desk() {
   const setSpeed = useDesk((s) => s.setSpeed);
   const setMode = useDesk((s) => s.setMode);
   const setStartUsd = useDesk((s) => s.setStartUsd);
+  const setIctFilter = useDesk((s) => s.setIctFilter);
   const setGrok = useDesk((s) => s.setGrok);
   const bumpGrok = useDesk((s) => s.bumpGrokCalls);
 
@@ -41,13 +43,13 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT replay from $${startUsd.toFixed(0)} · TTrades Power of 3 / Silver Bullet on live SOL 15m candles.`;
+        return `ICT ${engine.ictFilter} from $${startUsd.toFixed(0)} · TTrades Silver Bullet / Power of 3 on live 15m (BTC ETH SOL XRP XLM TAO NPC + liquid names). Mechanical, not scripted.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
         return `Watch · same Zostaff method as live paper, faster hunter on the live queue · fees still apply.`;
     }
-  }, [engine.mode, startUsd, z.startSol, z.targetEndUsd]);
+  }, [engine.mode, engine.ictFilter, startUsd, z.startSol, z.targetEndUsd]);
 
   async function askGrok() {
     if (grokBusy) return;
@@ -104,6 +106,27 @@ export function Desk() {
       />
 
       <p className="border-b border-line px-4 py-2 font-mono text-[11px] text-subtle">{modeHint}</p>
+
+      {engine.mode === "ict" && (
+        <div className="flex flex-wrap gap-1 border-b border-line px-4 py-2">
+          {[{ id: "ALL", symbol: "ALL" }, ...ICT_ASSETS].map((a) => {
+            const on = engine.ictFilter === a.id;
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => setIctFilter(a.id)}
+                className={cn(
+                  "h-9 rounded-md px-2.5 font-mono text-[11px] tracking-[0.12em] uppercase",
+                  on ? "bg-phosphor text-phosphor-ink" : "text-muted hover:bg-surface-2 hover:text-fg",
+                )}
+              >
+                {a.symbol}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="grid gap-px bg-line md:grid-cols-12">
         <section className="relative bg-surface p-3 md:col-span-4">
@@ -187,7 +210,7 @@ export function Desk() {
           {grokNote ?? `Grok calls ${engine.stats.grokCalls}/8 · user-initiated, capped.`}
         </p>
         <p className="ml-auto max-w-xl text-right font-sans text-[11px] text-subtle">
-          Paper desk. Live paper is the Zostaff method on today's mints with 1% fee, Jito, and curve slippage. Zostaff run is the published 80× replay. No wallet.
+          Paper desk. Live paper is the Zostaff method on today's mints with 1% fee, Jito, and curve slippage. ICT is mechanical on live 15m majors. Zostaff run is the published 80× replay. No wallet.
         </p>
       </div>
 

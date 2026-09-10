@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import type { Candle, Launch, MarketSnapshot } from "@/lib/engine/types";
 import { parseKlines } from "@/lib/engine/ict";
 import { estimateUniqueBuyers } from "@/lib/engine/pipeline";
+import { ICT_ASSETS, type IctBook } from "@/lib/engine/universe";
 import fallback from "./fallback-klines.json";
 
 type KlinePack = { m15: number[][]; h1: number[][]; m5: number[][] };
@@ -41,6 +42,64 @@ function candlesFromOkx(data: unknown): Candle[] {
     .reverse()
     .map((r) => [num(r[0]), num(r[1]), num(r[2]), num(r[3]), num(r[4]), num(r[5])]);
   return parseKlines(rows);
+}
+
+function candlesFromKucoin(data: unknown): Candle[] {
+  if (!data || typeof data !== "object") return [];
+  const rows = (data as { data?: unknown }).data;
+  if (!Array.isArray(rows)) return [];
+  const parsed = rows
+    .map((row) => {
+      if (!Array.isArray(row)) return null;
+      const t = num(row[0]);
+      const o = num(row[1]);
+      const close = num(row[2]);
+      const h = num(row[3]);
+      const l = num(row[4]);
+      const v = num(row[5]);
+      return { t: t > 1e12 ? t : t * 1000, o, h, l, c: close, v };
+    })
+    .filter((c): c is Candle => Boolean(c && c.t && c.o));
+  parsed.sort((a, b) => a.t - b.t);
+  return parsed.slice(-200);
+}
+
+async function fetchOkxBook(instId: string, symbol: string, name: string, id: string): Promise<IctBook> {
+  const [ticker, candles] = await Promise.all([
+    getJson(`https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(instId)}`),
+    getJson(`https://www.okx.com/api/v5/market/candles?instId=${encodeURIComponent(instId)}&bar=15m&limit=200`),
+  ]);
+  const row = (ticker as { data?: Record<string, string>[] })?.data?.[0];
+  const last = num(row?.last);
+  const open = num(row?.open24h, last);
+  return {
+    id,
+    symbol,
+    name,
+    last,
+    change24h: open ? last / open - 1 : 0,
+    candles15: candlesFromOkx(candles),
+    source: "okx",
+  };
+}
+
+async function fetchKucoinBook(instId: string, symbol: string, name: string, id: string): Promise<IctBook> {
+  const [stats, candles] = await Promise.all([
+    getJson(`https://api.kucoin.com/api/v1/market/stats?symbol=${encodeURIComponent(instId)}`),
+    getJson(`https://api.kucoin.com/api/v1/market/candles?type=15min&symbol=${encodeURIComponent(instId)}`),
+  ]);
+  const row = (stats as { data?: Record<string, string> })?.data;
+  const last = num(row?.last);
+  const change = num(row?.changeRate);
+  return {
+    id,
+    symbol,
+    name,
+    last,
+    change24h: change,
+    candles15: candlesFromKucoin(candles),
+    source: "kucoin",
+  };
 }
 
 function mapPump(raw: unknown): Launch[] {
@@ -109,6 +168,7 @@ export const getDeskSnapshot = createServerFn({ method: "GET" }).handler(
       candles15: parseKlines(FALLBACK.m15),
       candles1h: parseKlines(FALLBACK.h1),
       candles5: parseKlines(FALLBACK.m5),
+      books: [],
       source: "fallback",
       livePump: false,
     };
@@ -205,6 +265,29 @@ export const getDeskSnapshot = createServerFn({ method: "GET" }).handler(
     return snap;
   },
 );
+
+export const getIctBooks = createServerFn({ method: "GET" }).handler(async (): Promise<IctBook[]> => {
+  const settled = await Promise.allSettled(
+    ICT_ASSETS.map((a) =>
+      a.venue === "kucoin"
+        ? fetchKucoinBook(a.instId, a.symbol, a.name, a.id)
+        : fetchOkxBook(a.instId, a.symbol, a.name, a.id),
+    ),
+  );
+  return settled.map((r, i) => {
+    const a = ICT_ASSETS[i]!;
+    if (r.status === "fulfilled" && r.value.candles15.length > 10) return r.value;
+    return {
+      id: a.id,
+      symbol: a.symbol,
+      name: a.name,
+      last: 0,
+      change24h: 0,
+      candles15: [],
+      source: "down",
+    };
+  });
+});
 
 export const getMintQuotes = createServerFn({ method: "POST" })
   .validator((input: { mints: string[] }) => input)

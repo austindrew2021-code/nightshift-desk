@@ -189,6 +189,7 @@ export interface MarketSnapshot {
   candles15: Candle[];
   candles1h: Candle[];
   candles5: Candle[];
+  books: import("./universe").IctBook[];
   source: string;
   livePump: boolean;
 }

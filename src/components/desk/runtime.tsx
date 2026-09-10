@@ -1,11 +1,12 @@
 import { useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getDeskSnapshot, getMintQuotes } from "@/lib/market/api";
+import { getDeskSnapshot, getIctBooks, getMintQuotes } from "@/lib/market/api";
 import { useDesk } from "@/lib/store";
 
 export function DeskRuntime({ children }: { children: ReactNode }) {
   const hydrate = useDesk((s) => s.hydrateMarket);
   const hydrateQuotes = useDesk((s) => s.hydrateQuotes);
+  const hydrateBooks = useDesk((s) => s.hydrateBooks);
   const setError = useDesk((s) => s.setMarketError);
   const setStartUsd = useDesk((s) => s.setStartUsd);
   const step = useDesk((s) => s.step);
@@ -30,6 +31,13 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
     refetchInterval: 8_000,
   });
 
+  const books = useQuery({
+    queryKey: ["ict-books"],
+    queryFn: () => getIctBooks(),
+    refetchInterval: mode === "ict" ? 20_000 : 60_000,
+    staleTime: 15_000,
+  });
+
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("nightshift.startUsd");
@@ -49,6 +57,10 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (quotes.data) hydrateQuotes(quotes.data);
   }, [quotes.data, hydrateQuotes]);
+
+  useEffect(() => {
+    if (books.data) hydrateBooks(books.data);
+  }, [books.data, hydrateBooks]);
 
   useEffect(() => {
     if (q.error) setError(q.error instanceof Error ? q.error.message : "market feed failed");

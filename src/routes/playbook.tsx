@@ -29,11 +29,18 @@ function PlaybookPage() {
   const closed = useDesk((s) => s.engine.closed);
 
   const ictOdds = useMemo(() => {
-    if (!market || market.candles15.length < 40) return { trades: [], odds: oddsFromTrades(closed) };
-    const trades = [
-      ...simulateIct(market.candles15, scanIct(market.candles15), 12),
-      ...simulateIct(market.candles1h, scanIct(market.candles1h), 12),
-    ];
+    const books = market?.books ?? [];
+    const fromBooks = books.flatMap((b) =>
+      b.candles15.length >= 40 ? simulateIct(b.candles15, scanIct(b.candles15), 12, b.symbol, b.name) : [],
+    );
+    const fromSol =
+      market && market.candles15.length >= 40 && !fromBooks.length
+        ? [
+            ...simulateIct(market.candles15, scanIct(market.candles15), 12),
+            ...simulateIct(market.candles1h, scanIct(market.candles1h), 12),
+          ]
+        : [];
+    const trades = fromBooks.length ? fromBooks : fromSol;
     return { trades, odds: oddsFromTrades([...trades, ...closed]) };
   }, [market, closed]);
 
@@ -46,8 +53,35 @@ function PlaybookPage() {
       <main className="mx-auto max-w-6xl px-4 py-6">
         <h1 className="font-sans text-2xl tracking-tight text-fg">Playbook</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
-          Five Grok agents on pump.fun, TTrades ICT models on SOL, and setup odds before you press the paper button. Nothing here is a live order.
+          Five Grok agents on pump.fun, TTrades ICT on live 15m majors, and setup odds before you press paper. Nothing here is a live order.
         </p>
+
+        <h2 className="mt-8 font-sans text-lg text-fg">How to run a real test</h2>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {[
+            {
+              t: "1. Do not use Zostaff run",
+              d: "That button replays their published 1→80 SOL book. It is reconstructed. It will always land on ~80× from your start. That is not a test.",
+            },
+            {
+              t: "2. Live paper — pump.fun method",
+              d: "Set $100 (or $1k). Tap Live paper. Leave it running. Max 10 fills/day, 0.1 SOL cap, 50% stop. Many hours can pass with 0 fills — the filter is supposed to skip almost everything. Overnight is a start. A week is a real sample.",
+            },
+            {
+              t: "3. ICT · majors — TTrades on live 15m",
+              d: "Tap ICT · majors. It first replays the last ~2 days of 15m on BTC ETH SOL XRP XLM TAO NPC + BNB DOGE AVAX LINK HYPE. Then it stays on and picks up new Silver Bullet / AMD signals as 15m bars print. Leave it through at least one NY 10–11 ET window. Five sessions is a real sample.",
+            },
+            {
+              t: "4. What “accurate” means",
+              d: "Live paper and ICT PnL come from live prints and mechanical rules. They can lose. They are still paper: 8–20s poll, modeled pump fees, no mempool, no failed txs. Unique buyers on pump.fun are estimated when the API omits holders.",
+            },
+          ].map((x) => (
+            <article key={x.t} className="rounded-xl bg-surface p-4 shadow-[0_0_0_1px_rgba(61,255,138,0.08)]">
+              <p className="font-sans text-sm text-fg">{x.t}</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted">{x.d}</p>
+            </article>
+          ))}
+        </div>
 
         <h2 className="mt-8 font-sans text-lg text-fg">Five agents</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-5">

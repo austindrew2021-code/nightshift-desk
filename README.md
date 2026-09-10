@@ -18,7 +18,7 @@ A phosphor-green trading floor modeled on the public @zostaff five-agent pump.fu
 | --- | --- |
 | Watch | Same Zostaff method, faster hunter on the live queue. Fees still apply |
 | Live paper | Zostaff method on today's mints. 0.1 SOL cap, 50% stop, 1% fee + Jito + curve slip. Marks follow live mcap. Can lose |
-| ICT · SOL | Mechanical ICT replay on real SOL 15m/1h candles |
+| ICT · majors | Mechanical TTrades Silver Bullet / Power of 3 on live 15m: BTC ETH SOL XRP XLM TAO NPC + BNB DOGE AVAX LINK HYPE. Replays ~2 days then stays on. Not scripted |
 | Zostaff run | Published 1 SOL → 80 SOL book ($1k → $80k), scaled to your start. Tickers never released |
 
 ## Zostaff numbers (26 Aug 2026)

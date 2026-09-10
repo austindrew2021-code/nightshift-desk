@@ -22,7 +22,7 @@ const NAV = [
 const MODES: { id: DeskMode; label: string }[] = [
   { id: "watch", label: "Watch" },
   { id: "live", label: "Live paper" },
-  { id: "ict", label: "ICT · SOL" },
+  { id: "ict", label: "ICT · majors" },
   { id: "zostaff", label: "Zostaff run" },
 ];
 

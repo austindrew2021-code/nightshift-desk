@@ -27,6 +27,7 @@ import {
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
 import { scanIct, simulateIct } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
+import type { IctBook } from "./universe";
 import {
   ZOSTAFF_LAST_TICK,
   ZOSTAFF_SCANNED,
@@ -77,6 +78,8 @@ export interface EngineState {
   ictIndex: number;
   ictTrades: ClosedTrade[];
   ictCursor: number;
+  ictFilter: string;
+  ictSeen: string[];
   tickN: number;
   dayLoss: number;
   zPlan: ZostaffStep[];
@@ -136,6 +139,8 @@ export function createEngine(solUsd = 100, startUsd = DEFAULT_START_USD): Engine
     ictIndex: 0,
     ictTrades: [],
     ictCursor: 0,
+    ictFilter: "ALL",
+    ictSeen: [],
     tickN: 0,
     dayLoss: 0,
     zPlan: [],
@@ -605,25 +610,12 @@ function tickZostaff(s: EngineState) {
 }
 
 function tickIct(s: EngineState, market: MarketSnapshot | null) {
-  if (!s.ictTrades.length && market && market.candles15.length > 40) {
-    const risk = Math.max(1, s.startUsd * 0.01);
-    const sigs = scanIct(market.candles15);
-    s.ictTrades = simulateIct(market.candles15, sigs, risk).map((t) => ({
-      ...t,
-      origin: "ict" as const,
-      pnlSol: t.pnlUsd / Math.max(1e-6, s.solUsd),
-    }));
-    pushTape(s, {
-      t: s.simT,
-      kind: "note",
-      symbol: "SOL",
-      text: `ICT replay · ${s.ictTrades.length} mechanical signals on last ${market.candles15.length} SOL 15m candles · risk $${risk.toFixed(0)} / fill (1% of start)`,
-      tone: "mute",
-    });
-  }
+  if (market) ingestIct(s, market);
   if (s.ictCursor >= s.ictTrades.length) {
-    s.running = false;
-    setAgent(s, "timing", { status: "replay complete", busy: false });
+    setAgent(s, "timing", {
+      status: s.ictTrades.length ? "caught up · waiting next 15m" : "no A+ yet · waiting NY window",
+      busy: false,
+    });
     return;
   }
   const tr = s.ictTrades[s.ictCursor]!;
@@ -641,16 +633,16 @@ function tickIct(s: EngineState, market: MarketSnapshot | null) {
     t: tr.openedAt,
     kind: "open",
     agent: "timing",
-    symbol: "SOL",
-    text: `${tr.side} SOL @ ${tr.entryUsd.toFixed(2)}  ${tr.note}`,
+    symbol: tr.symbol,
+    text: `${tr.side} ${tr.symbol} @ ${tr.entryUsd.toFixed(tr.entryUsd < 2 ? 5 : 2)}  ${tr.note}`,
     tone: "mute",
   });
   pushTape(s, {
     t: tr.closedAt,
     kind: tr.reason === "stop" ? "stop" : "close",
     agent: "timing",
-    symbol: "SOL",
-    text: `${tr.reason} ${tr.side}  ${tr.pnlUsd >= 0 ? "+" : ""}${tr.pnlUsd.toFixed(2)} usd  ${tr.rMultiple.toFixed(2)}R  ${tr.setup}`,
+    symbol: tr.symbol,
+    text: `${reasonLabel(tr.reason)} ${tr.side} ${tr.symbol}  ${tr.pnlUsd >= 0 ? "+" : ""}${tr.pnlUsd.toFixed(2)} usd  ${tr.rMultiple.toFixed(2)}R  ${tr.setup}`,
     tone: tr.pnlUsd >= 0 ? "up" : "down",
   });
   s.closed = [tr, ...s.closed];
@@ -658,9 +650,60 @@ function tickIct(s: EngineState, market: MarketSnapshot | null) {
   s.gauges.fill = 0.8;
   s.gauges.decay = 0.35;
   setAgent(s, "timing", {
-    status: `${tr.setup} ${tr.side} ${tr.rMultiple.toFixed(2)}R`,
+    status: `${tr.symbol} ${tr.setup} ${tr.side} ${tr.rMultiple.toFixed(2)}R`,
     lastScore: Math.max(0, Math.min(1, (tr.rMultiple + 1) / 3)),
     busy: true,
+  });
+}
+
+function reasonLabel(r: ClosedTrade["reason"]) {
+  return r;
+}
+
+export function ingestIct(s: EngineState, market: MarketSnapshot) {
+  const books: IctBook[] =
+    market.books && market.books.length
+      ? market.books
+      : [
+          {
+            id: "SOL",
+            symbol: "SOL",
+            name: "Solana",
+            last: market.solUsd,
+            change24h: market.solChange24h,
+            candles15: market.candles15,
+            source: "okx",
+          },
+        ];
+  const filtered = s.ictFilter === "ALL" ? books : books.filter((b) => b.id === s.ictFilter);
+  const risk = Math.max(1, s.startUsd * 0.01);
+  let added = 0;
+  const fresh: ClosedTrade[] = [];
+  for (const b of filtered) {
+    if (b.candles15.length < 40) continue;
+    const sigs = scanIct(b.candles15);
+    const sim = simulateIct(b.candles15, sigs, risk, b.symbol, b.name).map((t) => ({
+      ...t,
+      origin: "ict" as const,
+      pnlSol: t.pnlUsd / Math.max(1e-6, s.solUsd),
+    }));
+    for (const t of sim) {
+      const key = `${t.symbol}-${t.openedAt}`;
+      if (s.ictSeen.includes(key)) continue;
+      s.ictSeen = [...s.ictSeen, key];
+      fresh.push(t);
+      added += 1;
+    }
+  }
+  if (!fresh.length) return;
+  fresh.sort((a, b) => a.openedAt - b.openedAt);
+  s.ictTrades = [...s.ictTrades, ...fresh];
+  pushTape(s, {
+    t: s.simT,
+    kind: "note",
+    symbol: s.ictFilter,
+    text: `ICT ${s.ictFilter} · +${added} mechanical fills on live 15m · 1% of start per fill · not a scripted book`,
+    tone: "mute",
   });
 }
 
@@ -781,13 +824,20 @@ export function tick(s: EngineState, market: MarketSnapshot | null): EngineState
   return s;
 }
 
-export function resetEngine(mode: DeskMode, solUsd: number, startUsd: number, launches: Launch[] = []): EngineState {
+export function resetEngine(
+  mode: DeskMode,
+  solUsd: number,
+  startUsd: number,
+  launches: Launch[] = [],
+  ictFilter = "ALL",
+): EngineState {
   const s = createEngine(solUsd, startUsd);
   s.mode = mode;
   s.running = true;
   s.simT = Date.now();
   s.wallStarted = Date.now();
   s.equity = [{ t: s.simT, v: s.startUsd }];
+  s.ictFilter = ictFilter;
   ingestLaunches(s, launches);
   if (mode === "zostaff") {
     s.zPlan = buildZostaffPlan(
@@ -816,6 +866,14 @@ export function resetEngine(mode: DeskMode, solUsd: number, startUsd: number, la
       kind: "note",
       symbol: "DESK",
       text: `watch · same Zostaff method, faster hunter on the live queue · fees still apply`,
+      tone: "mute",
+    });
+  } else if (mode === "ict") {
+    pushTape(s, {
+      t: s.simT,
+      kind: "note",
+      symbol: "ICT",
+      text: `ICT ${ictFilter} · TTrades Silver Bullet / Power of 3 on live 15m · BTC ETH SOL XRP XLM TAO NPC + liquid names · nothing scripted`,
       tone: "mute",
     });
   }

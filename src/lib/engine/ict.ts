@@ -257,6 +257,8 @@ export function simulateIct(
   cs: Candle[],
   signals: IctSignal[],
   riskUsd = 10,
+  symbol = "SOL",
+  name = "Solana",
 ): IctSimTrade[] {
   const trades: IctSimTrade[] = [];
   for (const s of signals) {
@@ -303,9 +305,9 @@ export function simulateIct(
     const r = (exit - s.entry) * dir / Math.abs(s.entry - s.stop);
     const pnlUsd = r * riskUsd;
     trades.push({
-      id: `ict-${s.t}`,
-      symbol: "SOL",
-      name: "Solana",
+      id: `ict-${symbol}-${s.t}`,
+      symbol,
+      name,
       setup: s.setup,
       side: s.side,
       openedAt: s.t,
