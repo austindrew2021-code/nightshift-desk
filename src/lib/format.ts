@@ -30,8 +30,11 @@ export function fmtInt(n: number): string {
   return Math.round(n).toLocaleString("en-US");
 }
 
+/** New York clock — ICT kill zones are NY. EDT in September = UTC−4. */
 export function fmtClock(ms: number): string {
-  const d = new Date(ms);
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
+  const shifted = ms - 4 * 3600_000;
+  const d = new Date(shifted);
   const hh = String(d.getUTCHours()).padStart(2, "0");
   const mm = String(d.getUTCMinutes()).padStart(2, "0");
   const ss = String(d.getUTCSeconds()).padStart(2, "0");

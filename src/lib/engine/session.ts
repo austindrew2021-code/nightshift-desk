@@ -427,16 +427,6 @@ function runPipeline(s: EngineState, token: ScoredToken) {
   if (token.skipReason && token.skipReason !== "low_score") {
     s.stats.skipped += 1;
     setAgent(s, "hunter", { status: `skip · ${token.skipReason}`, busy: false });
-    if (s.tickN % 2 === 0) {
-      pushTape(s, {
-        t: s.simT,
-        kind: "skip",
-        agent: "hunter",
-        symbol: token.launch.symbol,
-        text: `skip ${token.launch.symbol} · ${token.skipReason}`,
-        tone: "mute",
-      });
-    }
     return;
   }
 
@@ -702,14 +692,33 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     t: s.simT,
     kind: "note",
     symbol: s.ictFilter,
-    text: `ICT ${s.ictFilter} · +${added} mechanical fills on live 15m · 1% of start per fill · not a scripted book`,
+    text: `ICT ${s.ictFilter} · +${added} fills after HTF bias + CISD · sweep alone is not a trade`,
     tone: "mute",
   });
 }
 
 function nextUnseen(s: EngineState): Launch | null {
+  let waiting = 0;
   for (const l of s.liveQueue) {
-    if (!s.seenMints.includes(l.mint)) return l;
+    if (s.seenMints.includes(l.mint)) continue;
+    const ageMin = Math.max(0, (Date.now() - l.createdAt) / 60000);
+    const tooNew = ageMin < 2;
+    const empty = l.uniqueBuyers < 5;
+    const dead = l.complete || !l.symbol || l.symbol === "?";
+    if (tooNew || empty || dead) {
+      s.seenMints = [...s.seenMints, l.mint].slice(-400);
+      s.stats.skipped += 1;
+      s.stats.scanned += 1;
+      waiting += 1;
+      continue;
+    }
+    return l;
+  }
+  if (waiting && s.tickN % 8 === 0) {
+    setAgent(s, "hunter", {
+      status: `waiting · ${waiting} too new or empty`,
+      busy: false,
+    });
   }
   return null;
 }
@@ -873,7 +882,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} · TTrades Silver Bullet / Power of 3 on live 15m · BTC ETH SOL XRP XLM TAO NPC + liquid names · nothing scripted`,
+      text: `ICT ${ictFilter} · TTrades Silver Bullet 10–11 NY on 9am range · AMD London wick · CISD required · NY clock`,
       tone: "mute",
     });
   }

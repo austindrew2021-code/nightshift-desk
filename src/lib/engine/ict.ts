@@ -130,7 +130,6 @@ function buildAsia(cs: Candle[]): Map<string, DayRange> {
   const map = new Map<string, DayRange>();
   for (const c of cs) {
     const p = nyParts(c.t);
-    // Asia 20:00–02:00 NY belongs to the *next* NY session day.
     let day = p.day;
     if (p.h >= 20) {
       const shifted = c.t - NY_OFFSET_MS + 24 * 3600_000;
@@ -150,6 +149,82 @@ function buildAsia(cs: Candle[]): Map<string, DayRange> {
   return map;
 }
 
+function hourRange(cs: Candle[], day: string, startH: number, endH: number): { h: number; l: number } | null {
+  let h = -Infinity;
+  let l = Infinity;
+  for (const c of cs) {
+    if (nyParts(c.t).day !== day) continue;
+    const hr = nyHour(c.t);
+    if (hr < startH || hr >= endH) continue;
+    h = Math.max(h, c.h);
+    l = Math.min(l, c.l);
+  }
+  if (!Number.isFinite(h) || !Number.isFinite(l) || h <= l) return null;
+  return { h, l };
+}
+
+/** Prior ~5h slope. 1 bull, -1 bear, 0 no trade. */
+export function htfBias(cs: Candle[], i: number): 1 | -1 | 0 {
+  if (i < 24) return 0;
+  const a = cs[i - 24]!.c;
+  const b = cs[i]!.c;
+  if (a <= 0) return 0;
+  const ch = (b - a) / a;
+  if (ch > 0.0035) return 1;
+  if (ch < -0.0035) return -1;
+  return 0;
+}
+
+function atr(cs: Candle[], i: number, n = 14): number {
+  const start = Math.max(1, i - n);
+  let s = 0;
+  let k = 0;
+  for (let j = start; j <= i; j++) {
+    const c = cs[j]!;
+    const prev = cs[j - 1] ?? c;
+    const tr = Math.max(c.h - c.l, Math.abs(c.h - prev.c), Math.abs(c.l - prev.c));
+    s += tr;
+    k += 1;
+  }
+  return k ? s / k : cs[i]!.h - cs[i]!.l;
+}
+
+/** CISD: close through the candle series that made the swept swing. */
+function cisd(cs: Candle[], sweepI: number, side: "long" | "short"): { ok: boolean; i: number; fvg?: FVG } {
+  const fvgs = detectFvgs(cs);
+  const from = Math.max(0, sweepI - 8);
+  if (side === "long") {
+    let seriesHigh = cs[sweepI]!.h;
+    for (let k = from; k <= sweepI; k++) {
+      if (cs[k]!.c <= cs[k]!.o) seriesHigh = Math.max(seriesHigh, cs[k]!.h);
+    }
+    for (let k = sweepI + 1; k <= Math.min(cs.length - 1, sweepI + 6); k++) {
+      const n = cs[k]!;
+      const body = Math.abs(n.c - n.o);
+      const range = n.h - n.l || 1;
+      if (n.c > seriesHigh && n.c > n.o && body / range >= 0.45 && body >= atr(cs, k) * 0.45) {
+        const fvg = fvgs.find((f) => f.i === k && f.dir === 1);
+        return { ok: true, i: k, fvg };
+      }
+    }
+  } else {
+    let seriesLow = cs[sweepI]!.l;
+    for (let k = from; k <= sweepI; k++) {
+      if (cs[k]!.c >= cs[k]!.o) seriesLow = Math.min(seriesLow, cs[k]!.l);
+    }
+    for (let k = sweepI + 1; k <= Math.min(cs.length - 1, sweepI + 6); k++) {
+      const n = cs[k]!;
+      const body = Math.abs(n.c - n.o);
+      const range = n.h - n.l || 1;
+      if (n.c < seriesLow && n.c < n.o && body / range >= 0.45 && body >= atr(cs, k) * 0.45) {
+        const fvg = fvgs.find((f) => f.i === k && f.dir === -1);
+        return { ok: true, i: k, fvg };
+      }
+    }
+  }
+  return { ok: false, i: sweepI };
+}
+
 export interface IctSignal {
   i: number;
   t: number;
@@ -162,88 +237,122 @@ export interface IctSignal {
 }
 
 /**
- * Mechanical TTrades-style A+ checklist on 15m SOL:
- *  1. Asia range as liquidity
- *  2. London or NY AM stop-raid (sweep)
- *  3. Displacement / MSS back inside
- *  4. Retrace into FVG or order block in discount/premium
- *  5. Silver Bullet (10–11 NY) preferred; AMD continuation also tagged
+ * TTrades mechanical checklist:
+ *  Daily/HTF bias first.
+ *  AMD: Asia accumulates, London manipulates (daily wick), NY distributes.
+ *  Silver Bullet 10–11 NY: sweep the 9:00 hour, CISD back in, FVG, target the other side.
+ *  CISD = close through the candles that made the raid (TTrades). Sweep alone is not a trade.
  */
 export function scanIct(cs: Candle[]): IctSignal[] {
-  if (cs.length < 40) return [];
+  if (cs.length < 48) return [];
   const asia = buildAsia(cs);
-  const fvgs = detectFvgs(cs);
   const signals: IctSignal[] = [];
   const usedDays = new Set<string>();
+  const londonRaid = new Map<string, "high" | "low">();
 
-  for (let i = 8; i < cs.length - 1; i++) {
+  for (let i = 24; i < cs.length - 2; i++) {
     const c = cs[i]!;
     const day = nyParts(c.t).day;
     if (usedDays.has(day)) continue;
-    if (!(isLondon(c.t) || isNyAm(c.t) || isSilver(c.t))) continue;
-    const range = asia.get(day);
-    if (!range || !range.asiaReady) continue;
+    const bias = htfBias(cs, i);
 
-    const lookback = cs.slice(Math.max(0, i - 16), i + 1);
-    const hi = Math.max(...lookback.map((x) => x.h));
-    const lo = Math.min(...lookback.map((x) => x.l));
-
-    const sweptHigh = c.h > range.asiaH && c.c < range.asiaH;
-    const sweptLow = c.l < range.asiaL && c.c > range.asiaL;
-    const sweptEqHigh = c.h > hi - (hi - lo) * 0.02 && c.c < (lookback[lookback.length - 2]?.c ?? c.c);
-    const sweptEqLow = c.l < lo + (hi - lo) * 0.02 && c.c > (lookback[lookback.length - 2]?.c ?? c.c);
-
-    let side: "long" | "short" | null = null;
-    let sweepPx = 0;
-    let note = "";
-
-    if (sweptLow || (c.l < range.asiaL && c.c > c.o && (sweptEqLow || isSilver(c.t)))) {
-      side = "long";
-      sweepPx = Math.min(c.l, range.asiaL);
-      note = sweptLow ? "swept Asia low" : "raid on session low";
-    } else if (sweptHigh || (c.h > range.asiaH && c.c < c.o && (sweptEqHigh || isSilver(c.t)))) {
-      side = "short";
-      sweepPx = Math.max(c.h, range.asiaH);
-      note = sweptHigh ? "swept Asia high" : "raid on session high";
+    if (isLondon(c.t)) {
+      const range = asia.get(day);
+      if (range?.asiaReady) {
+        if (c.h > range.asiaH && c.c < range.asiaH) londonRaid.set(day, "high");
+        if (c.l < range.asiaL && c.c > range.asiaL) londonRaid.set(day, "low");
+      }
     }
-    if (!side) continue;
 
-    // Displacement: next 1–4 candles close in the trade direction past the sweep candle body.
-    let mss = false;
-    let fvg: FVG | undefined;
-    for (let k = i + 1; k <= Math.min(cs.length - 1, i + 6); k++) {
-      const n = cs[k]!;
-      if (side === "long" && n.c > c.h) mss = true;
-      if (side === "short" && n.c < c.l) mss = true;
-      const found = fvgs.find((f) => f.i === k && f.dir === (side === "long" ? 1 : -1));
-      if (found) fvg = found;
+    if (isSilver(c.t)) {
+      const nine = hourRange(cs, day, 9, 10);
+      if (!nine) continue;
+      const sweptLow = c.l < nine.l && c.c > nine.l;
+      const sweptHigh = c.h > nine.h && c.c < nine.h;
+      const side: "long" | "short" | null = sweptLow ? "long" : sweptHigh ? "short" : null;
+      if (!side) continue;
+      if (bias === 1 && side === "short") continue;
+      if (bias === -1 && side === "long") continue;
+      const conf = cisd(cs, i, side);
+      if (!conf.ok || !conf.fvg) continue;
+      const sweepPx = side === "long" ? Math.min(c.l, nine.l) : Math.max(c.h, nine.h);
+      const entry = (conf.fvg.bot + conf.fvg.top) / 2;
+      const stopPad = (nine.h - nine.l) * 0.08 || entry * 0.002;
+      const stop = side === "long" ? sweepPx - stopPad : sweepPx + stopPad;
+      const risk = Math.abs(entry - stop);
+      if (risk <= 0 || risk / entry > 0.025) continue;
+      const erl = side === "long" ? nine.h : nine.l;
+      const target = side === "long" ? Math.max(erl, entry + risk * 2) : Math.min(erl, entry - risk * 2);
+      signals.push({
+        i: conf.i,
+        t: cs[conf.i]!.t,
+        side,
+        setup: "silver",
+        entry,
+        stop,
+        target,
+        note: `SB 10–11 NY · swept 9am ${side === "long" ? "low" : "high"} · CISD · FVG · tgt other side of 9am`,
+      });
+      usedDays.add(day);
+      continue;
     }
-    if (!mss) continue;
 
-    const setup: SetupKind = isSilver(c.t) ? "silver" : isLondon(c.t) ? "amd" : "sweep";
-    const entry = fvg
-      ? side === "long"
-        ? (fvg.bot + fvg.top) / 2
-        : (fvg.bot + fvg.top) / 2
-      : c.c;
-    const stopPad = (hi - lo) * 0.08 || entry * 0.004;
-    const stop = side === "long" ? sweepPx - stopPad : sweepPx + stopPad;
-    const risk = Math.abs(entry - stop);
-    if (risk <= 0 || risk / entry > 0.03) continue; // skip oversized stops
-    const target = side === "long" ? entry + risk * 2 : entry - risk * 2;
+    if (isLondon(c.t) || isNyAm(c.t)) {
+      const range = asia.get(day);
+      if (!range?.asiaReady) continue;
+      const raid = londonRaid.get(day);
+      let side: "long" | "short" | null = null;
+      let sweepPx = 0;
+      let note = "";
 
-    const pd = fvg ? "FVG" : "displacement close";
-    signals.push({
-      i,
-      t: c.t,
-      side,
-      setup,
-      entry,
-      stop,
-      target,
-      note: `${note}; MSS; ${pd}; ${setup === "silver" ? "Silver Bullet" : setup === "amd" ? "Power of 3" : "A+ sweep"}`,
-    });
-    usedDays.add(day);
+      if (isLondon(c.t)) {
+        const sweptLow = c.l < range.asiaL && c.c > range.asiaL;
+        const sweptHigh = c.h > range.asiaH && c.c < range.asiaH;
+        if (sweptLow && bias !== -1) {
+          side = "long";
+          sweepPx = Math.min(c.l, range.asiaL);
+          note = "AMD · London raid on Asia low";
+        } else if (sweptHigh && bias !== 1) {
+          side = "short";
+          sweepPx = Math.max(c.h, range.asiaH);
+          note = "AMD · London raid on Asia high";
+        }
+      } else if (isNyAm(c.t) && raid) {
+        if (raid === "low" && bias !== -1 && c.c > range.asiaL) {
+          side = "long";
+          sweepPx = range.asiaL;
+          note = "AMD · NY distribution after London SSL";
+        } else if (raid === "high" && bias !== 1 && c.c < range.asiaH) {
+          side = "short";
+          sweepPx = range.asiaH;
+          note = "AMD · NY distribution after London BSL";
+        }
+      }
+      if (!side) continue;
+      const conf = cisd(cs, i, side);
+      if (!conf.ok) continue;
+      if (isNyAm(c.t) && !conf.fvg) continue;
+      const entry = conf.fvg ? (conf.fvg.bot + conf.fvg.top) / 2 : cs[conf.i]!.c;
+      const stopPad = (range.asiaH - range.asiaL) * 0.06 || entry * 0.0025;
+      const stop = side === "long" ? sweepPx - stopPad : sweepPx + stopPad;
+      const risk = Math.abs(entry - stop);
+      if (risk <= 0 || risk / entry > 0.03) continue;
+      const erl = side === "long" ? range.asiaH : range.asiaL;
+      const twoR = side === "long" ? entry + risk * 2 : entry - risk * 2;
+      const erlR = Math.abs(erl - entry) / risk;
+      const target = erlR >= 1.2 ? erl : twoR;
+      signals.push({
+        i: conf.i,
+        t: cs[conf.i]!.t,
+        side,
+        setup: isLondon(c.t) ? "amd" : "sweep",
+        entry,
+        stop,
+        target,
+        note: `${note} · CISD${conf.fvg ? " · FVG" : ""} · ${bias === 1 ? "bull HTF" : bias === -1 ? "bear HTF" : "no HTF"}`,
+      });
+      usedDays.add(day);
+    }
   }
   return signals;
 }

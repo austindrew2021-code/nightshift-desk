@@ -17,11 +17,11 @@ const AGENTS = [
 ];
 
 const ICT = [
-  { t: "A+ checklist", d: "Stop raid → market structure shift → discount/premium → PD array (FVG or order block). From TTrades." },
-  { t: "Power of 3", d: "Accumulation (Asia range), Manipulation (London raid), Distribution (NY expansion). Video: ICT Power Of 3 — AMD." },
-  { t: "Silver Bullet", d: "10:00–11:00 New York. Raid then FVG. One setup per window." },
-  { t: "Kill zones", d: "London 02–05 NY, NY AM 07–10, Silver Bullet 10–11. No setups in the dead tape." },
-  { t: "Risk", d: "1% risk, 2R target, stop beyond the sweep. Daily loss cap 22%. Max 3 open, 10 fills/day." },
+  { t: "Bias first", d: "TTrades: daily / 5h slope first. No long into a sell day, no short into a buy day." },
+  { t: "Power of 3", d: "Asia accumulates, London puts the daily wick (manipulation), NY is the body (distribution). Video: ICT Power Of 3 — AMD." },
+  { t: "CISD", d: "A sweep alone is not a trade. Need a close through the candles that made the raid, then FVG." },
+  { t: "Silver Bullet", d: "10:00–11:00 NY only. Sweep the 9:00 hour high or low, displacement back in, FVG, target the other side of that hour." },
+  { t: "Risk", d: "Stop beyond the raid. Target opposing liquidity or 2R. One setup per pair per day." },
 ];
 
 function PlaybookPage() {

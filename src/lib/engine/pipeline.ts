@@ -13,9 +13,11 @@ function clamp(n: number, lo: number, hi: number) {
 }
 
 export function estimateUniqueBuyers(realSol: number, replies: number, usdMcap: number): number {
-  const fromSol = realSol > 0 ? realSol / 0.02 : 0;
-  const fromMcap = Math.log10(Math.max(1, usdMcap)) * 2.4;
-  return Math.max(1, Math.round(fromSol + fromMcap * 0.35 + replies * 0.4));
+  const sol = Math.max(0, realSol);
+  const fromFlow = sol > 0 ? Math.sqrt(sol / 0.04) * 3.2 : 0;
+  const fromReplies = Math.max(0, replies) * 0.5;
+  const fromMcap = Math.log10(Math.max(10, usdMcap));
+  return Math.max(1, Math.min(28, Math.round(fromFlow + fromReplies + fromMcap)));
 }
 
 export function regimeScore(m: MarketSnapshot | null): number {
@@ -95,7 +97,7 @@ export function scoreLive(l: Launch, timing: number): ScoredToken {
 export function agentLine(id: AgentId, token: ScoredToken): string {
   switch (id) {
     case "hunter":
-      return `curve ${token.curvePct.toFixed(0)}% · buyers ~${token.uniqueBuyers} · ${token.ageMin.toFixed(1)}m`;
+      return `curve ${token.curvePct.toFixed(0)}% · ~${token.uniqueBuyers} buyers · ${token.ageMin.toFixed(1)}m`;
     case "auditor":
       return `risk ${token.risk.toFixed(1)} · organic ${(token.diversity * 100).toFixed(0)}%`;
     case "narrative":

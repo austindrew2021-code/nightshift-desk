@@ -43,7 +43,7 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} from $${startUsd.toFixed(0)} · TTrades Silver Bullet / Power of 3 on live 15m (BTC ETH SOL XRP XLM TAO NPC + liquid names). Mechanical, not scripted.`;
+        return `ICT ${engine.ictFilter} from $${startUsd.toFixed(0)} · TTrades: HTF bias, CISD, Silver Bullet 10–11 NY on the 9am hour, AMD London wick. Times are New York. Mechanical, not scripted.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
