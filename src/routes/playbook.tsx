@@ -130,6 +130,27 @@ function PlaybookPage() {
           Three of the four winners have no published PnL. The replay splits the leftover +12 SOL of the +82 SOL win book across them and labels those implied. Skip tape uses today's live pump.fun names.
         </p>
 
+        <h2 className="mt-10 font-sans text-lg text-fg">Live paper = Zostaff method</h2>
+        <p className="mt-1 max-w-2xl text-sm text-muted">
+          Live paper is the five-agent pipeline on today's pump.fun tape, not the 80× replay. Zostaff run is the published 24h book. Use Live paper if you want to see how the rules do now.
+        </p>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {[
+            { t: "Filters", d: "Metadata, >5 buyers (estimated from reserves if pump.fun omits holders), curve <40%, age >2m, risk ≤7, score ≥0.65, checker veto." },
+            { t: "Size", d: "0.1 SOL cap (their video), 8% of book, 3 open, 10 fills/day, 22% daily loss, size shrinks as the daily limit is spent." },
+            { t: "Exits", d: "50% stop. Winners trail 35% off peak after 1.4×. No small take-profit — they rode the 190×. Losers time-out at 60m if still red." },
+            { t: "Costs on every fill", d: "1% pump.fun fee in and out, 0.001 SOL Jito tip each side, curve impact from virtual+real SOL. Open PnL is haircut as if you flattened now." },
+          ].map((x) => (
+            <article key={x.t} className="rounded-xl bg-surface p-4 shadow-[0_0_0_1px_rgba(61,255,138,0.08)]">
+              <p className="font-sans text-sm text-fg">{x.t}</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted">{x.d}</p>
+            </article>
+          ))}
+        </div>
+        <p className="mt-3 font-mono text-[11px] text-subtle">
+          Still paper. Poll is ~8s, not a mempool fill. No MEV, no failed landings, no on-chain holder map. Drag is modeled; speed of entry is not.
+        </p>
+
         <h2 className="mt-10 font-sans text-lg text-fg">Sources</h2>
         <ul className="mt-2 space-y-1 text-sm text-muted">
           <li>TTrades Education Center — ICT core / Power of 3 / Silver Bullet</li>

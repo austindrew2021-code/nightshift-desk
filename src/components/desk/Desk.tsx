@@ -39,13 +39,13 @@ export function Desk() {
   const modeHint = useMemo(() => {
     switch (engine.mode) {
       case "live":
-        return `Live paper from $${startUsd.toFixed(0)} · real pump.fun mcaps, no simulated dumps, no wallet.`;
+        return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
         return `ICT replay from $${startUsd.toFixed(0)} · TTrades Power of 3 / Silver Bullet on live SOL 15m candles.`;
       case "zostaff":
-        return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL · target $${z.targetEndUsd.toFixed(0)}. Tickers never released.`;
+        return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
-        return `Watch from $${startUsd.toFixed(0)} · live mints, faster hunter, marks follow live mcap. Paper only.`;
+        return `Watch · same Zostaff method as live paper, faster hunter on the live queue · fees still apply.`;
     }
   }, [engine.mode, startUsd, z.startSol, z.targetEndUsd]);
 
@@ -165,6 +165,10 @@ export function Desk() {
             <p className="mt-1 font-mono text-xs text-muted tabular">
               book {fmtUsd(engine.equityUsd)} · cash {fmtUsd(engine.cashUsd)} · start {fmtUsd(startUsd)}
             </p>
+            <p className="mt-1 font-mono text-[11px] text-subtle tabular">
+              fees {fmtUsd(engine.stats.feesUsd)} · jito {fmtUsd(engine.stats.jitoUsd)} · drag{" "}
+              {fmtUsd(engine.stats.feesUsd + engine.stats.jitoUsd)}
+            </p>
           </div>
           <div className="mt-4 grid grid-cols-4 gap-2 font-mono text-center text-[11px] tabular">
             <Stat k="open" v={String(engine.open.length)} />
@@ -183,7 +187,7 @@ export function Desk() {
           {grokNote ?? `Grok calls ${engine.stats.grokCalls}/8 · user-initiated, capped.`}
         </p>
         <p className="ml-auto max-w-xl text-right font-sans text-[11px] text-subtle">
-          Paper desk. No wallet. Live paper marks real pump.fun mcaps. Zostaff is the published 11-fill SOL book, scaled to your start. Tickers were never released.
+          Paper desk. Live paper is the Zostaff method on today's mints with 1% fee, Jito, and curve slippage. Zostaff run is the published 80× replay. No wallet.
         </p>
       </div>
 

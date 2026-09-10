@@ -121,6 +121,7 @@ export function StartCapital({
           inputMode="decimal"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          suppressHydrationWarning
           className="h-11 w-24 rounded-md bg-surface-2 px-2 font-mono text-sm tabular text-fg shadow-[0_0_0_1px_rgba(61,255,138,0.16)] outline-none focus:shadow-[0_0_0_1px_rgba(61,255,138,0.5)]"
         />
         <Button size="sm" variant="outline" type="submit">

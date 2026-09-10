@@ -16,8 +16,8 @@ A phosphor-green trading floor modeled on the public @zostaff five-agent pump.fu
 
 | Mode | What it does |
 | --- | --- |
-| Watch | Accelerated five-agent backtest on live pump.fun names. Marks follow live mcap |
-| Live paper | Same pipeline, slower, real latest mints, no simulated dumps |
+| Watch | Same Zostaff method, faster hunter on the live queue. Fees still apply |
+| Live paper | Zostaff method on today's mints. 0.1 SOL cap, 50% stop, 1% fee + Jito + curve slip. Marks follow live mcap. Can lose |
 | ICT · SOL | Mechanical ICT replay on real SOL 15m/1h candles |
 | Zostaff run | Published 1 SOL → 80 SOL book ($1k → $80k), scaled to your start. Tickers never released |
 

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { DEFAULT_START_USD, type DeskMode, type MarketSnapshot } from "@/lib/engine/types";
 import {
   applyMarket,
+  applyQuotes,
   clampStart,
   createEngine,
   ingestLaunches,
@@ -31,6 +32,7 @@ interface DeskStore {
   grokNote: string | null;
   installedHint: boolean;
   hydrateMarket: (m: MarketSnapshot) => void;
+  hydrateQuotes: (q: Record<string, number>) => void;
   setMarketError: (e: string | null) => void;
   setLoading: (v: boolean) => void;
   play: () => void;
@@ -73,6 +75,12 @@ export const useDesk = create<DeskStore>((set, get) => ({
       }
       return { market: m, engine: { ...engine }, loadingMarket: false, marketError: null };
     }),
+  hydrateQuotes: (q) =>
+    set((s) => {
+      const engine = s.engine;
+      applyQuotes(engine, q);
+      return { engine: { ...engine } };
+    }),
   setMarketError: (e) => set({ marketError: e, loadingMarket: false }),
   setLoading: (v) => set({ loadingMarket: v }),
   play: () =>
@@ -84,6 +92,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
         engine.simT = now;
         engine.equity = [{ t: now, v: engine.equityUsd }];
       }
+      if (engine.mode === "live" && s.market) applyMarket(engine, s.market);
       return { engine };
     }),
   pause: () =>
@@ -91,29 +100,35 @@ export const useDesk = create<DeskStore>((set, get) => ({
   setSpeed: (n) =>
     set((s) => ({ engine: { ...s.engine, speed: n } })),
   setMode: (m) => {
-    const sol = get().market?.solUsd ?? get().engine.solUsd;
+    const market = get().market;
+    const sol = market?.solUsd ?? get().engine.solUsd;
     const start = get().engine.startUsd;
-    const launches = get().market?.launches ?? [];
+    const launches = market?.launches ?? [];
     const engine = resetEngine(m, sol, start, launches);
+    if (market) applyMarket(engine, market);
     set({ engine, grokNote: null });
   },
   setStartUsd: (n) => {
     const start = clampStart(n);
     writeSavedStart(start);
-    const sol = get().market?.solUsd ?? get().engine.solUsd;
+    const market = get().market;
+    const sol = market?.solUsd ?? get().engine.solUsd;
     const mode = get().engine.mode;
-    const launches = get().market?.launches ?? [];
+    const launches = market?.launches ?? [];
     const engine = resetEngine(mode, sol, start, launches);
+    if (market) applyMarket(engine, market);
     set({ engine, grokNote: null });
   },
   step: () =>
     set((s) => ({ engine: { ...tick(s.engine, s.market) } })),
   reset: (mode) => {
     const m = mode ?? get().engine.mode;
-    const sol = get().market?.solUsd ?? get().engine.solUsd;
+    const market = get().market;
+    const sol = market?.solUsd ?? get().engine.solUsd;
     const start = get().engine.startUsd;
-    const launches = get().market?.launches ?? [];
+    const launches = market?.launches ?? [];
     const engine = resetEngine(m, sol, start, launches);
+    if (market) applyMarket(engine, market);
     set({ engine });
   },
   setGrok: (busy, note) => set({ grokBusy: busy, grokNote: note ?? null }),

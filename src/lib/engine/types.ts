@@ -60,6 +60,7 @@ export interface Launch {
   image?: string;
   creator?: string;
   realSol: number;
+  virtualSol: number;
   uniqueBuyers: number;
   lastTradeAt: number;
 }
@@ -104,6 +105,13 @@ export interface Position {
   agent: AgentId;
   note: string;
   origin: FillOrigin;
+  quotedEntryUsd?: number;
+  grossUsd?: number;
+  feeUsd?: number;
+  jitoUsd?: number;
+  slippagePct?: number;
+  virtualSol?: number;
+  realSol?: number;
 }
 
 export interface ClosedTrade {
@@ -124,6 +132,11 @@ export interface ClosedTrade {
   score: number;
   note: string;
   origin: FillOrigin;
+  quotedEntryUsd?: number;
+  quotedExitUsd?: number;
+  feeUsd?: number;
+  jitoUsd?: number;
+  slippagePct?: number;
 }
 
 export interface TapeEvent {
@@ -152,6 +165,8 @@ export interface DeskStats {
   losses: number;
   openCount: number;
   grokCalls: number;
+  feesUsd: number;
+  jitoUsd: number;
 }
 
 export interface EquityPoint {
@@ -205,14 +220,14 @@ export const START_PRESETS = [100, 250, 500, 1000, 2500, 5000] as const;
 export const MIN_START_USD = 10;
 export const MAX_START_USD = 1_000_000;
 
-/** grokbot-pumpfun config.example.yaml */
+/** grokbot-pumpfun / @zostaff video post */
 export const MAX_OPEN = 3;
-export const MAX_DAILY_TRADES = 20;
+export const MAX_DAILY_TRADES = 10;
 export const DAILY_LOSS_PCT = 0.22;
 export const MAX_POS_PCT = 0.08;
-export const MAX_SOL_PER_TRADE = 0.5;
-export const STOP_PCT = 0.3;
-export const TAKE_PROFIT_PCT = 1.2;
+export const MAX_SOL_PER_TRADE = 0.1;
+export const STOP_PCT = 0.5;
+export const TAKE_PROFIT_PCT = 20;
 export const TRAIL_PCT = 0.35;
 export const MAX_HOLD_MS = 3_600_000;
 export const MIN_SCORE = 0.65;

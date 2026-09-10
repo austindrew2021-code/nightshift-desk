@@ -26,6 +26,7 @@ import {
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
 import { scanIct, simulateIct } from "./ict";
+import { fillQuality, modelBuy, modelSell } from "./execution";
 import {
   ZOSTAFF_LAST_TICK,
   ZOSTAFF_SCANNED,
@@ -94,11 +95,13 @@ function blankStats(): DeskStats {
     losses: 0,
     openCount: 0,
     grokCalls: 0,
+    feesUsd: 0,
+    jitoUsd: 0,
   };
 }
 
-function finite(n: number, d = 0): number {
-  return Number.isFinite(n) ? n : d;
+function finite(n: number | undefined, d = 0): number {
+  return Number.isFinite(n) ? (n as number) : d;
 }
 
 export function clampStart(n: number): number {
@@ -182,21 +185,32 @@ function canTrade(s: EngineState): string | null {
 function positionSize(s: EngineState, score: number): number {
   const sc = finite(score, 0.5);
   const room = Math.max(0, s.startUsd * DAILY_LOSS_PCT - finite(s.dayLoss));
-  const capSol = MAX_SOL_PER_TRADE * (s.startUsd / DEFAULT_START_USD);
-  const capUsd = capSol * Math.max(1, s.solUsd);
-  const base = finite(s.equityUsd, s.startUsd) * MAX_POS_PCT * Math.min(1, Math.max(0.35, sc));
+  const capUsd = MAX_SOL_PER_TRADE * Math.max(1, s.solUsd);
+  const base = capUsd * Math.min(1, Math.max(0.35, sc));
   const usd = Math.max(
     1,
-    Math.min(base, room * 0.3, finite(s.cashUsd, s.startUsd) * 0.2, capUsd),
+    Math.min(base, room * 0.3, finite(s.cashUsd, s.startUsd) * 0.2, finite(s.equityUsd, s.startUsd) * MAX_POS_PCT),
   );
   return finite(usd, 1);
 }
 
 function revalue(s: EngineState, p: Position, next: number): Position {
   const entry = Math.max(1e-9, finite(p.entryUsd, 1));
-  const size = finite(p.sizeUsd, 1);
   const mark = Math.max(0, finite(next, p.markUsd));
-  const pnlUsd = ((mark - entry) / entry) * size;
+  let pnlUsd: number;
+  if (p.origin === "live" && p.grossUsd) {
+    const sell = modelSell({
+      quotedMcap: mark,
+      sizeUsdNet: finite(p.sizeUsd),
+      entryFill: entry,
+      solUsd: s.solUsd,
+      virtualSol: p.virtualSol ?? 30,
+      realSol: p.realSol ?? 0,
+    });
+    pnlUsd = sell.proceedsUsd - finite(p.grossUsd) - finite(p.jitoUsd);
+  } else {
+    pnlUsd = ((mark - entry) / entry) * finite(p.sizeUsd, 1);
+  }
   return {
     ...p,
     markUsd: mark,
@@ -212,10 +226,34 @@ function closePos(
   exitUsd: number,
   reason: ClosedTrade["reason"],
 ) {
-  const pnlUsd = ((exitUsd - p.entryUsd) / Math.max(1e-9, finite(p.entryUsd, 1))) * finite(p.sizeUsd);
+  let pnlUsd: number;
+  let feeUsd = finite(p.feeUsd);
+  let jitoUsd = finite(p.jitoUsd);
+  let slip = finite(p.slippagePct);
+  let fillExit = exitUsd;
+  if (p.origin === "live" && p.grossUsd) {
+    const sell = modelSell({
+      quotedMcap: exitUsd,
+      sizeUsdNet: finite(p.sizeUsd),
+      entryFill: Math.max(1e-9, finite(p.entryUsd, 1)),
+      solUsd: s.solUsd,
+      virtualSol: p.virtualSol ?? 30,
+      realSol: p.realSol ?? 0,
+    });
+    fillExit = sell.fillMcap;
+    feeUsd += sell.feeUsd;
+    jitoUsd += sell.jitoUsd;
+    slip = (slip + sell.slippagePct) / 2;
+    s.cashUsd = finite(s.cashUsd) + sell.proceedsUsd;
+    pnlUsd = sell.proceedsUsd - finite(p.grossUsd) - finite(p.jitoUsd);
+    s.stats.feesUsd += sell.feeUsd;
+    s.stats.jitoUsd += sell.jitoUsd;
+  } else {
+    pnlUsd = ((exitUsd - p.entryUsd) / Math.max(1e-9, finite(p.entryUsd, 1))) * finite(p.sizeUsd);
+    s.cashUsd = finite(s.cashUsd) + finite(p.sizeUsd) + finite(pnlUsd);
+  }
   const pnlSol = finite(pnlUsd) / Math.max(1e-6, s.solUsd);
   const rMultiple = finite(pnlUsd) / Math.max(1e-6, finite(p.sizeUsd) * p.stopPct);
-  s.cashUsd = finite(s.cashUsd) + finite(p.sizeUsd) + finite(pnlUsd);
   s.closed = [
     {
       id: p.id,
@@ -226,7 +264,7 @@ function closePos(
       openedAt: p.openedAt,
       closedAt: s.simT,
       entryUsd: p.entryUsd,
-      exitUsd,
+      exitUsd: fillExit,
       sizeSol: p.sizeSol,
       pnlSol,
       pnlUsd,
@@ -235,6 +273,11 @@ function closePos(
       score: 0.7,
       note: p.note,
       origin: p.origin,
+      quotedEntryUsd: p.quotedEntryUsd,
+      quotedExitUsd: exitUsd,
+      feeUsd,
+      jitoUsd,
+      slippagePct: slip,
     },
     ...s.closed,
   ].slice(0, 80);
@@ -245,12 +288,13 @@ function closePos(
   }
   bumpSpark(s, p.agent, pnlUsd);
   const kind = reason === "stop" ? "stop" : "close";
+  const cost = p.origin === "live" ? ` · fees ${feeUsd.toFixed(2)} jito ${jitoUsd.toFixed(2)} slip ${(slip * 100).toFixed(1)}%` : "";
   pushTape(s, {
     t: s.simT,
     kind,
     agent: p.agent,
     symbol: p.symbol,
-    text: `${reason} ${p.symbol} ${pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)} usd`,
+    text: `${reason} ${p.symbol} ${pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)} usd${cost}`,
     tone: pnlUsd >= 0 ? "up" : "down",
   });
 }
@@ -272,10 +316,11 @@ function markLive(s: EngineState) {
     const trailHit = p.peakUsd > p.entryUsd * 1.4 && p.markUsd < p.peakUsd * (1 - TRAIL_PCT);
     const stopHit = dd <= -p.stopPct;
     const targetHit = dd >= TAKE_PROFIT_PCT;
-    const timeHit = s.simT - p.openedAt > MAX_HOLD_MS;
+    const held = s.simT - p.openedAt > MAX_HOLD_MS;
+    const timeHit = held && p.pnlUsd <= 0;
     if (stopHit || targetHit || trailHit || timeHit) {
       const reason = stopHit ? "stop" : targetHit ? "target" : trailHit ? "trail" : "time";
-      closePos(s, p, p.markUsd, reason);
+      closePos(s, p, p.origin === "live" ? (s.quotes[p.mint] || p.markUsd) : p.markUsd, reason);
     } else {
       still.push(p);
     }
@@ -299,9 +344,19 @@ function openFromScore(s: EngineState, token: ScoredToken, origin: FillOrigin = 
     return;
   }
   const usd = positionSize(s, token.score);
-  if (usd < 1 || usd > s.cashUsd || !Number.isFinite(usd)) return;
-  s.cashUsd -= usd;
-  const mcap = Math.max(50, finite(token.launch.usdMcap, 400));
+  if (usd < 1 || !Number.isFinite(usd)) return;
+  const quoted = Math.max(50, finite(token.launch.usdMcap, 400));
+  const buy = modelBuy({
+    quotedMcap: quoted,
+    sizeUsd: usd,
+    solUsd: s.solUsd,
+    virtualSol: token.launch.virtualSol,
+    realSol: token.launch.realSol,
+  });
+  if (buy.cashDebitUsd > s.cashUsd + 1e-6) return;
+  s.cashUsd -= buy.cashDebitUsd;
+  s.stats.feesUsd += buy.feeUsd;
+  s.stats.jitoUsd += buy.jitoUsd;
   const pos: Position = {
     id: nid("p"),
     symbol: token.launch.symbol,
@@ -310,33 +365,40 @@ function openFromScore(s: EngineState, token: ScoredToken, origin: FillOrigin = 
     setup: "curve",
     side: "long",
     openedAt: s.simT,
-    entryUsd: mcap,
-    sizeSol: usd / Math.max(1e-6, s.solUsd),
-    sizeUsd: usd,
+    entryUsd: buy.fillMcap,
+    sizeSol: buy.sizeSolNet,
+    sizeUsd: buy.sizeUsdNet,
     stopPct: STOP_PCT,
     targetR: 2,
-    markUsd: mcap,
+    markUsd: buy.fillMcap,
     pnlSol: 0,
-    pnlUsd: 0,
-    peakUsd: mcap,
+    pnlUsd: -(buy.feeUsd + buy.jitoUsd),
+    peakUsd: buy.fillMcap,
     agent: "checker",
-    note: `live mcap ${mcap.toFixed(0)} · score ${finite(token.score).toFixed(2)} · ${token.launch.mint.slice(0, 6)}…`,
+    note: `fill $${buy.fillMcap.toFixed(0)} vs print $${quoted.toFixed(0)} · slip ${(buy.slippagePct * 100).toFixed(1)}% · ${token.launch.mint.slice(0, 6)}…`,
     origin,
+    quotedEntryUsd: quoted,
+    grossUsd: buy.sizeUsdGross,
+    feeUsd: buy.feeUsd,
+    jitoUsd: buy.jitoUsd,
+    slippagePct: buy.slippagePct,
+    virtualSol: token.launch.virtualSol,
+    realSol: token.launch.realSol,
   };
   s.open = [...s.open, pos];
   s.stats.taken += 1;
   s.stats.openCount = s.open.length;
-  s.quotes[token.launch.mint] = mcap;
+  s.quotes[token.launch.mint] = quoted;
   s.gauges.follow = s.stats.scanned ? s.stats.passed / Math.max(1, s.stats.scanned) : 0;
-  s.gauges.fill = 0.62 + token.curveHealth * 0.3;
+  s.gauges.fill = fillQuality(buy.slippagePct, buy.feeUsd, buy.jitoUsd, buy.sizeUsdGross);
   s.gauges.decay = Math.min(0.9, token.curvePct / 100 + 0.2);
-  bumpSpark(s, "checker", 0);
+  bumpSpark(s, "checker", pos.pnlUsd);
   pushTape(s, {
     t: s.simT,
     kind: "open",
     agent: "checker",
     symbol: token.launch.symbol,
-    text: `opened ${pos.sizeSol.toFixed(3)} sol in ${token.launch.symbol} @ $${mcap.toFixed(0)} mcap  score ${token.score.toFixed(2)}`,
+    text: `opened ${pos.sizeSol.toFixed(3)} sol in ${token.launch.symbol} @ fill $${buy.fillMcap.toFixed(0)} (print $${quoted.toFixed(0)}) slip ${(buy.slippagePct * 100).toFixed(1)}% fee ${buy.feeUsd.toFixed(2)} jito ${buy.jitoUsd.toFixed(3)}`,
     tone: "up",
   });
 }
@@ -613,9 +675,15 @@ function tickMeme(s: EngineState, market: MarketSnapshot | null) {
   markLive(s);
   const timing = regimeScore(market);
   setAgent(s, "timing", { status: `regime ${timing.toFixed(2)}`, lastScore: timing, busy: true });
+  if (s.mode === "live") {
+    setAgent(s, "hunter", {
+      status: s.liveQueue.length ? "live poll · waiting next mint batch" : "waiting for pump.fun",
+      busy: false,
+    });
+    return;
+  }
 
-  const live = s.mode === "live";
-  const burst = live ? (s.tickN % 6 === 0 ? 1 : 0) : 2;
+  const burst = 2;
   let processed = 0;
   for (let i = 0; i < burst; i++) {
     const l = nextUnseen(s);
@@ -639,11 +707,36 @@ function tickMeme(s: EngineState, market: MarketSnapshot | null) {
   }));
 }
 
+function scanLiveBatch(s: EngineState, market: MarketSnapshot | null) {
+  const timing = regimeScore(market);
+  setAgent(s, "timing", { status: `regime ${timing.toFixed(2)}`, lastScore: timing, busy: true });
+  let processed = 0;
+  while (processed < 40) {
+    const l = nextUnseen(s);
+    if (!l) break;
+    s.seenMints = [...s.seenMints, l.mint].slice(-400);
+    runPipeline(s, scoreLive(l, timing));
+    processed += 1;
+    if (s.open.length >= MAX_OPEN) break;
+  }
+  setAgent(s, "hunter", {
+    status: processed ? `batch ${processed} · ${s.stats.taken} fills` : "live poll · no new mints",
+    busy: processed > 0,
+  });
+}
+
 export function ingestLaunches(s: EngineState, launches: Launch[]) {
   s.liveQueue = launches;
   for (const l of launches) {
     if (l.usdMcap > 0) s.quotes[l.mint] = l.usdMcap;
   }
+}
+
+export function applyQuotes(s: EngineState, quotes: Record<string, number>) {
+  for (const [mint, mcap] of Object.entries(quotes)) {
+    if (Number.isFinite(mcap) && mcap > 0) s.quotes[mint] = mcap;
+  }
+  if (s.mode === "live" || s.mode === "watch") markLive(s);
 }
 
 export function applyMarket(s: EngineState, m: MarketSnapshot) {
@@ -652,6 +745,7 @@ export function applyMarket(s: EngineState, m: MarketSnapshot) {
   }
   ingestLaunches(s, m.launches);
   if (s.mode === "live" || s.mode === "watch") markLive(s);
+  if (s.mode === "live" && s.running) scanLiveBatch(s, m);
 }
 
 export function tick(s: EngineState, market: MarketSnapshot | null): EngineState {
@@ -713,7 +807,7 @@ export function resetEngine(mode: DeskMode, solUsd: number, startUsd: number, la
       t: s.simT,
       kind: "note",
       symbol: "DESK",
-      text: `live paper from $${s.startUsd.toFixed(0)} · marks follow live pump.fun mcap · no simulated dumps`,
+      text: `live paper · Zostaff method from $${s.startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% fee + Jito + curve slip · marks follow live mcap`,
       tone: "mute",
     });
   } else if (mode === "watch") {
@@ -721,7 +815,7 @@ export function resetEngine(mode: DeskMode, solUsd: number, startUsd: number, la
       t: s.simT,
       kind: "note",
       symbol: "DESK",
-      text: `watch from $${s.startUsd.toFixed(0)} · same live mints, faster hunter · PnL is live mcap`,
+      text: `watch · same Zostaff method, faster hunter on the live queue · fees still apply`,
       tone: "mute",
     });
   }

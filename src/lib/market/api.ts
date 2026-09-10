@@ -53,6 +53,7 @@ function mapPump(raw: unknown): Launch[] {
     const created = num(c.created_timestamp);
     const usdMcap = num(c.usd_market_cap ?? c.market_cap_usd ?? c.market_cap);
     const realSol = num(c.real_sol_reserves) / 1e9;
+    const virtualSol = num(c.virtual_sol_reserves) / 1e9;
     const replies = num(c.reply_count);
     const lastTrade = num(c.last_trade_timestamp);
     const holders = num(c.holder_count ?? c.unique_holders ?? c.uniqueHolders);
@@ -71,6 +72,7 @@ function mapPump(raw: unknown): Launch[] {
       image: typeof c.image_uri === "string" ? c.image_uri : undefined,
       creator: typeof c.creator === "string" ? c.creator : undefined,
       realSol,
+      virtualSol,
       uniqueBuyers: holders > 0 ? holders : estimateUniqueBuyers(realSol, replies, usdMcap),
       lastTradeAt: lastTrade > 1e12 ? lastTrade : lastTrade * 1000,
     });
@@ -203,6 +205,27 @@ export const getDeskSnapshot = createServerFn({ method: "GET" }).handler(
     return snap;
   },
 );
+
+export const getMintQuotes = createServerFn({ method: "POST" })
+  .validator((input: { mints: string[] }) => input)
+  .handler(async ({ data }): Promise<Record<string, number>> => {
+    const mints = [...new Set(data.mints.filter((m) => typeof m === "string" && m.length > 20))].slice(0, 5);
+    const quotes: Record<string, number> = {};
+    await Promise.all(
+      mints.map(async (mint) => {
+        try {
+          const raw = await getJson(`https://frontend-api-v3.pump.fun/coins/${encodeURIComponent(mint)}`, 2200);
+          if (!raw || typeof raw !== "object") return;
+          const c = raw as Record<string, unknown>;
+          const usd = num(c.usd_market_cap ?? c.market_cap_usd ?? c.market_cap);
+          if (usd > 0) quotes[mint] = usd;
+        } catch {
+          /* mint may have died */
+        }
+      }),
+    );
+    return quotes;
+  });
 
 export type GrokConsult = {
   ok: true;
