@@ -1,14 +1,16 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getDeskSnapshot, getIctBooks, getMintQuotes } from "@/lib/market/api";
 import { useDesk } from "@/lib/store";
+import { loadEngine } from "@/lib/persist";
 
 export function DeskRuntime({ children }: { children: ReactNode }) {
   const hydrate = useDesk((s) => s.hydrateMarket);
   const hydrateQuotes = useDesk((s) => s.hydrateQuotes);
   const hydrateBooks = useDesk((s) => s.hydrateBooks);
+  const restoreSession = useDesk((s) => s.restoreSession);
+  const persistNow = useDesk((s) => s.persistNow);
   const setError = useDesk((s) => s.setMarketError);
-  const setStartUsd = useDesk((s) => s.setStartUsd);
   const step = useDesk((s) => s.step);
   const running = useDesk((s) => s.engine.running);
   const speed = useDesk((s) => s.engine.speed);
@@ -38,17 +40,50 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
     staleTime: 15_000,
   });
 
+  useLayoutEffect(() => {
+    const saved = loadEngine();
+    if (saved) restoreSession(saved);
+  }, [restoreSession]);
+
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem("nightshift.startUsd");
-      if (raw == null || raw === "") return;
-      const n = Number(raw);
-      const cur = useDesk.getState().engine.startUsd;
-      if (Number.isFinite(n) && Math.round(n) !== Math.round(cur)) setStartUsd(n);
-    } catch {
-      /* ignore */
-    }
-  }, [setStartUsd]);
+    const save = () => persistNow();
+    const id = window.setInterval(save, 2500);
+    const onHide = () => {
+      if (document.visibilityState === "hidden") save();
+    };
+    window.addEventListener("pagehide", save);
+    window.addEventListener("beforeunload", save);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("pagehide", save);
+      window.removeEventListener("beforeunload", save);
+      document.removeEventListener("visibilitychange", onHide);
+    };
+  }, [persistNow]);
+
+  useEffect(() => {
+    if (!running || typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
+    let lock: WakeLockSentinel | null = null;
+    let dead = false;
+    const grab = async () => {
+      try {
+        lock = await navigator.wakeLock.request("screen");
+      } catch {
+        /* denied / unsupported */
+      }
+    };
+    void grab();
+    const onVis = () => {
+      if (!dead && document.visibilityState === "visible") void grab();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      dead = true;
+      document.removeEventListener("visibilitychange", onVis);
+      void lock?.release();
+    };
+  }, [running]);
 
   useEffect(() => {
     if (q.data) hydrate(q.data);

@@ -210,7 +210,7 @@ export function Desk() {
           {grokNote ?? `Grok calls ${engine.stats.grokCalls}/8 · user-initiated, capped.`}
         </p>
         <p className="ml-auto max-w-xl text-right font-sans text-[11px] text-subtle">
-          Paper desk. Live paper is the Zostaff method on today's mints with 1% fee, Jito, and curve slippage. ICT is mechanical on live 15m majors. Zostaff run is the published 80× replay. No wallet.
+          Paper desk. Book saves on this phone — swipe-off pauses ticks, reopen restores. Live paper / ICT are mechanical. Zostaff run is the published 80× replay. No wallet.
         </p>
       </div>
 

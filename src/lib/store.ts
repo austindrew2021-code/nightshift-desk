@@ -13,17 +13,7 @@ import {
 } from "@/lib/engine/session";
 import { buildZostaffPlan } from "@/lib/engine/zostaff";
 import type { IctBook } from "@/lib/engine/universe";
-
-const START_KEY = "nightshift.startUsd";
-
-function writeSavedStart(n: number) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(START_KEY, String(n));
-  } catch {
-    /* ignore quota */
-  }
-}
+import { clearEngineSave, saveEngine, writeSavedStart } from "@/lib/persist";
 
 interface DeskStore {
   engine: EngineState;
@@ -49,6 +39,8 @@ interface DeskStore {
   setGrok: (busy: boolean, note?: string | null) => void;
   bumpGrokCalls: () => void;
   dismissInstall: () => void;
+  restoreSession: (engine: EngineState) => void;
+  persistNow: () => void;
 }
 
 function bootEngine(): EngineState {
@@ -71,7 +63,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
       applyMarket(engine, merged);
       ingestLaunches(engine, merged.launches);
       if (engine.mode === "ict" && books.length) ingestIct(engine, merged);
-      if (engine.mode === "zostaff" && engine.tickN < 4) {
+      if (engine.mode === "zostaff" && engine.tickN < 4 && engine.zPlan.length === 0) {
         engine.zPlan = buildZostaffPlan(
           engine.startUsd,
           engine.solUsd,
@@ -107,6 +99,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
       applyMarket(engine, market);
     }
     set({ engine, grokNote: null });
+    saveEngine(engine);
   },
   setMarketError: (e) => set({ marketError: e, loadingMarket: false }),
   setLoading: (v) => set({ loadingMarket: v }),
@@ -135,6 +128,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
     if (market) applyMarket(engine, market);
     if (m === "ict" && market?.books?.length) ingestIct(engine, market);
     set({ engine, grokNote: null });
+    saveEngine(engine);
   },
   setStartUsd: (n) => {
     const start = clampStart(n);
@@ -147,6 +141,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
     if (market) applyMarket(engine, market);
     if (mode === "ict" && market?.books?.length) ingestIct(engine, market);
     set({ engine, grokNote: null });
+    saveEngine(engine);
   },
   step: () =>
     set((s) => ({ engine: { ...tick(s.engine, s.market) } })),
@@ -159,6 +154,8 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const engine = resetEngine(m, sol, start, launches, get().engine.ictFilter);
     if (market) applyMarket(engine, market);
     if (m === "ict" && market?.books?.length) ingestIct(engine, market);
+    clearEngineSave();
+    saveEngine(engine);
     set({ engine });
   },
   setGrok: (busy, note) => set({ grokBusy: busy, grokNote: note ?? null }),
@@ -170,4 +167,6 @@ export const useDesk = create<DeskStore>((set, get) => ({
       },
     })),
   dismissInstall: () => set({ installedHint: false }),
+  restoreSession: (engine) => set({ engine, grokNote: null }),
+  persistNow: () => saveEngine(get().engine),
 }));
