@@ -36,7 +36,7 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
   const books = useQuery({
     queryKey: ["ict-books"],
     queryFn: () => getIctBooks(),
-    refetchInterval: mode === "ict" ? 5_000 : 60_000,
+    refetchInterval: 8_000,
     staleTime: 2_000,
   });
 

@@ -92,7 +92,7 @@ export function Desk() {
   }
 
   return (
-    <div className="desk-shell min-h-dvh overflow-x-hidden pb-16">
+    <div className="desk-shell min-h-dvh overflow-x-hidden overflow-y-auto pb-16">
       <TopBar
         equityUsd={engine.equityUsd}
         startUsd={startUsd}
@@ -114,7 +114,7 @@ export function Desk() {
       <p className="border-b border-line px-4 py-2 font-mono text-[11px] text-subtle">{modeHint}</p>
 
       {engine.mode === "ict" && (
-        <div className="flex flex-wrap gap-1 border-b border-line px-4 py-2">
+        <div className="flex gap-1 overflow-x-auto border-b border-line px-4 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {[{ id: "ALL", symbol: "ALL" }, ...ICT_ASSETS].map((a) => {
             const on = engine.ictFilter === a.id;
             return (
@@ -123,7 +123,7 @@ export function Desk() {
                 type="button"
                 onClick={() => setIctFilter(a.id)}
                 className={cn(
-                  "h-9 rounded-md px-2.5 font-mono text-[11px] tracking-[0.12em] uppercase",
+                  "h-9 shrink-0 rounded-md px-2.5 font-mono text-[11px] tracking-[0.12em] uppercase",
                   on ? "bg-phosphor text-phosphor-ink" : "text-muted hover:bg-surface-2 hover:text-fg",
                 )}
               >
@@ -141,7 +141,11 @@ export function Desk() {
             filter={engine.mode === "ict" ? engine.ictFilter : "SOL"}
             fallback={market?.candles15}
             orders={chartOrders}
-            onToggleFs={() => setChartFs(true)}
+            onToggleFs={() => {
+              setChartFs(true);
+              const root = document.documentElement;
+              if (root.requestFullscreen) void root.requestFullscreen().catch(() => undefined);
+            }}
           />
         </section>
 
@@ -257,14 +261,19 @@ export function Desk() {
       <InstallHint />
 
       {chartFs && (
-        <div className="fixed inset-0 z-[80] flex flex-col bg-bg">
+        <div className="fixed inset-0 z-[90] flex h-[100dvh] flex-col bg-bg pt-[env(safe-area-inset-top)]">
           <LiveChart
             books={market?.books ?? []}
             filter={engine.mode === "ict" ? engine.ictFilter : "SOL"}
             fallback={market?.candles15}
             orders={chartOrders}
             fullscreen
-            onToggleFs={() => setChartFs(false)}
+            onToggleFs={() => {
+              setChartFs(false);
+              if (typeof document !== "undefined" && document.fullscreenElement) {
+                void document.exitFullscreen();
+              }
+            }}
           />
         </div>
       )}

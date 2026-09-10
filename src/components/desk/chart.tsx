@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { chartLayers, nyHour, scanIct, type ChartZone, type IctSignal } from "@/lib/engine/ict";
+import { useQuery } from "@tanstack/react-query";
+import { chartLayers, nyHour, scanIct, type ChartZone } from "@/lib/engine/ict";
 import type { Candle, ClosedTrade, Position } from "@/lib/engine/types";
-import type { IctBook } from "@/lib/engine/universe";
-import { ICT_ASSETS } from "@/lib/engine/universe";
+import { CHART_BARS, ICT_ASSETS, type IctBook } from "@/lib/engine/universe";
+import { getChartKlines } from "@/lib/market/api";
 import { cn } from "@/lib/utils";
 
 const UP = "#3dff8a";
@@ -116,6 +117,7 @@ export function LiveChart({
   orders?: ChartOrder[];
 }) {
   const [sym, setSym] = useState(filter === "ALL" ? "SOL" : filter);
+  const [tf, setTf] = useState("5m");
   const [hover, setHover] = useState<number | null>(null);
   const [span, setSpan] = useState(72);
   const [start, setStart] = useState(0);
@@ -147,7 +149,19 @@ export function LiveChart({
   }, [filter]);
 
   const book = books.find((b) => b.id === sym) ?? books.find((b) => b.id === "SOL") ?? books[0];
-  const candles = book?.candles15?.length ? book.candles15 : fallback ?? [];
+  const tape = useQuery({
+    queryKey: ["chart-klines", sym, tf],
+    queryFn: () => getChartKlines({ data: { id: sym, bar: tf } }),
+    refetchInterval: tf === "1m" || tf === "5m" ? 3_000 : 5_000,
+    staleTime: 1_000,
+  });
+  const liveTape = tape.data?.id === sym && tape.data.bar === tf ? tape.data : null;
+  const candles =
+    liveTape && liveTape.candles.length > 8
+      ? liveTape.candles
+      : book?.candles15?.length
+        ? book.candles15
+        : (fallback ?? []);
   const nAll = candles.length;
   const visN = Math.max(20, Math.min(span, nAll || 20));
   const visStart = follow ? Math.max(0, nAll - visN) : clamp(start, 0, Math.max(0, nAll - visN));
@@ -155,7 +169,7 @@ export function LiveChart({
   const signals = useMemo(() => (candles.length >= 48 ? scanIct(candles) : []), [candles]);
   const zones = useMemo(() => chartLayers(view.length ? view : candles, signals), [view, candles, signals]);
   const stale = book?.source === "fallback" || (!book && (fallback?.length ?? 0) > 0);
-  const lastPx = book?.last || view[view.length - 1]?.c || 0;
+  const lastPx = liveTape?.last || book?.last || view[view.length - 1]?.c || 0;
   const mine = useMemo(() => {
     const here = orders.filter((o) => o.symbol === (book?.symbol ?? sym) || o.symbol === (book?.id ?? sym));
     const pending: ChartOrder[] = [];
@@ -211,7 +225,7 @@ export function LiveChart({
         return;
       }
 
-      const pad = { l: 6, r: on.orders !== false && mine.length ? 92 : 52, t: 6, b: 20 };
+      const pad = { l: 16, r: on.orders !== false && mine.length ? 92 : 56, t: 6, b: 22 };
       const innerW = w - pad.l - pad.r;
       const innerH = h - pad.t - pad.b;
       const hi = Math.max(...view.map((c) => c.h));
@@ -570,7 +584,6 @@ export function LiveChart({
   const c = hover != null ? view[hover] : view[view.length - 1];
   const last = view[view.length - 1];
   const chg = last && view[0] ? (last.c - view[0]!.c) / view[0]!.c : 0;
-  const liveSigs: IctSignal[] = signals.filter((s) => view[0] && s.t >= view[0].t).slice(-4);
   const working = mine.filter((o) => o.live);
 
   function zoom(factor: number) {
@@ -582,92 +595,113 @@ export function LiveChart({
   }
 
   return (
-    <div className={cn("flex h-full flex-col", fullscreen ? "min-h-0" : "min-h-[20rem] md:min-h-[24rem]")}>
-      <div className="flex flex-wrap items-center gap-2 px-3 pt-2">
-        <p className="font-mono text-[10px] tracking-[0.18em] text-subtle uppercase">15m · NY</p>
-        <div className="flex flex-wrap gap-1">
-          {ICT_ASSETS.map((a) => (
+    <div className={cn("flex h-full min-h-0 flex-col", fullscreen ? "h-full" : "")}>
+      <div className="flex items-center gap-2 px-3 pt-2">
+        <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {CHART_BARS.map((b) => (
             <button
-              key={a.id}
+              key={b.id}
               type="button"
-              onClick={() => setSym(a.id)}
+              onClick={() => {
+                setTf(b.id);
+                setFollow(true);
+              }}
               className={cn(
-                "h-6 rounded px-1.5 font-mono text-[10px] tracking-[0.1em]",
-                a.id === (book?.id ?? sym) ? "bg-phosphor text-phosphor-ink" : "text-muted hover:text-fg",
+                "h-7 shrink-0 rounded px-2 font-mono text-[10px] tracking-[0.12em]",
+                tf === b.id ? "bg-phosphor text-phosphor-ink" : "text-muted hover:text-fg",
               )}
             >
-              {a.symbol}
+              {b.label}
             </button>
           ))}
         </div>
-        <div className="ml-auto flex flex-wrap gap-1">
-          {TOGGLES.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() =>
-                setOn((s) => {
-                  if (t.id === "entry") {
-                    const next = s.entry === false;
-                    return { ...s, entry: next, stop: next, target: next };
-                  }
-                  return { ...s, [t.id]: s[t.id] === false };
-                })
-              }
-              className={cn(
-                "h-6 rounded px-1.5 font-mono text-[10px]",
-                on[t.id] !== false ? "text-phosphor" : "text-subtle",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-          <button type="button" className="h-6 rounded px-1.5 font-mono text-[10px] text-muted" onClick={() => zoom(0.75)}>
-            +
-          </button>
-          <button type="button" className="h-6 rounded px-1.5 font-mono text-[10px] text-muted" onClick={() => zoom(1.35)}>
-            −
-          </button>
+        {onToggleFs && (
           <button
             type="button"
-            className="h-6 rounded px-1.5 font-mono text-[10px] text-muted"
-            onClick={() => {
-              setFollow(false);
-              setSpan(Math.max(20, nAll));
-              setStart(0);
-            }}
+            className="h-8 shrink-0 rounded-md bg-phosphor px-3 font-mono text-[11px] tracking-[0.14em] text-phosphor-ink"
+            onClick={onToggleFs}
           >
-            ALL
+            {fullscreen ? "CLOSE" : "FULL"}
           </button>
+        )}
+      </div>
+      <div className="flex gap-1 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {ICT_ASSETS.map((a) => (
           <button
+            key={a.id}
             type="button"
-            className="h-6 rounded px-1.5 font-mono text-[10px] text-phosphor"
             onClick={() => {
+              setSym(a.id);
               setFollow(true);
-              setSpan(72);
             }}
+            className={cn(
+              "h-7 shrink-0 rounded px-2 font-mono text-[10px] tracking-[0.1em]",
+              a.id === (book?.id ?? sym) ? "bg-phosphor text-phosphor-ink" : "text-muted hover:text-fg",
+            )}
           >
-            END
+            {a.symbol}
           </button>
-          {onToggleFs && (
-            <button
-              type="button"
-              className="h-6 rounded px-1.5 font-mono text-[10px] text-phosphor"
-              onClick={onToggleFs}
-            >
-              {fullscreen ? "CLOSE" : "FULL"}
-            </button>
-          )}
-        </div>
+        ))}
+      </div>
+      <div className="flex gap-1 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {TOGGLES.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() =>
+              setOn((s) => {
+                if (t.id === "entry") {
+                  const next = s.entry === false;
+                  return { ...s, entry: next, stop: next, target: next };
+                }
+                return { ...s, [t.id]: s[t.id] === false };
+              })
+            }
+            className={cn(
+              "h-7 shrink-0 rounded px-2 font-mono text-[10px]",
+              on[t.id] !== false ? "text-phosphor" : "text-subtle",
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+        <button type="button" className="h-7 shrink-0 rounded px-2 font-mono text-[10px] text-muted" onClick={() => zoom(0.75)}>
+          +
+        </button>
+        <button type="button" className="h-7 shrink-0 rounded px-2 font-mono text-[10px] text-muted" onClick={() => zoom(1.35)}>
+          −
+        </button>
+        <button
+          type="button"
+          className="h-7 shrink-0 rounded px-2 font-mono text-[10px] text-muted"
+          onClick={() => {
+            setFollow(false);
+            setSpan(Math.max(20, nAll));
+            setStart(0);
+          }}
+        >
+          ALL
+        </button>
+        <button
+          type="button"
+          className="h-7 shrink-0 rounded px-2 font-mono text-[10px] text-phosphor"
+          onClick={() => {
+            setFollow(true);
+            setSpan(tf === "1m" ? 80 : 72);
+          }}
+        >
+          END
+        </button>
       </div>
       <div className="flex flex-wrap items-baseline gap-3 px-3 pt-1 font-mono text-[11px] tabular">
         <span className="text-fg">{book?.symbol ?? sym}</span>
+        <span className="text-subtle">{tf.toUpperCase()} · NY</span>
         {c && (
           <>
             <span className="text-subtle">O {px(c.o)}</span>
             <span className="text-phosphor">H {px(c.h)}</span>
             <span className="text-loss">L {px(c.l)}</span>
-            <span className="text-fg">C {px(c.c)}</span>
+            <span className="text-fg">C {px(lastPx || c.c)}</span>
           </>
         )}
         <span className={chg >= 0 ? "text-phosphor" : "text-loss"}>
@@ -675,17 +709,21 @@ export function LiveChart({
           {(chg * 100).toFixed(2)}%
         </span>
         <span className="text-subtle">NY {c ? nyLabel(c.t) : "—"}</span>
+        {tape.isFetching && <span className="text-muted">tick</span>}
         {stale && <span className="text-warn">stale tape</span>}
       </div>
       <div
         ref={wrap}
-        className="relative min-h-0 flex-1 touch-none"
+        className={cn(
+          "relative touch-none",
+          fullscreen ? "min-h-0 flex-1" : "h-[22rem] min-h-[18rem] md:h-[32rem]",
+        )}
         style={{ touchAction: "none" }}
         onPointerLeave={() => setHover(null)}
       >
         <canvas ref={canvas} className="absolute inset-0 h-full w-full" />
       </div>
-      <p className="truncate px-3 pb-2 font-mono text-[10px] text-subtle">
+      <p className="px-3 pb-2 font-mono text-[10px] text-subtle">
         {working.length
           ? working
               .map((o) => {
@@ -693,7 +731,7 @@ export function LiveChart({
                 return `${kind}  EN ${px(o.entry)}  SL ${o.stop ? px(o.stop) : "—"}  TP ${o.target ? px(o.target) : "—"}`;
               })
               .join(" · ")
-          : `drag · pinch · FULL · ORDERS = live entry / SL / TP${liveSigs.length ? ` · ${liveSigs.map((s) => `${s.setup} ${s.side}`).join(" · ")}` : ""}`}
+          : `swipe pairs/TFs · drag chart · pinch zoom · 1M ticks live`}
       </p>
     </div>
   );

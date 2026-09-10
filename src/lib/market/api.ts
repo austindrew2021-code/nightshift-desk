@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import type { Candle, Launch, MarketSnapshot } from "@/lib/engine/types";
 import { parseKlines } from "@/lib/engine/ict";
 import { estimateUniqueBuyers } from "@/lib/engine/pipeline";
-import { ICT_ASSETS, type IctBook } from "@/lib/engine/universe";
+import { CHART_BARS, ICT_ASSETS, type ChartTape, type IctBook } from "@/lib/engine/universe";
 import fallback from "./fallback-klines.json";
 
 type KlinePack = { m15: number[][]; h1: number[][]; m5: number[][] };
@@ -64,17 +64,34 @@ function candlesFromKucoin(data: unknown): Candle[] {
   return parsed.slice(-200);
 }
 
-function stampForming(book: IctBook): IctBook {
-  const lastPx = book.last;
-  if (!lastPx || lastPx <= 0 || book.candles15.length < 2) return book;
-  const cs = book.candles15.slice();
-  const i = cs.length - 1;
-  const c = { ...cs[i]! };
+function foldCandles(cs: Candle[], ms: number): Candle[] {
+  if (!ms || cs.length < 2) return cs;
+  const out: Candle[] = [];
+  for (const c of cs) {
+    const bucket = Math.floor(c.t / ms) * ms;
+    const last = out[out.length - 1];
+    if (!last || last.t !== bucket) {
+      out.push({ t: bucket, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v });
+    } else {
+      last.h = Math.max(last.h, c.h);
+      last.l = Math.min(last.l, c.l);
+      last.c = c.c;
+      last.v += c.v;
+    }
+  }
+  return out;
+}
+
+function stampLast(cs: Candle[], lastPx: number): Candle[] {
+  if (!lastPx || lastPx <= 0 || cs.length < 2) return cs;
+  const out = cs.slice();
+  const i = out.length - 1;
+  const c = { ...out[i]! };
   c.c = lastPx;
   c.h = Math.max(c.h, lastPx, c.o);
   c.l = Math.min(c.l, lastPx, c.o);
-  cs[i] = c;
-  return { ...book, candles15: cs };
+  out[i] = c;
+  return out;
 }
 
 async function fetchOkxBook(instId: string, symbol: string, name: string, id: string): Promise<IctBook> {
@@ -91,7 +108,7 @@ async function fetchOkxBook(instId: string, symbol: string, name: string, id: st
     name,
     last,
     change24h: open ? last / open - 1 : 0,
-    candles15: candlesFromOkx(candles),
+    candles15: stampLast(candlesFromOkx(candles), last),
     source: "okx",
   };
 }
@@ -110,7 +127,7 @@ async function fetchKucoinBook(instId: string, symbol: string, name: string, id:
     name,
     last,
     change24h: change,
-    candles15: candlesFromKucoin(candles),
+    candles15: stampLast(candlesFromKucoin(candles), last),
     source: "kucoin",
   };
 }
@@ -289,7 +306,7 @@ export const getIctBooks = createServerFn({ method: "GET" }).handler(async (): P
   );
   return settled.map((r, i) => {
     const a = ICT_ASSETS[i]!;
-    if (r.status === "fulfilled" && r.value.candles15.length > 10) return stampForming(r.value);
+    if (r.status === "fulfilled" && r.value.candles15.length > 10) return r.value;
     return {
       id: a.id,
       symbol: a.symbol,
@@ -301,6 +318,35 @@ export const getIctBooks = createServerFn({ method: "GET" }).handler(async (): P
     };
   });
 });
+
+export const getChartKlines = createServerFn({ method: "POST" })
+  .validator((input: { id: string; bar: string }) => input)
+  .handler(async ({ data }): Promise<ChartTape> => {
+    const asset = ICT_ASSETS.find((a) => a.id === data.id) ?? ICT_ASSETS[2]!;
+    const tf = CHART_BARS.find((b) => b.id === data.bar) ?? CHART_BARS[3]!;
+    if (asset.venue === "kucoin") {
+      const [stats, candles] = await Promise.all([
+        getJson(`https://api.kucoin.com/api/v1/market/stats?symbol=${encodeURIComponent(asset.instId)}`),
+        getJson(
+          `https://api.kucoin.com/api/v1/market/candles?type=${encodeURIComponent(tf.kucoin)}&symbol=${encodeURIComponent(asset.instId)}`,
+        ),
+      ]);
+      const last = num((stats as { data?: Record<string, string> })?.data?.last);
+      let cs = candlesFromKucoin(candles);
+      if (tf.foldMs) cs = foldCandles(cs, tf.foldMs);
+      return { id: asset.id, last, candles: stampLast(cs, last), source: "kucoin", bar: tf.id };
+    }
+    const [ticker, candles] = await Promise.all([
+      getJson(`https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(asset.instId)}`),
+      getJson(
+        `https://www.okx.com/api/v5/market/candles?instId=${encodeURIComponent(asset.instId)}&bar=${encodeURIComponent(tf.okx)}&limit=${tf.limit}`,
+      ),
+    ]);
+    const last = num((ticker as { data?: Record<string, string>[] })?.data?.[0]?.last);
+    let cs = candlesFromOkx(candles);
+    if (tf.foldMs) cs = foldCandles(cs, tf.foldMs);
+    return { id: asset.id, last, candles: stampLast(cs, last), source: "okx", bar: tf.id };
+  });
 
 export const getMintQuotes = createServerFn({ method: "POST" })
   .validator((input: { mints: string[] }) => input)
