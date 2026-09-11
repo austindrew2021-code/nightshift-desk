@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { chartLayers, nyHour, scanIct, type ChartZone } from "@/lib/engine/ict";
 import type { Candle, ClosedTrade, Position } from "@/lib/engine/types";
@@ -39,6 +39,20 @@ const TOGGLES: { id: ChartZone["kind"] | "orders"; label: string }[] = [
   { id: "entry", label: "FILLS" },
   { id: "orders", label: "ORDERS" },
 ];
+
+export function ChipRow({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("relative min-w-0", className)}>
+      <div
+        className="min-w-0 w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin] [-webkit-overflow-scrolling:touch]"
+        style={{ touchAction: "pan-x" }}
+      >
+        <div className="flex w-max gap-1 px-3 py-1 pr-10">{children}</div>
+      </div>
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-surface to-transparent" />
+    </div>
+  );
+}
 
 export interface ChartOrder {
   id: string;
@@ -595,9 +609,18 @@ export function LiveChart({
   }
 
   return (
-    <div className={cn("flex h-full min-h-0 flex-col", fullscreen ? "h-full" : "")}>
-      <div className="flex items-center gap-2 px-3 pt-2">
-        <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className={cn("flex h-full min-h-0 w-full min-w-0 max-w-full flex-col", fullscreen ? "h-full" : "")}>
+      <div className="flex min-w-0 items-stretch">
+        {onToggleFs && (
+          <button
+            type="button"
+            className="m-2 h-8 shrink-0 rounded-md bg-phosphor px-3 font-mono text-[11px] tracking-[0.14em] text-phosphor-ink"
+            onClick={onToggleFs}
+          >
+            {fullscreen ? "CLOSE" : "FULL"}
+          </button>
+        )}
+        <ChipRow className="min-w-0 flex-1">
           {CHART_BARS.map((b) => (
             <button
               key={b.id}
@@ -614,18 +637,9 @@ export function LiveChart({
               {b.label}
             </button>
           ))}
-        </div>
-        {onToggleFs && (
-          <button
-            type="button"
-            className="h-8 shrink-0 rounded-md bg-phosphor px-3 font-mono text-[11px] tracking-[0.14em] text-phosphor-ink"
-            onClick={onToggleFs}
-          >
-            {fullscreen ? "CLOSE" : "FULL"}
-          </button>
-        )}
+        </ChipRow>
       </div>
-      <div className="flex gap-1 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <ChipRow>
         {ICT_ASSETS.map((a) => (
           <button
             key={a.id}
@@ -642,8 +656,8 @@ export function LiveChart({
             {a.symbol}
           </button>
         ))}
-      </div>
-      <div className="flex gap-1 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      </ChipRow>
+      <ChipRow>
         {TOGGLES.map((t) => (
           <button
             key={t.id}
@@ -692,8 +706,8 @@ export function LiveChart({
         >
           END
         </button>
-      </div>
-      <div className="flex flex-wrap items-baseline gap-3 px-3 pt-1 font-mono text-[11px] tabular">
+      </ChipRow>
+      <div className="flex min-w-0 flex-wrap items-baseline gap-3 px-3 pt-1 font-mono text-[11px] tabular">
         <span className="text-fg">{book?.symbol ?? sym}</span>
         <span className="text-subtle">{tf.toUpperCase()} · NY</span>
         {c && (
@@ -715,13 +729,22 @@ export function LiveChart({
       <div
         ref={wrap}
         className={cn(
-          "relative touch-none",
+          "relative min-w-0 touch-none",
           fullscreen ? "min-h-0 flex-1" : "h-[22rem] min-h-[18rem] md:h-[32rem]",
         )}
         style={{ touchAction: "none" }}
         onPointerLeave={() => setHover(null)}
       >
         <canvas ref={canvas} className="absolute inset-0 h-full w-full" />
+        {onToggleFs && (
+          <button
+            type="button"
+            className="absolute right-2 top-2 z-20 h-9 rounded-md bg-phosphor px-3 font-mono text-[12px] tracking-[0.14em] text-phosphor-ink"
+            onClick={onToggleFs}
+          >
+            {fullscreen ? "CLOSE" : "FULL"}
+          </button>
+        )}
       </div>
       <p className="px-3 pb-2 font-mono text-[10px] text-subtle">
         {working.length

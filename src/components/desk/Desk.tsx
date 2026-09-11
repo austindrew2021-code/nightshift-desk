@@ -7,7 +7,7 @@ import { TopBar } from "./shell";
 import { AgentFloor, Heatmap } from "./floor";
 import { EquityChart, GaugeRow, Multiplier, SparkRow } from "./widgets";
 import { Button } from "@/components/ui/button";
-import { LiveChart, deskOrders } from "./chart";
+import { LiveChart, deskOrders, ChipRow } from "./chart";
 import { InstallHint } from "./install";
 import { zostaffScale } from "@/lib/engine/zostaff";
 import { ICT_ASSETS } from "@/lib/engine/universe";
@@ -92,7 +92,7 @@ export function Desk() {
   }
 
   return (
-    <div className="desk-shell min-h-dvh overflow-x-hidden overflow-y-auto pb-16">
+    <div className="desk-shell min-h-dvh min-w-0 overflow-x-hidden overflow-y-auto pb-16">
       <TopBar
         equityUsd={engine.equityUsd}
         startUsd={startUsd}
@@ -114,7 +114,7 @@ export function Desk() {
       <p className="border-b border-line px-4 py-2 font-mono text-[11px] text-subtle">{modeHint}</p>
 
       {engine.mode === "ict" && (
-        <div className="flex gap-1 overflow-x-auto border-b border-line px-4 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <ChipRow className="border-b border-line">
           {[{ id: "ALL", symbol: "ALL" }, ...ICT_ASSETS].map((a) => {
             const on = engine.ictFilter === a.id;
             return (
@@ -131,11 +131,11 @@ export function Desk() {
               </button>
             );
           })}
-        </div>
+        </ChipRow>
       )}
 
-      <div className="grid gap-px bg-line md:grid-cols-12">
-        <section className="bg-surface md:col-span-12">
+      <div className="grid min-w-0 gap-px bg-line md:grid-cols-12">
+        <section className="min-w-0 bg-surface md:col-span-12">
           <LiveChart
             books={market?.books ?? []}
             filter={engine.mode === "ict" ? engine.ictFilter : "SOL"}
