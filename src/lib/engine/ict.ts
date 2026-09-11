@@ -903,6 +903,7 @@ function scanSwing(cs: Candle[]): IctSignal[] {
     const i15 = h1[k]!.i;
     const bias = htfBias(bars, k);
     if (bias === 0) continue;
+    if (!inKill(b.t)) continue;
     const a = atr(bars, k);
     const ob = [...obs].reverse().find((o) => o.i < k && o.i >= k - 12 && o.dir === bias);
     const fvg = [...fvgs].reverse().find((f) => f.i < k && f.i >= k - 12 && f.dir === bias);
@@ -946,6 +947,7 @@ export function scanSwingNative(cs: Candle[]): IctSignal[] {
     const b = cs[k]!;
     const bias = htfBias(cs, k);
     if (bias === 0) continue;
+    if (!inKill(b.t)) continue;
     const a = atr(cs, k);
     const ob = [...obs].reverse().find((o) => o.i < k && o.i >= k - 12 && o.dir === bias);
     const fvg = [...fvgs].reverse().find((f) => f.i < k && f.i >= k - 12 && f.dir === bias);
@@ -987,6 +989,7 @@ export function scanWeekly(cs: Candle[]): IctSignal[] {
     const b = cs[k]!;
     const bias = htfBias(cs, k);
     if (bias === 0) continue;
+    if (!inKill(b.t)) continue;
     const from = Math.max(0, k - 120);
     const prior = cs.slice(from, Math.max(from + 1, k - 24));
     if (prior.length < 24) continue;

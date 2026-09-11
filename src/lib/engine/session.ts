@@ -25,7 +25,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { nyParts, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
+import { inKill, nyHour, nyParts, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -293,7 +293,7 @@ function closePos(
     },
     ...s.closed,
   ].slice(0, 80);
-  if (pnlUsd >= 0) s.stats.wins += 1;
+  if (pnlUsd > 0.05) s.stats.wins += 1;
   else {
     s.stats.losses += 1;
     s.dayLoss += Math.abs(pnlUsd);
@@ -615,7 +615,7 @@ function tickIct(s: EngineState, market: MarketSnapshot | null) {
     s.stats.scanned += 4;
     s.stats.taken += 1;
     s.cashUsd += tr.pnlUsd;
-    if (tr.pnlUsd >= 0) s.stats.wins += 1;
+    if (tr.pnlUsd > 0.05) s.stats.wins += 1;
     else {
       s.stats.losses += 1;
       s.dayLoss += Math.abs(tr.pnlUsd);
@@ -679,6 +679,12 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
       (p.side === "long" ? p.entryUsd + risk * p.targetR : p.entryUsd - risk * p.targetR);
     if (trailSet.has(p.setup)) {
       const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
+      const hour = nyHour(c?.t ?? Date.now());
+      if (p.setup === "asia" && hour >= 2 && hour < 7 && mfe < risk) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, last, "time");
+        continue;
+      }
       if (mfe >= risk) {
         stopPx = p.side === "long" ? Math.max(stopPx, p.entryUsd) : Math.min(stopPx, p.entryUsd);
       }
@@ -841,6 +847,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         added += 1;
         continue;
       }
+      if (s.open.some((p) => p.origin === "ict" && p.symbol === t.symbol)) continue;
       fresh.push({
         ...t,
         stopUsd: t.stop,
