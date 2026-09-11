@@ -15,7 +15,10 @@ async function getJson(url: string, timeout = 2800): Promise<unknown> {
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
-      headers: { Accept: "application/json", "User-Agent": "NightshiftDesk/1.0" },
+      headers:
+        typeof window === "undefined"
+          ? { Accept: "application/json", "User-Agent": "NightshiftDesk/1.0" }
+          : { Accept: "application/json" },
     });
     if (!res.ok) throw new Error(`http ${res.status}`);
     return await res.json();
@@ -188,8 +191,7 @@ function mergeLaunches(...lists: Launch[][]): Launch[] {
   return [...map.values()].sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export const getDeskSnapshot = createServerFn({ method: "GET" }).handler(
-  async (): Promise<MarketSnapshot> => {
+export async function fetchDeskSnapshot(): Promise<MarketSnapshot> {
     const sources: string[] = [];
     const empty: MarketSnapshot = {
       fetchedAt: Date.now(),
@@ -301,10 +303,11 @@ export const getDeskSnapshot = createServerFn({ method: "GET" }).handler(
       snap.solUsd = num(amt, snap.solUsd);
     }
     return snap;
-  },
-);
+  }
 
-export const getIctBooks = createServerFn({ method: "GET" }).handler(async (): Promise<IctBook[]> => {
+export const getDeskSnapshot = createServerFn({ method: "GET" }).handler(fetchDeskSnapshot);
+
+export async function fetchIctBooks(): Promise<IctBook[]> {
   const settled = await Promise.allSettled(
     ICT_ASSETS.map((a) =>
       a.venue === "kucoin"
@@ -325,11 +328,11 @@ export const getIctBooks = createServerFn({ method: "GET" }).handler(async (): P
       source: "down",
     };
   });
-});
+}
 
-export const getChartKlines = createServerFn({ method: "POST" })
-  .validator((input: { id: string; bar: string }) => input)
-  .handler(async ({ data }): Promise<ChartTape> => {
+export const getIctBooks = createServerFn({ method: "GET" }).handler(fetchIctBooks);
+
+export async function fetchChartKlines(data: { id: string; bar: string }): Promise<ChartTape> {
     const asset = ICT_ASSETS.find((a) => a.id === data.id) ?? ICT_ASSETS[2]!;
     const tf = CHART_BARS.find((b) => b.id === data.bar) ?? CHART_BARS[3]!;
     if (asset.venue === "kucoin") {
@@ -354,28 +357,34 @@ export const getChartKlines = createServerFn({ method: "POST" })
     let cs = candlesFromOkx(candles);
     if (tf.foldMs) cs = foldCandles(cs, tf.foldMs);
     return { id: asset.id, last, candles: stampLast(cs, last), source: "okx", bar: tf.id };
-  });
+}
+
+export const getChartKlines = createServerFn({ method: "POST" })
+  .validator((input: { id: string; bar: string }) => input)
+  .handler(async ({ data }) => fetchChartKlines(data));
+
+export async function fetchMintQuotes(mints: string[]): Promise<Record<string, number>> {
+  const unique = [...new Set(mints.filter((m) => typeof m === "string" && m.length > 20))].slice(0, 5);
+  const quotes: Record<string, number> = {};
+  await Promise.all(
+    unique.map(async (mint) => {
+      try {
+        const raw = await getJson(`https://frontend-api-v3.pump.fun/coins/${encodeURIComponent(mint)}`, 2200);
+        if (!raw || typeof raw !== "object") return;
+        const c = raw as Record<string, unknown>;
+        const usd = num(c.usd_market_cap ?? c.market_cap_usd ?? c.market_cap);
+        if (usd > 0) quotes[mint] = usd;
+      } catch {
+        /* mint may have died */
+      }
+    }),
+  );
+  return quotes;
+}
 
 export const getMintQuotes = createServerFn({ method: "POST" })
   .validator((input: { mints: string[] }) => input)
-  .handler(async ({ data }): Promise<Record<string, number>> => {
-    const mints = [...new Set(data.mints.filter((m) => typeof m === "string" && m.length > 20))].slice(0, 5);
-    const quotes: Record<string, number> = {};
-    await Promise.all(
-      mints.map(async (mint) => {
-        try {
-          const raw = await getJson(`https://frontend-api-v3.pump.fun/coins/${encodeURIComponent(mint)}`, 2200);
-          if (!raw || typeof raw !== "object") return;
-          const c = raw as Record<string, unknown>;
-          const usd = num(c.usd_market_cap ?? c.market_cap_usd ?? c.market_cap);
-          if (usd > 0) quotes[mint] = usd;
-        } catch {
-          /* mint may have died */
-        }
-      }),
-    );
-    return quotes;
-  });
+  .handler(async ({ data }): Promise<Record<string, number>> => fetchMintQuotes(data.mints));
 
 export type GrokConsult = {
   ok: true;

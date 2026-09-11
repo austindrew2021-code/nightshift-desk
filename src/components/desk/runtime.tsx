@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getDeskSnapshot, getIctBooks, getMintQuotes } from "@/lib/market/api";
+import { fetchDeskSnapshot, fetchIctBooks, fetchMintQuotes } from "@/lib/market/api";
 import { useDesk } from "@/lib/store";
 import { loadEngine } from "@/lib/persist";
 
@@ -22,20 +22,20 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
 
   const q = useQuery({
     queryKey: ["desk-snapshot"],
-    queryFn: () => getDeskSnapshot(),
+    queryFn: () => fetchDeskSnapshot(),
     refetchInterval: mode === "live" ? 8_000 : mode === "ict" ? 12_000 : 45_000,
   });
 
   const quotes = useQuery({
     queryKey: ["mint-quotes", openMints],
-    queryFn: () => getMintQuotes({ data: { mints: openMints.split(",").filter(Boolean) } }),
+    queryFn: () => fetchMintQuotes(openMints.split(",").filter(Boolean)),
     enabled: Boolean(openMints) && (mode === "live" || mode === "watch"),
     refetchInterval: 8_000,
   });
 
   const books = useQuery({
     queryKey: ["ict-books"],
-    queryFn: () => getIctBooks(),
+    queryFn: () => fetchIctBooks(),
     refetchInterval: 8_000,
     staleTime: 2_000,
   });

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { chartLayers, nyHour, type ChartZone } from "@/lib/engine/ict";
 import type { Candle, ClosedTrade, Position } from "@/lib/engine/types";
 import { CHART_BARS, ICT_ASSETS, type IctBook } from "@/lib/engine/universe";
-import { getChartKlines } from "@/lib/market/api";
+import { fetchChartKlines } from "@/lib/market/api";
 import { cn } from "@/lib/utils";
 
 const UP = "#3dff8a";
@@ -165,7 +165,7 @@ export function LiveChart({
   const book = books.find((b) => b.id === sym) ?? books.find((b) => b.id === "SOL") ?? books[0];
   const tape = useQuery({
     queryKey: ["chart-klines", sym, tf],
-    queryFn: () => getChartKlines({ data: { id: sym, bar: tf } }),
+    queryFn: () => fetchChartKlines({ id: sym, bar: tf }),
     refetchInterval: tf === "1m" || tf === "5m" ? 3_000 : 5_000,
     staleTime: 1_000,
   });

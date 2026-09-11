@@ -146,10 +146,12 @@ function authPopupPlugin(): Plugin {
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
+  base: process.env.GITHUB_PAGES ? "/nightshift-desk/" : "/",
   server: {
     host: "0.0.0.0",
     port: 8080,
     strictPort: true,
+    allowedHosts: true,
   },
   preview: {
     host: "127.0.0.1",
@@ -166,17 +168,15 @@ export default defineConfig(({ command, isPreview }) => ({
     // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
     grokPwaPlugin(),
     tailwindcss(),
-    tanstackStart(),
+    tanstackStart(process.env.GITHUB_PAGES ? { spa: { enabled: true } } : undefined),
     ...(command === "build" || isPreview
-      ? [
-          nitro({
-            preset: process.env.NETLIFY ? "netlify" : "vercel",
-            // Auto-registers server/middleware/* (the PWA install page +
-            // manifest + head-tag middleware). Nitro v3 defaults serverDir to
-            // false, so removing this silently unwires /?install=1 on deploys.
-            serverDir: "./server",
-          }),
-        ]
+      ? process.env.GITHUB_PAGES
+        ? []
+        : [
+            nitro({
+              preset: process.env.NETLIFY ? "netlify" : "vercel",
+            }),
+          ]
       : []),
     viteReact(),
   ],
