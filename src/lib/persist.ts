@@ -108,7 +108,9 @@ export function loadEngine(): EngineState | null {
       text: "restored after close · book kept · ticks were paused while the phone killed the page",
       tone: "warn",
     };
-    restored.tape = [note, ...restored.tape].slice(0, 80);
+    if (!restored.tape[0]?.text?.startsWith("restored after close")) {
+      restored.tape = [note, ...restored.tape].slice(0, 80);
+    }
     return restored;
   } catch {
     return null;

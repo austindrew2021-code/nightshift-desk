@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { chartLayers, nyHour, scanIct, type ChartZone } from "@/lib/engine/ict";
+import { chartLayers, nyHour, type ChartZone } from "@/lib/engine/ict";
 import type { Candle, ClosedTrade, Position } from "@/lib/engine/types";
 import { CHART_BARS, ICT_ASSETS, type IctBook } from "@/lib/engine/universe";
 import { getChartKlines } from "@/lib/market/api";
@@ -180,45 +180,12 @@ export function LiveChart({
   const visN = Math.max(20, Math.min(span, nAll || 20));
   const visStart = follow ? Math.max(0, nAll - visN) : clamp(start, 0, Math.max(0, nAll - visN));
   const view = nAll ? candles.slice(visStart, visStart + visN) : [];
-  const signals = useMemo(() => (candles.length >= 48 ? scanIct(candles) : []), [candles]);
-  const zones = useMemo(() => {
-    const liveIds = new Set(orders.filter((o) => o.live && !o.pending).map((o) => `${o.side}-${o.setup}`));
-    const draw = signals.filter((s) => s.i >= candles.length - 12 || liveIds.has(`${s.side}-${s.setup}`));
-    return chartLayers(view.length ? view : candles, draw);
-  }, [view, candles, signals, orders]);
+  const zones = useMemo(() => chartLayers(view.length ? view : candles, []), [view, candles]);
   const stale = book?.source === "fallback" || (!book && (fallback?.length ?? 0) > 0);
   const lastPx = liveTape?.last || book?.last || view[view.length - 1]?.c || 0;
   const mine = useMemo(() => {
-    const here = orders.filter((o) => o.symbol === (book?.symbol ?? sym) || o.symbol === (book?.id ?? sym));
-    const pending: ChartOrder[] = [];
-    const lastC = view[view.length - 1];
-    if (lastC) {
-      for (const s of signals) {
-        if (s.i < candles.length - 12) continue;
-        if (here.some((o) => o.live && !o.pending && o.side === s.side && Math.abs(o.entry - s.entry) / s.entry < 0.004)) continue;
-        const thru =
-          s.side === "short"
-            ? lastC.h >= s.stop || lastC.l <= s.target
-            : lastC.l <= s.stop || lastC.h >= s.target;
-        if (thru) continue;
-        const waiting = s.side === "long" ? lastC.c > s.entry : lastC.c < s.entry;
-        if (!waiting) continue;
-        pending.push({
-          id: `lmt-${s.setup}-${s.i}`,
-          symbol: book?.symbol ?? sym,
-          side: s.side,
-          setup: s.setup,
-          entry: s.entry,
-          stop: s.stop,
-          target: s.target,
-          openedAt: s.t,
-          live: true,
-          pending: true,
-        });
-      }
-    }
-    return [...here, ...pending.slice(0, 3)];
-  }, [orders, book?.symbol, book?.id, sym, signals, candles.length, view]);
+    return orders.filter((o) => o.symbol === (book?.symbol ?? sym) || o.symbol === (book?.id ?? sym));
+  }, [orders, book?.symbol, book?.id, sym]);
 
   useEffect(() => {
     if (follow && nAll > 0) setStart(Math.max(0, nAll - visN));
@@ -763,7 +730,7 @@ export function LiveChart({
                 return `${kind}  EN ${px(o.entry)}  SL ${o.stop ? px(o.stop) : "—"}  TP ${o.target ? px(o.target) : "—"}`;
               })
               .join(" · ")
-          : `swipe pairs/TFs · drag chart · pinch zoom · 1M ticks live`}
+          : `no paper fill · boxes are levels · next London 2–5 NY (3–6 AM ADT)`}
       </p>
     </div>
   );
