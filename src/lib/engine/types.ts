@@ -15,6 +15,10 @@ export type SetupKind =
   | "div"
   | "scalp"
   | "swing"
+  | "breaker"
+  | "ifvg"
+  | "judas"
+  | "weekly"
   | "published";
 
 export type TapeKind =

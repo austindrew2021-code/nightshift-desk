@@ -19,9 +19,11 @@ const AGENTS = [
 const ICT = [
   { t: "Bias first", d: "TTrades: 5h slope first. No long into a sell day, no short into a buy day." },
   { t: "Power of 3", d: "Asia accumulates, London puts the daily wick, NY is the body. Drawn as the Asia box on the 15m chart." },
-  { t: "Sweeps", d: "Equal highs/lows or Asia range. Sweep alone is not a trade — needs CISD + FVG. Tap SWEEP to run only this + AMD." },
+  { t: "Sweeps", d: "Equal highs/lows or Asia range. Sweep alone is not a trade — needs CISD + FVG. Tap SWEEP to run only this + AMD + Judas." },
+  { t: "Judas", d: "NY 7–9 raid of overnight high/low, then CISD reverse. The fake open, not the true NY move." },
   { t: "Scalps", d: "Silver Bullet 10–11 NY on the 9am hour, PM 1:30–4 NY, plus the same models on 5m. 1.5R, short hold. Tap SCALP." },
-  { t: "Swings", d: "Native 1H order block / FVG with HTF bias. 3R. Tap SWING. 15m fold is the fallback." },
+  { t: "Swings / weekly", d: "Native 1H OB/FVG 3R, plus prior-week high/low raid. Tap SWING." },
+  { t: "Breaker / iFVG", d: "Failed order block flipped. FVG closed the wrong way then used as continuation." },
   { t: "Order block / Unicorn / OTE", d: "Last opposite candle. Unicorn = OB∩FVG. OTE is the 62–79 retrace of displacement." },
   { t: "FVG + divergence", d: "FVG entry at CE in premium/discount. Regular + hidden RSI. SMT: BTC vs ETH failed swing." },
 ];

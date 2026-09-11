@@ -50,7 +50,7 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · $${startUsd.toFixed(0)} live. SWEEP = eq H/L + AMD. SCALP = SB + PM + 5m. SWING = 1H OB/FVG 3R.`;
+        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · $${startUsd.toFixed(0)}. SWEEP=+Judas. SCALP=5m SB. SWING=1H+weekly+breaker/iFVG.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:

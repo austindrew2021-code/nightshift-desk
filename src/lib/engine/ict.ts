@@ -34,6 +34,9 @@ export function isAsia(t: number): boolean {
   const h = nyHour(t);
   return h >= 20 || h < 2;
 }
+export function isJudas(t: number): boolean {
+  return inWindow(t, 7, 9);
+}
 export function isNyPm(t: number): boolean {
   return inWindow(t, 13.5, 16);
 }
@@ -119,6 +122,46 @@ export function detectObs(cs: Candle[]): OrderBlock[] {
           out.push({ i: k, t: prev.t, dir: -1, top: prev.h, bot: prev.l });
           break;
         }
+      }
+    }
+  }
+  return out;
+}
+
+/** OB closed through, then used the other way. */
+export function detectBreakers(cs: Candle[]): OrderBlock[] {
+  const obs = detectObs(cs);
+  const out: OrderBlock[] = [];
+  for (const o of obs) {
+    for (let k = o.i + 1; k < Math.min(cs.length, o.i + 28); k++) {
+      const n = cs[k]!;
+      if (o.dir === -1 && n.c > o.top) {
+        out.push({ i: o.i, t: o.t, dir: 1, top: o.top, bot: o.bot });
+        break;
+      }
+      if (o.dir === 1 && n.c < o.bot) {
+        out.push({ i: o.i, t: o.t, dir: -1, top: o.top, bot: o.bot });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** FVG fully closed through becomes an inversion. */
+export function detectIfvg(cs: Candle[]): FVG[] {
+  const fvgs = detectFvgs(cs);
+  const out: FVG[] = [];
+  for (const f of fvgs) {
+    for (let k = f.i + 1; k < Math.min(cs.length, f.i + 24); k++) {
+      const n = cs[k]!;
+      if (f.dir === 1 && n.c < f.bot) {
+        out.push({ i: f.i, t: f.t, dir: -1, top: f.top, bot: f.bot });
+        break;
+      }
+      if (f.dir === -1 && n.c > f.top) {
+        out.push({ i: f.i, t: f.t, dir: 1, top: f.top, bot: f.bot });
+        break;
       }
     }
   }
@@ -309,6 +352,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
   const asia = buildAsia(cs);
   const fvgs = detectFvgs(cs);
   const obs = detectObs(cs);
+  const brks = detectBreakers(cs);
+  const ifvgs = detectIfvg(cs);
   const rsi = rsiWilder(cs);
   const sw = swings(cs, 3, 2);
   const signals: IctSignal[] = [];
@@ -415,6 +460,40 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
       }
     }
 
+    if (isJudas(c.t)) {
+      const range = asia.get(day);
+      const london = hourRange(cs, day, 2, 5);
+      const ovnH = Math.max(range?.asiaH ?? -Infinity, london?.h ?? -Infinity);
+      const ovnL = Math.min(range?.asiaL ?? Infinity, london?.l ?? Infinity);
+      if (Number.isFinite(ovnH) && Number.isFinite(ovnL) && ovnH > ovnL) {
+        const sweptLow = c.l < ovnL && c.c > ovnL;
+        const sweptHigh = c.h > ovnH && c.c < ovnH;
+        const side: "long" | "short" | null =
+          sweptLow && bias !== -1 ? "long" : sweptHigh && bias !== 1 ? "short" : null;
+        if (side) {
+          const conf = cisd(cs, i, side);
+          if (conf.ok && conf.fvg) {
+            const sweepPx = side === "long" ? Math.min(c.l, ovnL) : Math.max(c.h, ovnH);
+            const entry = (conf.fvg.bot + conf.fvg.top) / 2;
+            const stopPad = (ovnH - ovnL) * 0.06 || entry * 0.002;
+            const stop = side === "long" ? sweepPx - stopPad : sweepPx + stopPad;
+            add(
+              pack(
+                conf.i,
+                cs[conf.i]!.t,
+                side,
+                "judas",
+                entry,
+                stop,
+                twoR(side, entry, stop, side === "long" ? ovnH : ovnL),
+                `Judas 7–9 NY · fake ${side === "long" ? "low" : "high"} · CISD · FVG`,
+              ),
+            );
+          }
+        }
+      }
+    }
+
     if (!inKill(c.t) || bias === 0) continue;
 
     // Unicorn / advanced OB: last opposite candle overlapping a displacement FVG.
@@ -459,6 +538,52 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
             stop,
             twoR(side, entry, stop),
             `Order block · ${side} · TTrades last opposite candle`,
+          ),
+        );
+      }
+    }
+
+    const br = [...brks].reverse().find((o) => o.i < i && o.i >= i - 36 && o.dir === bias);
+    if (br) {
+      const tapped = c.l <= br.top && c.h >= br.bot;
+      const holds = bias === 1 ? c.c > br.bot : c.c < br.top;
+      if (tapped && holds) {
+        const side = bias === 1 ? "long" : "short";
+        const entry = (br.top + br.bot) / 2;
+        const stop = bias === 1 ? br.bot - a * 0.18 : br.top + a * 0.18;
+        add(
+          pack(
+            i,
+            c.t,
+            side,
+            "breaker",
+            entry,
+            stop,
+            twoR(side, entry, stop),
+            `Breaker · failed OB flipped · ${side}`,
+          ),
+        );
+      }
+    }
+
+    const inv = [...ifvgs].reverse().find((f) => f.i < i && f.i >= i - 28 && f.dir === bias);
+    if (inv) {
+      const tapped = c.l <= inv.top && c.h >= inv.bot;
+      const holds = bias === 1 ? c.c > inv.bot : c.c < inv.top;
+      if (tapped && holds) {
+        const side = bias === 1 ? "long" : "short";
+        const entry = (inv.top + inv.bot) / 2;
+        const stop = bias === 1 ? inv.bot - a * 0.15 : inv.top + a * 0.15;
+        add(
+          pack(
+            i,
+            c.t,
+            side,
+            "ifvg",
+            entry,
+            stop,
+            twoR(side, entry, stop),
+            `iFVG · inverted gap · ${side}`,
           ),
         );
       }
@@ -786,24 +911,67 @@ export function scanSwingNative(cs: Candle[]): IctSignal[] {
   return out.slice(-4);
 }
 
+/** Prior-week high/low raid on 1H. */
+export function scanWeekly(cs: Candle[]): IctSignal[] {
+  if (cs.length < 80) return [];
+  const out: IctSignal[] = [];
+  for (let k = 48; k < cs.length; k++) {
+    const b = cs[k]!;
+    const bias = htfBias(cs, k);
+    if (bias === 0) continue;
+    const from = Math.max(0, k - 120);
+    const prior = cs.slice(from, Math.max(from + 1, k - 24));
+    if (prior.length < 24) continue;
+    const h = Math.max(...prior.map((x) => x.h));
+    const l = Math.min(...prior.map((x) => x.l));
+    const a = atr(cs, k);
+    const sweptLow = b.l < l && b.c > l && bias !== -1;
+    const sweptHigh = b.h > h && b.c < h && bias !== 1;
+    const side: "long" | "short" | null = sweptLow ? "long" : sweptHigh ? "short" : null;
+    if (!side) continue;
+    const conf = cisd(cs, k, side);
+    if (!conf.ok) continue;
+    const entry = conf.fvg ? (conf.fvg.bot + conf.fvg.top) / 2 : b.c;
+    const sweepPx = side === "long" ? Math.min(b.l, l) : Math.max(b.h, h);
+    const stop = side === "long" ? sweepPx - a * 0.2 : sweepPx + a * 0.2;
+    const sig = pack(
+      conf.i,
+      cs[conf.i]!.t,
+      side,
+      "weekly",
+      entry,
+      stop,
+      twoR(side, entry, stop, undefined, 3),
+      `Weekly ${side === "long" ? "low" : "high"} raid · CISD · 3R`,
+      0.07,
+    );
+    if (sig) out.push(sig);
+  }
+  return out.slice(-3);
+}
+
 export function styleAllows(style: string, setup: SetupKind): boolean {
-  if (style === "sweep") return setup === "sweep" || setup === "amd";
-  if (style === "scalp") return setup === "scalp" || setup === "silver";
-  if (style === "swing") return setup === "swing";
+  if (style === "sweep") return setup === "sweep" || setup === "amd" || setup === "judas";
+  if (style === "scalp") return setup === "scalp" || setup === "silver" || setup === "judas";
+  if (style === "swing") return setup === "swing" || setup === "weekly" || setup === "breaker" || setup === "ifvg";
   return true;
 }
 
 const SETUP_RANK: Record<SetupKind, number> = {
   silver: 0,
   amd: 1,
-  scalp: 2,
-  swing: 3,
-  sweep: 4,
-  ob: 5,
-  fvg: 6,
-  div: 7,
-  curve: 8,
-  published: 9,
+  judas: 2,
+  scalp: 3,
+  swing: 4,
+  weekly: 5,
+  sweep: 6,
+  breaker: 7,
+  ifvg: 8,
+  ob: 9,
+  fvg: 10,
+  div: 11,
+  curve: 12,
+  published: 13,
 };
 
 /** Keep the session models; don't let early OBs spend the day's budget. */
@@ -822,7 +990,7 @@ function pickDay(raw: IctSignal[]): IctSignal[] {
       if (uniq.some((x) => Math.abs(x.i - s.i) < 4 && x.side === s.side)) continue;
       uniq.push(s);
     }
-    const pinned = ["silver", "amd", "scalp", "swing"] as const;
+    const pinned = ["silver", "amd", "judas", "scalp", "swing", "weekly"] as const;
     const kept: IctSignal[] = [];
     for (const kind of pinned) {
       const hit = uniq.find((s) => s.setup === kind);
@@ -1039,7 +1207,12 @@ export function simulateIct(
     let reason: ClosedTrade["reason"] = "time";
     let closedAt = cs[cs.length - 1]?.t ?? s.t;
     let filled = s.setup === "div";
-    const hold = s.setup === "scalp" || s.setup === "silver" ? 16 : s.setup === "swing" ? 80 : 32;
+    const hold =
+      s.setup === "scalp" || s.setup === "silver" || s.setup === "judas"
+        ? 16
+        : s.setup === "swing" || s.setup === "weekly" || s.setup === "breaker"
+          ? 80
+          : 32;
     for (let i = s.i + 1; i < cs.length; i++) {
       const c = cs[i]!;
       if (!filled) {
@@ -1111,28 +1284,36 @@ export function simulateIct(
 }
 
 export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
-  const kinds: SetupKind[] = ["silver", "amd", "scalp", "sweep", "fvg", "ob", "div", "swing"];
+  const kinds: SetupKind[] = ["silver", "amd", "judas", "scalp", "sweep", "breaker", "ifvg", "fvg", "ob", "div", "swing", "weekly"];
   const labels: Record<SetupKind, string> = {
     silver: "Silver Bullet 10–11 NY (scalp)",
     amd: "Power of 3 (AMD)",
+    judas: "Judas 7–9 NY open fake",
     scalp: "NY PM scalp 1:30–4",
     sweep: "Sweep + CISD (eq H/L)",
+    breaker: "Breaker (failed OB flip)",
+    ifvg: "Inversion FVG",
     fvg: "FVG CE + OTE 62–79",
     ob: "Order block / Unicorn",
     div: "RSI / hidden / SMT",
     swing: "1H swing OB/FVG 3R",
+    weekly: "Weekly high/low raid 3R",
     curve: "Pump.fun early curve",
     published: "Published outlier",
   };
   const notes: Record<SetupKind, string> = {
     silver: "TTrades AM Silver Bullet. Sweep the 9am hour, CISD, FVG. Scalp 1.5–2R.",
     amd: "Asia range, London wick, NY distribution.",
+    judas: "NY 7–9 raid of overnight high/low, then CISD reverse. Not the true move.",
     scalp: "PM session high/low raid + CISD. 1.5R, 4h time stop.",
     sweep: "Equal highs/lows then CISD. Sweep alone is not a trade.",
+    breaker: "Order block closed through, then retested as the other side.",
+    ifvg: "FVG filled the wrong way, then used as continuation.",
     fvg: "Displacement FVG or OTE 62–79 retrace in PD.",
     ob: "Last opposite candle. Unicorn = OB overlapping FVG.",
     div: "Regular and hidden RSI divergence plus BTC/ETH SMT.",
-    swing: "Folded 1H order block / FVG. 3R, holds the session.",
+    swing: "Native 1H order block / FVG. 3R, holds the session.",
+    weekly: "Prior-week high/low raid on 1H + CISD. 3R swing.",
     curve: "Bonding-curve filter from the five-agent desk.",
     published: "Reconstructed from the public @zostaff writeup.",
   };

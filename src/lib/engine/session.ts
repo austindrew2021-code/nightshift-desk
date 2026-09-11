@@ -25,7 +25,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { nyParts, scanIct, scanSmt, scanSwingNative, simulateIct, styleAllows } from "./ict";
+import { nyParts, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -728,19 +728,28 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     const corr = b.id === "BTC" ? eth : btc;
     const extra =
       corr && corr.id !== b.id ? scanSmt(b.candles15, corr.candles15, corr.symbol) : [];
-    const raw = [...scanIct(b.candles15), ...extra];
-    if ((s.ictStyle === "all" || s.ictStyle === "scalp") && b.candles5 && b.candles5.length >= 48) {
+    const s15 = [...scanIct(b.candles15), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
+    const s5: typeof s15 = [];
+    const s1h: typeof s15 = [];
+    if ((s.ictStyle === "all" || s.ictStyle === "scalp" || s.ictStyle === "sweep") && b.candles5 && b.candles5.length >= 48) {
       for (const sig of scanIct(b.candles5, { skipSwing: true })) {
-        if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "sweep") {
-          raw.push({ ...sig, note: `${sig.note} · 5m` });
+        if (!styleAllows(s.ictStyle, sig.setup)) continue;
+        if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "sweep" || sig.setup === "judas" || sig.setup === "ifvg") {
+          s5.push({ ...sig, note: `${sig.note} · 5m` });
         }
       }
     }
     if ((s.ictStyle === "all" || s.ictStyle === "swing") && b.candles1h && b.candles1h.length >= 24) {
-      for (const sig of scanSwingNative(b.candles1h)) raw.push({ ...sig, note: `${sig.note} · 1H` });
+      for (const sig of [...scanSwingNative(b.candles1h), ...scanWeekly(b.candles1h)]) {
+        if (!styleAllows(s.ictStyle, sig.setup)) continue;
+        s1h.push({ ...sig, note: `${sig.note} · 1H` });
+      }
     }
-    const sigs = raw.filter((x) => styleAllows(s.ictStyle, x.setup));
-    const sim = simulateIct(b.candles15, sigs, risk, b.symbol, b.name).map((t) => ({
+    const sim = [
+      ...simulateIct(b.candles15, s15, risk, b.symbol, b.name),
+      ...(b.candles5 ? simulateIct(b.candles5, s5, risk, b.symbol, b.name) : []),
+      ...(b.candles1h ? simulateIct(b.candles1h, s1h, risk, b.symbol, b.name) : []),
+    ].map((t) => ({
       ...t,
       origin: "ict" as const,
       pnlSol: t.pnlUsd / Math.max(1e-6, s.solUsd),
