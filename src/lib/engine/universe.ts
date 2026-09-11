@@ -51,6 +51,8 @@ export interface IctBook {
   last: number;
   change24h: number;
   candles15: import("./types").Candle[];
+  candles5?: import("./types").Candle[];
+  candles1h?: import("./types").Candle[];
   source: string;
 }
 

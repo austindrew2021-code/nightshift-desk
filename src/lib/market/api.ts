@@ -95,9 +95,11 @@ function stampLast(cs: Candle[], lastPx: number): Candle[] {
 }
 
 async function fetchOkxBook(instId: string, symbol: string, name: string, id: string): Promise<IctBook> {
-  const [ticker, candles] = await Promise.all([
+  const [ticker, candles, m5, h1] = await Promise.all([
     getJson(`https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(instId)}`),
     getJson(`https://www.okx.com/api/v5/market/candles?instId=${encodeURIComponent(instId)}&bar=15m&limit=200`),
+    getJson(`https://www.okx.com/api/v5/market/candles?instId=${encodeURIComponent(instId)}&bar=5m&limit=200`),
+    getJson(`https://www.okx.com/api/v5/market/candles?instId=${encodeURIComponent(instId)}&bar=1H&limit=200`),
   ]);
   const row = (ticker as { data?: Record<string, string>[] })?.data?.[0];
   const last = num(row?.last);
@@ -109,14 +111,18 @@ async function fetchOkxBook(instId: string, symbol: string, name: string, id: st
     last,
     change24h: open ? last / open - 1 : 0,
     candles15: stampLast(candlesFromOkx(candles), last),
+    candles5: stampLast(candlesFromOkx(m5), last),
+    candles1h: stampLast(candlesFromOkx(h1), last),
     source: "okx",
   };
 }
 
 async function fetchKucoinBook(instId: string, symbol: string, name: string, id: string): Promise<IctBook> {
-  const [stats, candles] = await Promise.all([
+  const [stats, candles, m5, h1] = await Promise.all([
     getJson(`https://api.kucoin.com/api/v1/market/stats?symbol=${encodeURIComponent(instId)}`),
     getJson(`https://api.kucoin.com/api/v1/market/candles?type=15min&symbol=${encodeURIComponent(instId)}`),
+    getJson(`https://api.kucoin.com/api/v1/market/candles?type=5min&symbol=${encodeURIComponent(instId)}`),
+    getJson(`https://api.kucoin.com/api/v1/market/candles?type=1hour&symbol=${encodeURIComponent(instId)}`),
   ]);
   const row = (stats as { data?: Record<string, string> })?.data;
   const last = num(row?.last);
@@ -128,6 +134,8 @@ async function fetchKucoinBook(instId: string, symbol: string, name: string, id:
     last,
     change24h: change,
     candles15: stampLast(candlesFromKucoin(candles), last),
+    candles5: stampLast(candlesFromKucoin(m5), last),
+    candles1h: stampLast(candlesFromKucoin(h1), last),
     source: "kucoin",
   };
 }

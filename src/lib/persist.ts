@@ -90,6 +90,7 @@ export function loadEngine(): EngineState | null {
       ictTrades: Array.isArray(e.ictTrades) ? e.ictTrades : [],
       ictSeen: Array.isArray(e.ictSeen) ? e.ictSeen : [],
       ictFilter: typeof e.ictFilter === "string" ? e.ictFilter : "ALL",
+      ictStyle: e.ictStyle === "sweep" || e.ictStyle === "scalp" || e.ictStyle === "swing" ? e.ictStyle : "all",
       zPlan: Array.isArray(e.zPlan) ? e.zPlan : [],
       zCursor: finite(e.zCursor),
       zDone: Boolean(e.zDone),

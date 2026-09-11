@@ -1,4 +1,5 @@
 export type DeskMode = "watch" | "live" | "ict" | "zostaff";
+export type IctStyle = "all" | "sweep" | "scalp" | "swing";
 
 export type AgentId = "hunter" | "auditor" | "narrative" | "timing" | "checker";
 
@@ -12,6 +13,8 @@ export type SetupKind =
   | "sweep"
   | "ob"
   | "div"
+  | "scalp"
+  | "swing"
   | "published";
 
 export type TapeKind =

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_START_USD, type DeskMode, type MarketSnapshot } from "@/lib/engine/types";
+import { DEFAULT_START_USD, type DeskMode, type IctStyle, type MarketSnapshot } from "@/lib/engine/types";
 import {
   applyMarket,
   applyQuotes,
@@ -27,6 +27,7 @@ interface DeskStore {
   hydrateQuotes: (q: Record<string, number>) => void;
   hydrateBooks: (books: IctBook[]) => void;
   setIctFilter: (id: string) => void;
+  setIctStyle: (id: IctStyle) => void;
   setMarketError: (e: string | null) => void;
   setLoading: (v: boolean) => void;
   play: () => void;
@@ -94,11 +95,19 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const launches = market?.launches ?? [];
     const engine = resetEngine("ict", sol, start, launches, id);
     engine.mode = "ict";
+    engine.ictStyle = get().engine.ictStyle;
     if (market) {
       if (market.books?.length) ingestIct(engine, market);
       applyMarket(engine, market);
     }
     set({ engine, grokNote: null });
+    saveEngine(engine);
+  },
+  setIctStyle: (id) => {
+    const engine = { ...get().engine, ictStyle: id };
+    const market = get().market;
+    if (market && engine.mode === "ict") ingestIct(engine, market);
+    set({ engine });
     saveEngine(engine);
   },
   setMarketError: (e) => set({ marketError: e, loadingMarket: false }),

@@ -31,6 +31,7 @@ export function Desk() {
   const setMode = useDesk((s) => s.setMode);
   const setStartUsd = useDesk((s) => s.setStartUsd);
   const setIctFilter = useDesk((s) => s.setIctFilter);
+  const setIctStyle = useDesk((s) => s.setIctStyle);
   const setGrok = useDesk((s) => s.setGrok);
   const bumpGrok = useDesk((s) => s.bumpGrokCalls);
   const [chartFs, setChartFs] = useState(false);
@@ -49,13 +50,13 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} live from $${startUsd.toFixed(0)} · new 15m fills only. History is boxes, not PnL. FULL = realtime chart.`;
+        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · $${startUsd.toFixed(0)} live. SWEEP = eq H/L + AMD. SCALP = SB + PM + 5m. SWING = 1H OB/FVG 3R.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
         return `Watch · same Zostaff method as live paper, faster hunter on the live queue · fees still apply.`;
     }
-  }, [engine.mode, engine.ictFilter, startUsd, z.startSol, z.targetEndUsd]);
+  }, [engine.mode, engine.ictFilter, engine.ictStyle, startUsd, z.startSol, z.targetEndUsd]);
 
   async function askGrok() {
     if (grokBusy) return;
@@ -128,6 +129,33 @@ export function Desk() {
                 )}
               >
                 {a.symbol}
+              </button>
+            );
+          })}
+        </ChipRow>
+      )}
+      {engine.mode === "ict" && (
+        <ChipRow className="border-b border-line">
+          {(
+            [
+              { id: "all", label: "ALL SETUPS" },
+              { id: "sweep", label: "SWEEP" },
+              { id: "scalp", label: "SCALP" },
+              { id: "swing", label: "SWING" },
+            ] as const
+          ).map((st) => {
+            const on = (engine.ictStyle ?? "all") === st.id;
+            return (
+              <button
+                key={st.id}
+                type="button"
+                onClick={() => setIctStyle(st.id)}
+                className={cn(
+                  "h-9 shrink-0 rounded-md px-2.5 font-mono text-[11px] tracking-[0.12em] uppercase",
+                  on ? "bg-phosphor text-phosphor-ink" : "text-muted hover:bg-surface-2 hover:text-fg",
+                )}
+              >
+                {st.label}
               </button>
             );
           })}

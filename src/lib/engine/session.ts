@@ -25,7 +25,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { scanIct, scanSmt, simulateIct } from "./ict";
+import { nyParts, scanIct, scanSmt, scanSwingNative, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -80,6 +80,7 @@ export interface EngineState {
   ictCursor: number;
   ictFilter: string;
   ictSeen: string[];
+  ictStyle: import("./types").IctStyle;
   tickN: number;
   dayLoss: number;
   zPlan: ZostaffStep[];
@@ -141,6 +142,7 @@ export function createEngine(solUsd = 100, startUsd = DEFAULT_START_USD): Engine
     ictCursor: 0,
     ictFilter: "ALL",
     ictSeen: [],
+    ictStyle: "all",
     tickN: 0,
     dayLoss: 0,
     zPlan: [],
@@ -726,18 +728,31 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     const corr = b.id === "BTC" ? eth : btc;
     const extra =
       corr && corr.id !== b.id ? scanSmt(b.candles15, corr.candles15, corr.symbol) : [];
-    const sigs = [...scanIct(b.candles15), ...extra];
+    const raw = [...scanIct(b.candles15), ...extra];
+    if ((s.ictStyle === "all" || s.ictStyle === "scalp") && b.candles5 && b.candles5.length >= 48) {
+      for (const sig of scanIct(b.candles5, { skipSwing: true })) {
+        if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "sweep") {
+          raw.push({ ...sig, note: `${sig.note} · 5m` });
+        }
+      }
+    }
+    if ((s.ictStyle === "all" || s.ictStyle === "swing") && b.candles1h && b.candles1h.length >= 24) {
+      for (const sig of scanSwingNative(b.candles1h)) raw.push({ ...sig, note: `${sig.note} · 1H` });
+    }
+    const sigs = raw.filter((x) => styleAllows(s.ictStyle, x.setup));
     const sim = simulateIct(b.candles15, sigs, risk, b.symbol, b.name).map((t) => ({
       ...t,
       origin: "ict" as const,
       pnlSol: t.pnlUsd / Math.max(1e-6, s.solUsd),
     }));
     for (const t of sim) {
-      if (t.openedAt < liveFrom) continue;
+      const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
+      const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
+      const today = nyParts(Date.now()).day === nyParts(t.openedAt).day;
+      if (t.openedAt < liveFrom && !(stillOpen && today)) continue;
       const key = `${t.symbol}-${t.setup}-${t.openedAt}`;
       if (s.ictSeen.includes(key)) continue;
       s.ictSeen = [...s.ictSeen, key];
-      const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
       if (stillOpen) {
         if (s.open.some((p) => p.id === t.id) || s.open.length >= MAX_OPEN) continue;
         const stopDist = Math.abs(t.entryUsd - t.stop);
@@ -993,7 +1008,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} live from $${s.startUsd.toFixed(0)} · only new 15m fills after now · boxes on the chart are history`,
+      text: `ICT ${ictFilter} ${s.ictStyle} from $${s.startUsd.toFixed(0)} · live fills only · sweep/scalp/swing + 5m/1H`,
       tone: "mute",
     });
   }
