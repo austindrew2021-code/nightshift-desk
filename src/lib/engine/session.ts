@@ -790,7 +790,35 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const btc = books.find((b) => b.id === "BTC");
   const eth = books.find((b) => b.id === "ETH");
   const riskFlat = ictRiskUsd(s, 0.01).risk;
-  const liveFrom = (s.wallStarted || Date.now()) - 20 * 60_000;
+  const now = Date.now();
+  const liveFrom = now - 25 * 60_000;
+  const today = nyParts(now).day;
+  const ictCount =
+    s.closed.filter((t) => t.origin === "ict").length + s.open.filter((p) => p.origin === "ict").length;
+  if (finite(s.dayLoss) >= s.startUsd * DAILY_LOSS_PCT) {
+    if (s.tickN % 30 === 1) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `daily loss halt · $${s.dayLoss.toFixed(0)} / ${(DAILY_LOSS_PCT * 100).toFixed(0)}% · no new tickets until Reset`,
+        tone: "warn",
+      });
+    }
+    return;
+  }
+  if (ictCount >= MAX_DAILY_TRADES) {
+    if (s.tickN % 30 === 1) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `daily cap ${MAX_DAILY_TRADES} · quality over 70-fill spray`,
+        tone: "mute",
+      });
+    }
+    return;
+  }
   let added = 0;
   const fresh: ClosedTrade[] = [];
   for (const b of filtered) {
@@ -832,6 +860,22 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       const key = `${t.symbol}-${t.setup}-${t.openedAt}`;
       if (s.ictSeen.includes(key)) continue;
       s.ictSeen = [...s.ictSeen, key];
+      const taken =
+        s.closed.filter((x) => x.origin === "ict").length +
+        s.open.filter((p) => p.origin === "ict").length +
+        fresh.length +
+        added;
+      if (taken >= MAX_DAILY_TRADES) continue;
+      const stoppedToday = s.closed.some(
+        (c) =>
+          c.origin === "ict" &&
+          c.symbol === t.symbol &&
+          c.reason === "stop" &&
+          nyParts(c.closedAt).day === today,
+      );
+      if (stoppedToday) continue;
+      const sameSide = s.open.filter((p) => p.origin === "ict" && p.side === t.side).length;
+      if (sameSide >= 2) continue;
       if (stillOpen) {
         if (
           s.open.some((p) => p.id === t.id || (p.origin === "ict" && p.symbol === t.symbol)) ||
@@ -893,6 +937,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         added += 1;
         continue;
       }
+      if (t.closedAt < now - 25 * 60_000) continue;
       if (s.open.some((p) => p.origin === "ict" && p.symbol === t.symbol)) continue;
       fresh.push({
         ...t,
