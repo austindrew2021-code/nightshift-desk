@@ -415,37 +415,26 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
       }
     }
 
-    if (isLondon(c.t) || isNyAm(c.t)) {
+    if (isLondon(c.t)) {
       const range = asia.get(day);
-      const raid = londonRaid.get(day);
       if (range?.asiaReady) {
+        const sweptLow = c.l < range.asiaL && c.c > range.asiaL;
+        const sweptHigh = c.h > range.asiaH && c.c < range.asiaH;
         let side: "long" | "short" | null = null;
         let sweepPx = 0;
         let note = "";
-        if (isLondon(c.t)) {
-          const sweptLow = c.l < range.asiaL && c.c > range.asiaL;
-          const sweptHigh = c.h > range.asiaH && c.c < range.asiaH;
-          if (sweptLow && bias !== -1) {
-            side = "long";
-            sweepPx = Math.min(c.l, range.asiaL);
-            note = "AMD · London raid on Asia low";
-          } else if (sweptHigh && bias !== 1) {
-            side = "short";
-            sweepPx = Math.max(c.h, range.asiaH);
-            note = "AMD · London raid on Asia high";
-          }
-        } else if (raid === "low" && bias !== -1 && c.c > range.asiaL) {
+        if (sweptLow && bias !== -1) {
           side = "long";
-          sweepPx = range.asiaL;
-          note = "AMD · NY distribution after London SSL";
-        } else if (raid === "high" && bias !== 1 && c.c < range.asiaH) {
+          sweepPx = Math.min(c.l, range.asiaL);
+          note = "AMD · London raid on Asia low";
+        } else if (sweptHigh && bias !== 1) {
           side = "short";
-          sweepPx = range.asiaH;
-          note = "AMD · NY distribution after London BSL";
+          sweepPx = Math.max(c.h, range.asiaH);
+          note = "AMD · London raid on Asia high";
         }
         if (side) {
           const conf = cisd(cs, i, side);
-          if (conf.ok && (conf.fvg || isLondon(c.t))) {
+          if (conf.ok && (conf.fvg || true)) {
             const entry = conf.fvg ? (conf.fvg.bot + conf.fvg.top) / 2 : cs[conf.i]!.c;
             const stopPad = (range.asiaH - range.asiaL) * 0.06 || entry * 0.0025;
             const stop = side === "long" ? sweepPx - stopPad : sweepPx + stopPad;
@@ -454,11 +443,11 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
                 conf.i,
                 cs[conf.i]!.t,
                 side,
-                isLondon(c.t) ? "amd" : "amd",
+                "amd",
                 entry,
                 stop,
-                twoR(side, entry, stop, side === "long" ? range.asiaH : range.asiaL),
-                `${note} · CISD${conf.fvg ? " · FVG" : ""} · ${bias === 1 ? "bull HTF" : bias === -1 ? "bear HTF" : "flat HTF"}`,
+                twoR(side, entry, stop, side === "long" ? range.asiaH : range.asiaL, 3),
+                `${note} · CISD${conf.fvg ? " · FVG" : ""} · ${bias === 1 ? "bull HTF" : bias === -1 ? "bear HTF" : "flat HTF"} · 3R`,
               ),
             );
           }
@@ -529,28 +518,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
             "ob",
             entry,
             stop,
-            twoR(side, entry, stop),
-            `Unicorn OB∩FVG · ${side} · ${bias === 1 ? "bull" : "bear"} HTF`,
-          ),
-        );
-      }
-    } else if (contOk && recentOb) {
-      const tapped = c.l <= recentOb.top && c.h >= recentOb.bot;
-      const holds = recentOb.dir === 1 ? c.c > recentOb.bot : c.c < recentOb.top;
-      if (tapped && holds) {
-        const entry = (recentOb.top + recentOb.bot) / 2;
-        const stop = recentOb.dir === 1 ? recentOb.bot - a * 0.15 : recentOb.top + a * 0.15;
-        const side = recentOb.dir === 1 ? "long" : "short";
-        add(
-          pack(
-            i,
-            c.t,
-            side,
-            "ob",
-            entry,
-            stop,
-            twoR(side, entry, stop),
-            `Order block · ${side} · TTrades last opposite candle`,
+            twoR(side, entry, stop, undefined, 3),
+            `Unicorn OB∩FVG · ${side} · ${bias === 1 ? "bull" : "bear"} HTF · 3R`,
           ),
         );
       }

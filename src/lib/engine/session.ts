@@ -124,14 +124,13 @@ export function tradableUsd(s: EngineState): number {
   return Math.max(0, finite(s.equityUsd, s.startUsd) - finite(s.bankedUsd));
 }
 
-/** 15x on 30% margin, $1R never more than 2% of tradable. */
+/** 12% of tradable per 1R. 15x×80% is the notional ceiling, not a 2% clip. */
 export function ictRiskUsd(s: EngineState, stopPct = 0.01): { risk: number; notional: number } {
   const book = Math.max(s.startUsd * 0.25, tradableUsd(s) || s.startUsd);
+  const risk = Math.max(1, book * ICT_MAX_RISK_PCT);
   const notionalCap = book * ICT_MARGIN_PCT * ICT_LEVERAGE;
-  const fromLev = notionalCap * Math.max(1e-6, stopPct);
-  const cap = book * ICT_MAX_RISK_PCT;
-  const risk = Math.max(0.5, Math.min(fromLev, cap));
-  return { risk, notional: risk / Math.max(1e-6, stopPct) };
+  const notional = Math.min(risk / Math.max(1e-6, stopPct), notionalCap);
+  return { risk: notional * Math.max(1e-6, stopPct), notional };
 }
 
 function maybeBank(s: EngineState) {
@@ -792,7 +791,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
   const liveFrom = now - 25 * 60_000;
-  if (finite(s.dayLoss) >= s.startUsd * DAILY_LOSS_PCT) {
+  if (finite(s.dayLoss) >= s.startUsd * (s.mode === "ict" ? 0.4 : DAILY_LOSS_PCT)) {
     if (s.tickN % 30 === 1) {
       pushTape(s, {
         t: now,
