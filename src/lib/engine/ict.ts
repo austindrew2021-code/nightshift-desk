@@ -389,9 +389,13 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
         const side: "long" | "short" | null = sweptLow ? "long" : sweptHigh ? "short" : null;
         if (side && !(bias === 1 && side === "short") && !(bias === -1 && side === "long")) {
           const conf = cisd(cs, i, side);
-          if (conf.ok && conf.fvg) {
+          const want = side === "long" ? 1 : -1;
+          const fvg =
+            conf.fvg ??
+            [...fvgs].reverse().find((f) => f.dir === want && f.i <= (conf.ok ? conf.i : i) && f.i >= i - 8);
+          if (conf.ok && fvg) {
             const sweepPx = side === "long" ? Math.min(c.l, nine.l) : Math.max(c.h, nine.h);
-            const entry = (conf.fvg.bot + conf.fvg.top) / 2;
+            const entry = (fvg.bot + fvg.top) / 2;
             const stopPad = (nine.h - nine.l) * 0.08 || entry * 0.002;
             const stop = side === "long" ? sweepPx - stopPad : sweepPx + stopPad;
             add(
@@ -450,7 +454,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
                 conf.i,
                 cs[conf.i]!.t,
                 side,
-                isLondon(c.t) ? "amd" : "sweep",
+                isLondon(c.t) ? "amd" : "amd",
                 entry,
                 stop,
                 twoR(side, entry, stop, side === "long" ? range.asiaH : range.asiaL),
@@ -496,71 +500,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
       }
     }
 
-    // Asia 20:00–02:00 NY: HTF continuation only. Do not fade the Asia range (that's London).
-    if (isAsia(c.t) && bias !== 0) {
-      const aFvg = [...fvgs].reverse().find((f) => f.i < i && f.i >= i - 18 && f.dir === bias);
-      const aOb = [...obs].reverse().find((o) => o.i < i && o.i >= i - 18 && o.dir === bias);
-      const zone =
-        aOb && aFvg && overlap(aOb.top, aOb.bot, aFvg.top, aFvg.bot)
-          ? { top: Math.min(aOb.top, aFvg.top), bot: Math.max(aOb.bot, aFvg.bot), tag: "Unicorn" }
-          : aFvg
-            ? { top: aFvg.top, bot: aFvg.bot, tag: "FVG" }
-            : aOb
-              ? { top: aOb.top, bot: aOb.bot, tag: "OB" }
-              : null;
-      if (zone) {
-        const tapped = c.l <= zone.top && c.h >= zone.bot;
-        const holds = bias === 1 ? c.c > zone.bot : c.c < zone.top;
-        if (tapped && holds) {
-          const side = bias === 1 ? "long" : "short";
-          const entry = (zone.top + zone.bot) / 2;
-          const pad = Math.max(a * 0.45, entry * 0.0018);
-          const stop = bias === 1 ? Math.min(zone.bot, entry) - pad : Math.max(zone.top, entry) + pad;
-          const nyH = nyHour(c.t);
-          add(
-            pack(
-              i,
-              c.t,
-              side,
-              "asia",
-              entry,
-              stop,
-              twoR(side, entry, stop, undefined, 1.5),
-              `Asia ${nyH < 2 ? "midnight" : "KZ"} · HTF ${side} ${zone.tag} · 1.5R · not a range fade`,
-            ),
-          );
-        }
-      }
-      if (inWindow(c.t, 0, 1.5) && i > 4) {
-        const prev = cs[i - 1]!;
-        const gap = c.o - prev.c;
-        const gapPct = Math.abs(gap) / Math.max(1e-9, prev.c);
-        if (gapPct > 0.0006) {
-          const fadeShort = gap > 0 && bias !== 1;
-          const fadeLong = gap < 0 && bias !== -1;
-          const side: "long" | "short" | null = fadeShort ? "short" : fadeLong ? "long" : null;
-          if (side) {
-            const conf = cisd(cs, i, side);
-            if (conf.ok && conf.fvg) {
-              const entry = (conf.fvg.bot + conf.fvg.top) / 2;
-              const stop = side === "short" ? Math.max(c.h, c.o) + a * 0.12 : Math.min(c.l, c.o) - a * 0.12;
-              add(
-                pack(
-                  conf.i,
-                  cs[conf.i]!.t,
-                  side,
-                  "asia",
-                  entry,
-                  stop,
-                  twoR(side, entry, stop, prev.c, 1.5),
-                  `NDOG · fade ${gap > 0 ? "up" : "down"} gap toward prior close · CISD`,
-                ),
-              );
-            }
-          }
-        }
-      }
-    }
+    // Asia is ICT accumulation. London raids it. Do not trade the Asia session — 7d test −16.7R.
 
     if (!inKill(c.t) || bias === 0) continue;
 
@@ -568,24 +508,6 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
     const liq = recentSweep(cs, sw, i, sideBias, 12);
     const conf = cisd(cs, i, sideBias);
     const contOk = Boolean(liq && conf.ok);
-
-    if (liq && conf.ok && conf.fvg) {
-      const entry = (conf.fvg.bot + conf.fvg.top) / 2;
-      const stop = sideBias === "long" ? liq.price - a * 0.18 : liq.price + a * 0.18;
-      const opp = lastFractal(sw, i, sideBias === "long" ? "high" : "low");
-      add(
-        pack(
-          conf.i,
-          cs[conf.i]!.t,
-          sideBias,
-          "sweep",
-          entry,
-          stop,
-          twoR(sideBias, entry, stop, opp?.price),
-          `Sweep ${liq.kind === "low" ? "SSL" : "BSL"} · CISD · FVG · tgt ${opp ? "opposing swing" : "2R"}`,
-        ),
-      );
-    }
 
     // Unicorn / advanced OB: last opposite candle overlapping a displacement FVG.
     const recentOb = [...obs].reverse().find((o) => o.i < i && o.i >= i - 18 && o.dir === bias);
@@ -680,32 +602,6 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
       }
     }
 
-    if (contOk && recentFvg) {
-      const ce = (recentFvg.top + recentFvg.bot) / 2;
-      const look = cs.slice(Math.max(0, i - 20), i + 1);
-      const hi = Math.max(...look.map((x) => x.h));
-      const lo = Math.min(...look.map((x) => x.l));
-      const mid = (hi + lo) / 2;
-      const inPd = bias === 1 ? c.c <= mid : c.c >= mid;
-      const tapped = c.l <= recentFvg.top && c.h >= recentFvg.bot;
-      if (inPd && tapped) {
-        const side = bias === 1 ? "long" : "short";
-        const stop = side === "long" ? recentFvg.bot - a * 0.12 : recentFvg.top + a * 0.12;
-        add(
-          pack(
-            i,
-            c.t,
-            side,
-            "fvg",
-            ce,
-            stop,
-            twoR(side, ce, stop),
-            `FVG CE · ${side} · ${bias === 1 ? "discount" : "premium"}`,
-          ),
-        );
-      }
-    }
-
     const highs = sw.filter((x) => x.kind === "high" && x.i <= i && x.i >= i - 36).slice(-2);
     const lows = sw.filter((x) => x.kind === "low" && x.i <= i && x.i >= i - 36).slice(-2);
     if (highs.length === 2 && i - highs[1]!.i <= 2) {
@@ -753,35 +649,6 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
       }
     }
 
-    const eq = equalPool(sw, i, a);
-    if (eq && inKill(c.t)) {
-      const side: "long" | "short" | null =
-        eq.kind === "low" && c.l < eq.px && c.c > eq.px && bias !== -1
-          ? "long"
-          : eq.kind === "high" && c.h > eq.px && c.c < eq.px && bias !== 1
-            ? "short"
-            : null;
-      if (side) {
-        const conf = cisd(cs, i, side);
-        if (conf.ok && conf.fvg) {
-          const entry = (conf.fvg.bot + conf.fvg.top) / 2;
-          const stop = side === "long" ? eq.px - a * 0.15 : eq.px + a * 0.15;
-          add(
-            pack(
-              conf.i,
-              cs[conf.i]!.t,
-              side,
-              "sweep",
-              entry,
-              stop,
-              twoR(side, entry, stop),
-              `Sweep eq ${eq.kind} · CISD · FVG · not a naked raid`,
-            ),
-          );
-        }
-      }
-    }
-
     if (isNyPm(c.t)) {
       const sess = sessionHiLo(cs, day, 0, 13.5);
       if (sess) {
@@ -810,33 +677,6 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
               ),
             );
           }
-        }
-      }
-    }
-
-    if (contOk && recentFvg) {
-      const impulse = impulseRange(cs, i, bias);
-      if (impulse) {
-        const rng = impulse.high - impulse.low;
-        const oteTop = bias === 1 ? impulse.high - rng * 0.62 : impulse.low + rng * 0.79;
-        const oteBot = bias === 1 ? impulse.high - rng * 0.79 : impulse.low + rng * 0.62;
-        const tapped = c.l <= oteTop && c.h >= oteBot;
-        if (tapped) {
-          const side = bias === 1 ? "long" : "short";
-          const entry = (oteTop + oteBot) / 2;
-          const stop = bias === 1 ? oteBot - a * 0.15 : oteTop + a * 0.15;
-          add(
-            pack(
-              i,
-              c.t,
-              side,
-              "fvg",
-              entry,
-              stop,
-              twoR(side, entry, stop),
-              `OTE 62–79 · ${side} · displacement retrace`,
-            ),
-          );
         }
       }
     }
@@ -1111,7 +951,7 @@ function pickDay(raw: IctSignal[]): IctSignal[] {
       if (uniq.some((x) => Math.abs(x.i - s.i) < 4 && x.side === s.side)) continue;
       uniq.push(s);
     }
-    const pinned = ["silver", "amd", "judas", "asia", "scalp", "swing", "weekly"] as const;
+    const pinned = ["silver", "amd", "judas", "scalp", "swing", "weekly"] as const;
     const kept: IctSignal[] = [];
     for (const kind of pinned) {
       const hit = uniq.find((s) => s.setup === kind);
