@@ -2,6 +2,11 @@ import {
   AGENT_META,
   DAILY_LOSS_PCT,
   DEFAULT_START_USD,
+  ICT_LEVERAGE,
+  ICT_MARGIN_PCT,
+  ICT_MAX_RISK_PCT,
+  BANK_EVERY_USD,
+  BANK_RATE,
   MAX_DAILY_TRADES,
   MAX_HOLD_MS,
   MAX_OPEN,
@@ -64,6 +69,7 @@ export interface EngineState {
   cashUsd: number;
   equityUsd: number;
   peakUsd: number;
+  bankedUsd: number;
   agents: AgentState[];
   open: Position[];
   closed: ClosedTrade[];
@@ -113,6 +119,41 @@ export function clampStart(n: number): number {
   return Math.min(1_000_000, Math.max(10, Math.round(v)));
 }
 
+/** Tradable book (equity minus vault). */
+export function tradableUsd(s: EngineState): number {
+  return Math.max(0, finite(s.equityUsd, s.startUsd) - finite(s.bankedUsd));
+}
+
+/** 15x on 30% margin, $1R never more than 2% of tradable. */
+export function ictRiskUsd(s: EngineState, stopPct = 0.01): { risk: number; notional: number } {
+  const book = Math.max(s.startUsd * 0.25, tradableUsd(s) || s.startUsd);
+  const notionalCap = book * ICT_MARGIN_PCT * ICT_LEVERAGE;
+  const fromLev = notionalCap * Math.max(1e-6, stopPct);
+  const cap = book * ICT_MAX_RISK_PCT;
+  const risk = Math.max(0.5, Math.min(fromLev, cap));
+  return { risk, notional: risk / Math.max(1e-6, stopPct) };
+}
+
+function maybeBank(s: EngineState) {
+  if (s.mode !== "ict") return;
+  const lifetime = finite(s.equityUsd) - s.startUsd;
+  const targetVault = Math.floor(lifetime / BANK_EVERY_USD) * (BANK_EVERY_USD * BANK_RATE);
+  const take = targetVault - finite(s.bankedUsd);
+  if (take < 1) return;
+  const room = Math.max(0, finite(s.cashUsd) - s.startUsd * 0.25);
+  const moved = Math.min(take, room);
+  if (moved < 1) return;
+  s.bankedUsd = finite(s.bankedUsd) + moved;
+  s.cashUsd = finite(s.cashUsd) - moved;
+  pushTape(s, {
+    t: s.simT || Date.now(),
+    kind: "note",
+    symbol: "BANK",
+    text: `banked ${moved.toFixed(0)} · 50% of +$${BANK_EVERY_USD} · vault $${s.bankedUsd.toFixed(0)} · trade $${(finite(s.equityUsd) - s.bankedUsd).toFixed(0)}`,
+    tone: "up",
+  });
+}
+
 export function createEngine(solUsd = 100, startUsd = DEFAULT_START_USD): EngineState {
   const start = clampStart(startUsd);
   return {
@@ -126,6 +167,7 @@ export function createEngine(solUsd = 100, startUsd = DEFAULT_START_USD): Engine
     cashUsd: start,
     equityUsd: start,
     peakUsd: start,
+    bankedUsd: 0,
     agents: blankAgents(),
     open: [],
     closed: [],
@@ -747,7 +789,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const filtered = books;
   const btc = books.find((b) => b.id === "BTC");
   const eth = books.find((b) => b.id === "ETH");
-  const risk = Math.max(1, s.startUsd * 0.01);
+  const riskFlat = ictRiskUsd(s, 0.01).risk;
   const liveFrom = (s.wallStarted || Date.now()) - 20 * 60_000;
   let added = 0;
   const fresh: ClosedTrade[] = [];
@@ -775,9 +817,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       }
     }
     const sim = [
-      ...simulateIct(b.candles15, s15, risk, b.symbol, b.name),
-      ...(b.candles5 ? simulateIct(b.candles5, s5, risk, b.symbol, b.name) : []),
-      ...(b.candles1h ? simulateIct(b.candles1h, s1h, risk, b.symbol, b.name) : []),
+      ...simulateIct(b.candles15, s15, riskFlat, b.symbol, b.name),
+      ...(b.candles5 ? simulateIct(b.candles5, s5, riskFlat, b.symbol, b.name) : []),
+      ...(b.candles1h ? simulateIct(b.candles1h, s1h, riskFlat, b.symbol, b.name) : []),
     ].map((t) => ({
       ...t,
       origin: "ict" as const,
@@ -799,7 +841,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas";
         const stopDist = Math.abs(t.entryUsd - t.stop);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
-        const sizeUsd = risk / Math.max(1e-6, stopPct);
+        const sized = ictRiskUsd(s, stopPct);
+        const risk = sized.risk;
+        const sizeUsd = sized.notional;
         const mark = b.last || t.entryUsd;
         const dir = t.side === "short" ? -1 : 1;
         const pnlUsd = ((mark - t.entryUsd) / Math.max(1e-9, t.entryUsd)) * sizeUsd * dir;
@@ -828,7 +872,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             pnlUsd,
             peakUsd: mark,
             agent: "timing",
-            note: trail ? `${t.note} · trail BE@1R → 3R` : t.note,
+            note: trail
+              ? `${t.note} · trail BE@1R → 3R · 15x ${ICT_MARGIN_PCT * 100}%`
+              : `${t.note} · 15x ${ICT_MARGIN_PCT * 100}%`,
             origin: "ict",
             stopUsd: t.stop,
             targetUsd,
@@ -977,7 +1023,7 @@ function repairIctCash(s: EngineState) {
   const closedPnl = s.closed
     .filter((t) => t.origin === "ict")
     .reduce((acc, t) => acc + finite(t.pnlUsd), 0);
-  const next = s.startUsd + closedPnl;
+  const next = s.startUsd + closedPnl - finite(s.bankedUsd);
   if (Math.abs(finite(s.cashUsd) - next) < 0.5 && finite(s.cashUsd) >= 0) return;
   const was = finite(s.cashUsd);
   s.cashUsd = next;
@@ -1019,7 +1065,9 @@ export function tick(s: EngineState, market: MarketSnapshot | null): EngineState
 
   const openPnl = s.open.reduce((acc, p) => acc + finite(p.pnlUsd), 0);
   s.cashUsd = finite(s.cashUsd, s.startUsd);
-  s.equityUsd = finite(s.cashUsd + openPnl, s.startUsd);
+  s.equityUsd = finite(s.cashUsd + openPnl + finite(s.bankedUsd), s.startUsd);
+  maybeBank(s);
+  s.equityUsd = finite(s.cashUsd + openPnl + finite(s.bankedUsd), s.startUsd);
   s.peakUsd = Math.max(finite(s.peakUsd, s.startUsd), s.equityUsd);
   if (s.tickN % 2 === 0) {
     s.equity = [...s.equity, { t: s.simT, v: s.equityUsd }].slice(-180);

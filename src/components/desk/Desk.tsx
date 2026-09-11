@@ -51,7 +51,7 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · $${startUsd.toFixed(0)}. Asia = HTF continuation 20:00–02 NY, not a range fade. London 2–5.`;
+        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · $${startUsd.toFixed(0)} · 15x on 30% · 2% max $ risk · bank 50% each +$200.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
@@ -244,7 +244,10 @@ export function Desk() {
               {sessionPnlSol.toFixed(2)} SOL
             </p>
             <p className="mt-1 font-mono text-xs text-muted tabular">
-              book {fmtUsd(engine.equityUsd)} · cash {fmtUsd(engine.cashUsd)} · start {fmtUsd(startUsd)}
+              book {fmtUsd(engine.equityUsd)} · cash {fmtUsd(engine.cashUsd)} · vault {fmtUsd(engine.bankedUsd ?? 0)} · start {fmtUsd(startUsd)}
+            </p>
+            <p className="mt-1 font-mono text-[11px] text-subtle tabular">
+              15x · 30% margin · 2% cap · bank 50% / +$200
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               fees {fmtUsd(engine.stats.feesUsd)} · jito {fmtUsd(engine.stats.jitoUsd)} · drag{" "}

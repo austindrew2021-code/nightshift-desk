@@ -20,6 +20,7 @@ const ICT = [
   { t: "Bias first", d: "TTrades: 5h slope first. No long into a sell day, no short into a buy day." },
   { t: "Power of 3", d: "Asia accumulates, London puts the daily wick, NY is the body. Drawn as the Asia box on the 15m chart." },
   { t: "Asia", d: "20:00–02:00 NY continuation WITH HTF (FVG/OB 1.5R) and NDOG at midnight. Never fade Asia high/low — London is the raid." },
+  { t: "15x / bank", d: "ICT sizes 15x on 30% of tradable, $ risk capped at 2% so a wick cannot wipe the $100. Each +$200 profit banks 50% ($100) in the vault; the rest compounds." },
   { t: "Judas", d: "NY 7–9 raid of overnight high/low, then CISD reverse. The fake open, not the true NY move." },
   { t: "Scalps", d: "Silver Bullet 10–11 NY on the 9am hour, PM 1:30–4 NY, plus the same models on 5m. 1.5R, short hold. Tap SCALP." },
   { t: "Swings / weekly", d: "Native 1H OB/FVG 3R, plus prior-week high/low raid. Tap SWING." },

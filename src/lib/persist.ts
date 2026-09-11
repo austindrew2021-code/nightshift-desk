@@ -75,6 +75,7 @@ export function loadEngine(): EngineState | null {
       cashUsd: finite(e.cashUsd, base.startUsd),
       equityUsd: finite(e.equityUsd, base.startUsd),
       peakUsd: finite(e.peakUsd, base.startUsd),
+      bankedUsd: finite((e as EngineState).bankedUsd),
       solUsd: finite(e.solUsd, 100),
       liveQueue: [],
       heatmap: Array.isArray(e.heatmap) && e.heatmap.length === 192 ? e.heatmap : base.heatmap,

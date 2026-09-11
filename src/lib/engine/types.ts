@@ -247,5 +247,12 @@ export const TRAIL_PCT = 0.35;
 export const MAX_HOLD_MS = 3_600_000;
 export const MIN_SCORE = 0.65;
 
+/** ICT paper: 15x on 30% of tradable, $ risk clipped at 2%. Bank 50% of each +$200. */
+export const ICT_LEVERAGE = 15;
+export const ICT_MARGIN_PCT = 0.3;
+export const ICT_MAX_RISK_PCT = 0.02;
+export const BANK_EVERY_USD = 200;
+export const BANK_RATE = 0.5;
+
 /** @deprecated use DEFAULT_START_USD — kept so older imports keep compiling */
 export const START_USD = DEFAULT_START_USD;
