@@ -176,6 +176,14 @@ export const useDesk = create<DeskStore>((set, get) => ({
       },
     })),
   dismissInstall: () => set({ installedHint: false }),
-  restoreSession: (engine) => set({ engine, grokNote: null }),
+  restoreSession: (engine) => {
+    if (engine.mode === "ict") {
+      const closedPnl = (engine.closed ?? [])
+        .filter((t) => t.origin === "ict")
+        .reduce((acc, t) => acc + (Number.isFinite(t.pnlUsd) ? t.pnlUsd : 0), 0);
+      engine = { ...engine, cashUsd: engine.startUsd + closedPnl };
+    }
+    set({ engine, grokNote: null });
+  },
   persistNow: () => saveEngine(get().engine),
 }));

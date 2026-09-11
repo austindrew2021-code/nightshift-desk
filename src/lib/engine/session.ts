@@ -259,7 +259,8 @@ function closePos(
   } else {
     const dir = p.side === "short" ? -1 : 1;
     pnlUsd = ((exitUsd - p.entryUsd) / Math.max(1e-9, finite(p.entryUsd, 1))) * finite(p.sizeUsd) * dir;
-    s.cashUsd = finite(s.cashUsd) + finite(p.sizeUsd) + finite(pnlUsd);
+    if (p.origin === "ict") s.cashUsd = finite(s.cashUsd) + finite(pnlUsd);
+    else s.cashUsd = finite(s.cashUsd) + finite(p.sizeUsd) + finite(pnlUsd);
   }
   const pnlSol = finite(pnlUsd) / Math.max(1e-6, s.solUsd);
   const rMultiple = finite(pnlUsd) / Math.max(1e-6, finite(p.sizeUsd) * p.stopPct);
@@ -757,17 +758,19 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     for (const t of sim) {
       const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
       const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
-      const today = nyParts(Date.now()).day === nyParts(t.openedAt).day;
-      if (t.openedAt < liveFrom && !(stillOpen && today)) continue;
+      if (t.openedAt < liveFrom) continue;
       const key = `${t.symbol}-${t.setup}-${t.openedAt}`;
       if (s.ictSeen.includes(key)) continue;
       s.ictSeen = [...s.ictSeen, key];
       if (stillOpen) {
-        if (s.open.some((p) => p.id === t.id) || s.open.length >= MAX_OPEN) continue;
+        if (
+          s.open.some((p) => p.id === t.id || (p.origin === "ict" && p.symbol === t.symbol)) ||
+          s.open.length >= MAX_OPEN
+        )
+          continue;
         const stopDist = Math.abs(t.entryUsd - t.stop);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
         const sizeUsd = risk / Math.max(1e-6, stopPct);
-        s.cashUsd -= sizeUsd;
         const mark = b.last || t.entryUsd;
         const dir = t.side === "short" ? -1 : 1;
         const pnlUsd = ((mark - t.entryUsd) / Math.max(1e-9, t.entryUsd)) * sizeUsd * dir;
@@ -935,6 +938,25 @@ export function applyMarket(s: EngineState, m: MarketSnapshot) {
   if (s.mode === "live" && s.running) scanLiveBatch(s, m);
 }
 
+function repairIctCash(s: EngineState) {
+  const closedPnl = s.closed
+    .filter((t) => t.origin === "ict")
+    .reduce((acc, t) => acc + finite(t.pnlUsd), 0);
+  const next = s.startUsd + closedPnl;
+  if (Math.abs(finite(s.cashUsd) - next) < 0.5 && finite(s.cashUsd) >= 0) return;
+  const was = finite(s.cashUsd);
+  s.cashUsd = next;
+  if (was < 0) {
+    pushTape(s, {
+      t: s.simT || Date.now(),
+      kind: "note",
+      symbol: "ICT",
+      text: `ICT cash repaired · was ${was.toFixed(0)} · now $${next.toFixed(0)} · 1% risk, not full notional · open swings kept`,
+      tone: "warn",
+    });
+  }
+}
+
 export function tick(s: EngineState, market: MarketSnapshot | null): EngineState {
   if (!s.running) return s;
   s.tickN += 1;
@@ -955,8 +977,10 @@ export function tick(s: EngineState, market: MarketSnapshot | null): EngineState
   }
 
   if (s.mode === "zostaff") tickZostaff(s);
-  else if (s.mode === "ict") tickIct(s, market);
-  else tickMeme(s, market);
+  else if (s.mode === "ict") {
+    tickIct(s, market);
+    repairIctCash(s);
+  } else tickMeme(s, market);
 
   const openPnl = s.open.reduce((acc, p) => acc + finite(p.pnlUsd), 0);
   s.cashUsd = finite(s.cashUsd, s.startUsd);
