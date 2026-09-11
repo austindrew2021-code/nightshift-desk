@@ -212,10 +212,12 @@ function hourRange(cs: Candle[], day: string, startH: number, endH: number): { h
   return { h, l };
 }
 
-/** Prior ~5h slope. 1 bull, -1 bear, 0 no trade. */
+/** ~6h slope so 5m bias isn't a 2-hour flip. */
 export function htfBias(cs: Candle[], i: number): 1 | -1 | 0 {
-  if (i < 24) return 0;
-  const a = cs[i - 24]!.c;
+  const dt = i > 0 ? Math.max(60_000, cs[i]!.t - cs[i - 1]!.t) : 15 * 60_000;
+  const look = Math.min(i, Math.max(24, Math.round((6 * 3600_000) / dt)));
+  if (look < 12) return 0;
+  const a = cs[i - look]!.c;
   const b = cs[i]!.c;
   if (a <= 0) return 0;
   const ch = (b - a) / a;
@@ -512,7 +514,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
         if (tapped && holds) {
           const side = bias === 1 ? "long" : "short";
           const entry = (zone.top + zone.bot) / 2;
-          const stop = bias === 1 ? zone.bot - a * 0.15 : zone.top + a * 0.15;
+          const pad = Math.max(a * 0.45, entry * 0.0018);
+          const stop = bias === 1 ? Math.min(zone.bot, entry) - pad : Math.max(zone.top, entry) + pad;
           const nyH = nyHour(c.t);
           add(
             pack(
@@ -1273,12 +1276,17 @@ export function simulateIct(
     let reason: ClosedTrade["reason"] = "time";
     let closedAt = cs[cs.length - 1]?.t ?? s.t;
     let filled = s.setup === "div";
-    const hold =
-      s.setup === "scalp" || s.setup === "silver" || s.setup === "judas" || s.setup === "asia"
-        ? 16
-        : s.setup === "swing" || s.setup === "weekly" || s.setup === "breaker"
-          ? 80
-          : 32;
+    const dt = cs.length > 1 ? Math.max(60_000, cs[1]!.t - cs[0]!.t) : 15 * 60_000;
+    const trail =
+      s.setup === "asia" || s.setup === "scalp" || s.setup === "silver" || s.setup === "judas";
+    const hold = trail
+      ? Math.max(16, Math.round((3 * 3600_000) / dt))
+      : s.setup === "swing" || s.setup === "weekly" || s.setup === "breaker"
+        ? 80
+        : 32;
+    let curStop = s.stop;
+    let curTgt = trail ? twoR(s.side, s.entry, s.stop, s.target, 3) : s.target;
+    const risk = Math.abs(s.entry - s.stop) || 1;
     for (let i = s.i + 1; i < cs.length; i++) {
       const c = cs[i]!;
       if (!filled) {
@@ -1286,28 +1294,43 @@ export function simulateIct(
         else if (i > s.i + hold) break;
         else continue;
       }
+      if (trail) {
+        const mfe = s.side === "long" ? c.h - s.entry : s.entry - c.l;
+        if (mfe >= risk) {
+          curStop = s.side === "long" ? Math.max(curStop, s.entry) : Math.min(curStop, s.entry);
+        }
+        if (mfe >= risk * 1.2 && i >= 2) {
+          if (s.side === "long") {
+            const sl = Math.min(cs[i]!.l, cs[i - 1]!.l, cs[i - 2]!.l);
+            curStop = Math.max(curStop, sl);
+          } else {
+            const sh = Math.max(cs[i]!.h, cs[i - 1]!.h, cs[i - 2]!.h);
+            curStop = Math.min(curStop, sh);
+          }
+        }
+      }
       if (s.side === "long") {
-        if (c.l <= s.stop) {
-          exit = s.stop;
-          reason = "stop";
+        if (c.l <= curStop) {
+          exit = curStop;
+          reason = curStop >= s.entry ? "target" : "stop";
           closedAt = c.t;
           break;
         }
-        if (c.h >= s.target) {
-          exit = s.target;
+        if (c.h >= curTgt) {
+          exit = curTgt;
           reason = "target";
           closedAt = c.t;
           break;
         }
       } else {
-        if (c.h >= s.stop) {
-          exit = s.stop;
-          reason = "stop";
+        if (c.h >= curStop) {
+          exit = curStop;
+          reason = curStop <= s.entry ? "target" : "stop";
           closedAt = c.t;
           break;
         }
-        if (c.l <= s.target) {
-          exit = s.target;
+        if (c.l <= curTgt) {
+          exit = curTgt;
           reason = "target";
           closedAt = c.t;
           break;
@@ -1372,7 +1395,7 @@ export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
     silver: "TTrades AM Silver Bullet. Sweep the 9am hour, CISD, FVG. Scalp 1.5–2R.",
     amd: "Asia range, London wick, NY distribution.",
     judas: "NY 7–9 raid of overnight high/low, then CISD reverse. The fake open, not the true NY move.",
-    asia: "20:00–02:00 NY continuation in HTF. NDOG fade at midnight. Never fade the Asia range — London does that.",
+    asia: "20:00–02:00 NY continuation in HTF. Trail BE at 1R, runner 3R. Never fade the Asia range.",
     scalp: "PM session high/low raid + CISD. 1.5R, 4h time stop.",
     sweep: "Equal highs/lows then CISD. Sweep alone is not a trade.",
     breaker: "Order block closed through, then retested as the other side.",

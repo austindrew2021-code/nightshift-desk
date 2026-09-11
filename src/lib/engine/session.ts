@@ -662,24 +662,46 @@ function tickIct(s: EngineState, market: MarketSnapshot | null) {
 
 function markIct(s: EngineState, market: MarketSnapshot | null) {
   const books = market?.books ?? [];
+  const trailSet = new Set(["asia", "scalp", "silver", "judas"]);
   for (const p of s.open) {
     if (p.origin !== "ict") continue;
     const b = books.find((x) => x.symbol === p.symbol || x.id === p.symbol);
     const last = b?.last || b?.candles15[b.candles15.length - 1]?.c;
     if (!last) continue;
-    const c = b?.candles15[b.candles15.length - 1];
+    const series = (b?.candles5 && b.candles5.length > 8 ? b.candles5 : b?.candles15) ?? [];
+    const c = series[series.length - 1];
     const hi = c ? Math.max(c.h, last) : last;
     const lo = c ? Math.min(c.l, last) : last;
-    const stopPx = p.side === "long" ? p.entryUsd * (1 - p.stopPct) : p.entryUsd * (1 + p.stopPct);
-    const tgtPx = p.side === "long" ? p.entryUsd * (1 + p.stopPct * p.targetR) : p.entryUsd * (1 - p.stopPct * p.targetR);
+    const risk = Math.max(1e-9, p.entryUsd * p.stopPct);
+    let stopPx = p.stopUsd ?? (p.side === "long" ? p.entryUsd - risk : p.entryUsd + risk);
+    let tgtPx =
+      p.targetUsd ??
+      (p.side === "long" ? p.entryUsd + risk * p.targetR : p.entryUsd - risk * p.targetR);
+    if (trailSet.has(p.setup)) {
+      const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
+      if (mfe >= risk) {
+        stopPx = p.side === "long" ? Math.max(stopPx, p.entryUsd) : Math.min(stopPx, p.entryUsd);
+      }
+      if (mfe >= risk * 1.2 && series.length >= 3) {
+        const a = series[series.length - 1]!;
+        const d = series[series.length - 2]!;
+        const e = series[series.length - 3]!;
+        if (p.side === "long") stopPx = Math.max(stopPx, Math.min(a.l, d.l, e.l));
+        else stopPx = Math.min(stopPx, Math.max(a.h, d.h, e.h));
+      }
+      tgtPx = p.side === "long" ? p.entryUsd + risk * 3 : p.entryUsd - risk * 3;
+      p.stopUsd = stopPx;
+      p.targetUsd = tgtPx;
+      p.targetR = 3;
+    }
     if (p.side === "long" && lo <= stopPx) {
       s.open = s.open.filter((x) => x.id !== p.id);
-      closePos(s, p, stopPx, "stop");
+      closePos(s, p, stopPx, stopPx >= p.entryUsd ? "target" : "stop");
       continue;
     }
     if (p.side === "short" && hi >= stopPx) {
       s.open = s.open.filter((x) => x.id !== p.id);
-      closePos(s, p, stopPx, "stop");
+      closePos(s, p, stopPx, stopPx <= p.entryUsd ? "target" : "stop");
       continue;
     }
     if (p.side === "long" && hi >= tgtPx) {
@@ -692,7 +714,7 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
       closePos(s, p, tgtPx, "target");
       continue;
     }
-    s.open = s.open.map((x) => (x.id === p.id ? revalue(s, x, last) : x));
+    s.open = s.open.map((x) => (x.id === p.id ? { ...revalue(s, x, last), stopUsd: stopPx, targetUsd: tgtPx } : x));
   }
   s.stats.openCount = s.open.length;
 }
@@ -768,12 +790,18 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           s.open.length >= MAX_OPEN
         )
           continue;
+        const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas";
         const stopDist = Math.abs(t.entryUsd - t.stop);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
         const sizeUsd = risk / Math.max(1e-6, stopPct);
         const mark = b.last || t.entryUsd;
         const dir = t.side === "short" ? -1 : 1;
         const pnlUsd = ((mark - t.entryUsd) / Math.max(1e-9, t.entryUsd)) * sizeUsd * dir;
+        const targetUsd = trail
+          ? t.side === "long"
+            ? t.entryUsd + stopDist * 3
+            : t.entryUsd - stopDist * 3
+          : t.target;
         s.open = [
           ...s.open,
           {
@@ -788,16 +816,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             sizeSol: sizeUsd / Math.max(1e-6, s.solUsd),
             sizeUsd,
             stopPct,
-            targetR: Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
+            targetR: trail ? 3 : Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
             markUsd: mark,
             pnlSol: pnlUsd / Math.max(1e-6, s.solUsd),
             pnlUsd,
             peakUsd: mark,
             agent: "timing",
-            note: t.note,
+            note: trail ? `${t.note} · trail BE@1R → 3R` : t.note,
             origin: "ict",
             stopUsd: t.stop,
-            targetUsd: t.target,
+            targetUsd,
           },
         ];
         s.stats.taken += 1;
