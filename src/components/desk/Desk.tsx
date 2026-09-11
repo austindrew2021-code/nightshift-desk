@@ -34,6 +34,7 @@ export function Desk() {
   const setIctStyle = useDesk((s) => s.setIctStyle);
   const setGrok = useDesk((s) => s.setGrok);
   const bumpGrok = useDesk((s) => s.bumpGrokCalls);
+  const [chartPair, setChartPair] = useState("SOL");
   const [chartFs, setChartFs] = useState(false);
   const chartOrders = useMemo(
     () => deskOrders(engine.open, engine.closed),
@@ -117,12 +118,16 @@ export function Desk() {
       {engine.mode === "ict" && (
         <ChipRow className="border-b border-line">
           {[{ id: "ALL", symbol: "ALL" }, ...ICT_ASSETS].map((a) => {
-            const on = engine.ictFilter === a.id;
+            const view = a.id === "ALL" ? "SOL" : a.id;
+            const on = a.id === "ALL" ? engine.ictFilter === "ALL" && chartPair === "SOL" : chartPair === a.id;
             return (
               <button
                 key={a.id}
                 type="button"
-                onClick={() => setIctFilter(a.id)}
+                onClick={() => {
+                  setChartPair(view);
+                  if (a.id === "ALL") setIctFilter("ALL");
+                }}
                 className={cn(
                   "h-9 shrink-0 rounded-md px-2.5 font-mono text-[11px] tracking-[0.12em] uppercase",
                   on ? "bg-phosphor text-phosphor-ink" : "text-muted hover:bg-surface-2 hover:text-fg",
@@ -166,7 +171,7 @@ export function Desk() {
         <section className="min-w-0 bg-surface md:col-span-12">
           <LiveChart
             books={market?.books ?? []}
-            filter={engine.mode === "ict" ? engine.ictFilter : "SOL"}
+            filter={engine.mode === "ict" ? chartPair : "SOL"}
             fallback={market?.candles15}
             orders={chartOrders}
             onToggleFs={() => {
@@ -292,7 +297,7 @@ export function Desk() {
         <div className="fixed inset-0 z-[90] flex h-[100dvh] flex-col bg-bg pt-[env(safe-area-inset-top)]">
           <LiveChart
             books={market?.books ?? []}
-            filter={engine.mode === "ict" ? engine.ictFilter : "SOL"}
+            filter={engine.mode === "ict" ? chartPair : "SOL"}
             fallback={market?.candles15}
             orders={chartOrders}
             fullscreen

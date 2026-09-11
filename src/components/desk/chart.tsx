@@ -181,7 +181,11 @@ export function LiveChart({
   const visStart = follow ? Math.max(0, nAll - visN) : clamp(start, 0, Math.max(0, nAll - visN));
   const view = nAll ? candles.slice(visStart, visStart + visN) : [];
   const signals = useMemo(() => (candles.length >= 48 ? scanIct(candles) : []), [candles]);
-  const zones = useMemo(() => chartLayers(view.length ? view : candles, signals), [view, candles, signals]);
+  const zones = useMemo(() => {
+    const liveIds = new Set(orders.filter((o) => o.live && !o.pending).map((o) => `${o.side}-${o.setup}`));
+    const draw = signals.filter((s) => s.i >= candles.length - 12 || liveIds.has(`${s.side}-${s.setup}`));
+    return chartLayers(view.length ? view : candles, draw);
+  }, [view, candles, signals, orders]);
   const stale = book?.source === "fallback" || (!book && (fallback?.length ?? 0) > 0);
   const lastPx = liveTape?.last || book?.last || view[view.length - 1]?.c || 0;
   const mine = useMemo(() => {
@@ -190,8 +194,13 @@ export function LiveChart({
     const lastC = view[view.length - 1];
     if (lastC) {
       for (const s of signals) {
-        if (s.i < candles.length - 16) continue;
-        if (here.some((o) => o.live && o.side === s.side && Math.abs(o.entry - s.entry) / s.entry < 0.004)) continue;
+        if (s.i < candles.length - 12) continue;
+        if (here.some((o) => o.live && !o.pending && o.side === s.side && Math.abs(o.entry - s.entry) / s.entry < 0.004)) continue;
+        const thru =
+          s.side === "short"
+            ? lastC.h >= s.stop || lastC.l <= s.target
+            : lastC.l <= s.stop || lastC.h >= s.target;
+        if (thru) continue;
         const waiting = s.side === "long" ? lastC.c > s.entry : lastC.c < s.entry;
         if (!waiting) continue;
         pending.push({

@@ -89,18 +89,10 @@ export const useDesk = create<DeskStore>((set, get) => ({
       return { market, engine: { ...engine } };
     }),
   setIctFilter: (id) => {
+    const engine = { ...get().engine, ictFilter: id };
     const market = get().market;
-    const sol = market?.solUsd ?? get().engine.solUsd;
-    const start = get().engine.startUsd;
-    const launches = market?.launches ?? [];
-    const engine = resetEngine("ict", sol, start, launches, id);
-    engine.mode = "ict";
-    engine.ictStyle = get().engine.ictStyle;
-    if (market) {
-      if (market.books?.length) ingestIct(engine, market);
-      applyMarket(engine, market);
-    }
-    set({ engine, grokNote: null });
+    if (market && engine.mode === "ict") ingestIct(engine, market);
+    set({ engine });
     saveEngine(engine);
   },
   setIctStyle: (id) => {

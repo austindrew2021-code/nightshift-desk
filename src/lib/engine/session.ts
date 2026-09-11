@@ -716,7 +716,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             source: "okx",
           },
         ];
-  const filtered = s.ictFilter === "ALL" ? books : books.filter((b) => b.id === s.ictFilter);
+  const filtered = books;
   const btc = books.find((b) => b.id === "BTC");
   const eth = books.find((b) => b.id === "ETH");
   const risk = Math.max(1, s.startUsd * 0.01);
