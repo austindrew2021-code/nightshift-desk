@@ -494,6 +494,71 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
       }
     }
 
+    // Asia 20:00–02:00 NY: HTF continuation only. Do not fade the Asia range (that's London).
+    if (isAsia(c.t) && bias !== 0) {
+      const aFvg = [...fvgs].reverse().find((f) => f.i < i && f.i >= i - 18 && f.dir === bias);
+      const aOb = [...obs].reverse().find((o) => o.i < i && o.i >= i - 18 && o.dir === bias);
+      const zone =
+        aOb && aFvg && overlap(aOb.top, aOb.bot, aFvg.top, aFvg.bot)
+          ? { top: Math.min(aOb.top, aFvg.top), bot: Math.max(aOb.bot, aFvg.bot), tag: "Unicorn" }
+          : aFvg
+            ? { top: aFvg.top, bot: aFvg.bot, tag: "FVG" }
+            : aOb
+              ? { top: aOb.top, bot: aOb.bot, tag: "OB" }
+              : null;
+      if (zone) {
+        const tapped = c.l <= zone.top && c.h >= zone.bot;
+        const holds = bias === 1 ? c.c > zone.bot : c.c < zone.top;
+        if (tapped && holds) {
+          const side = bias === 1 ? "long" : "short";
+          const entry = (zone.top + zone.bot) / 2;
+          const stop = bias === 1 ? zone.bot - a * 0.15 : zone.top + a * 0.15;
+          const nyH = nyHour(c.t);
+          add(
+            pack(
+              i,
+              c.t,
+              side,
+              "asia",
+              entry,
+              stop,
+              twoR(side, entry, stop, undefined, 1.5),
+              `Asia ${nyH < 2 ? "midnight" : "KZ"} · HTF ${side} ${zone.tag} · 1.5R · not a range fade`,
+            ),
+          );
+        }
+      }
+      if (inWindow(c.t, 0, 1.5) && i > 4) {
+        const prev = cs[i - 1]!;
+        const gap = c.o - prev.c;
+        const gapPct = Math.abs(gap) / Math.max(1e-9, prev.c);
+        if (gapPct > 0.0006) {
+          const fadeShort = gap > 0 && bias !== 1;
+          const fadeLong = gap < 0 && bias !== -1;
+          const side: "long" | "short" | null = fadeShort ? "short" : fadeLong ? "long" : null;
+          if (side) {
+            const conf = cisd(cs, i, side);
+            if (conf.ok && conf.fvg) {
+              const entry = (conf.fvg.bot + conf.fvg.top) / 2;
+              const stop = side === "short" ? Math.max(c.h, c.o) + a * 0.12 : Math.min(c.l, c.o) - a * 0.12;
+              add(
+                pack(
+                  conf.i,
+                  cs[conf.i]!.t,
+                  side,
+                  "asia",
+                  entry,
+                  stop,
+                  twoR(side, entry, stop, prev.c, 1.5),
+                  `NDOG · fade ${gap > 0 ? "up" : "down"} gap toward prior close · CISD`,
+                ),
+              );
+            }
+          }
+        }
+      }
+    }
+
     if (!inKill(c.t) || bias === 0) continue;
 
     // Unicorn / advanced OB: last opposite candle overlapping a displacement FVG.
@@ -952,7 +1017,7 @@ export function scanWeekly(cs: Candle[]): IctSignal[] {
 
 export function styleAllows(style: string, setup: SetupKind): boolean {
   if (style === "sweep") return setup === "sweep" || setup === "amd" || setup === "judas";
-  if (style === "scalp") return setup === "scalp" || setup === "silver" || setup === "judas";
+  if (style === "scalp") return setup === "scalp" || setup === "silver" || setup === "judas" || setup === "asia";
   if (style === "swing") return setup === "swing" || setup === "weekly" || setup === "breaker" || setup === "ifvg";
   return true;
 }
@@ -961,17 +1026,18 @@ const SETUP_RANK: Record<SetupKind, number> = {
   silver: 0,
   amd: 1,
   judas: 2,
-  scalp: 3,
-  swing: 4,
-  weekly: 5,
-  sweep: 6,
-  breaker: 7,
-  ifvg: 8,
-  ob: 9,
-  fvg: 10,
-  div: 11,
-  curve: 12,
-  published: 13,
+  asia: 3,
+  scalp: 4,
+  swing: 5,
+  weekly: 6,
+  sweep: 7,
+  breaker: 8,
+  ifvg: 9,
+  ob: 10,
+  fvg: 11,
+  div: 12,
+  curve: 13,
+  published: 14,
 };
 
 /** Keep the session models; don't let early OBs spend the day's budget. */
@@ -990,7 +1056,7 @@ function pickDay(raw: IctSignal[]): IctSignal[] {
       if (uniq.some((x) => Math.abs(x.i - s.i) < 4 && x.side === s.side)) continue;
       uniq.push(s);
     }
-    const pinned = ["silver", "amd", "judas", "scalp", "swing", "weekly"] as const;
+    const pinned = ["silver", "amd", "judas", "asia", "scalp", "swing", "weekly"] as const;
     const kept: IctSignal[] = [];
     for (const kind of pinned) {
       const hit = uniq.find((s) => s.setup === kind);
@@ -1208,7 +1274,7 @@ export function simulateIct(
     let closedAt = cs[cs.length - 1]?.t ?? s.t;
     let filled = s.setup === "div";
     const hold =
-      s.setup === "scalp" || s.setup === "silver" || s.setup === "judas"
+      s.setup === "scalp" || s.setup === "silver" || s.setup === "judas" || s.setup === "asia"
         ? 16
         : s.setup === "swing" || s.setup === "weekly" || s.setup === "breaker"
           ? 80
@@ -1284,11 +1350,12 @@ export function simulateIct(
 }
 
 export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
-  const kinds: SetupKind[] = ["silver", "amd", "judas", "scalp", "sweep", "breaker", "ifvg", "fvg", "ob", "div", "swing", "weekly"];
+  const kinds: SetupKind[] = ["silver", "amd", "judas", "asia", "scalp", "sweep", "breaker", "ifvg", "fvg", "ob", "div", "swing", "weekly"];
   const labels: Record<SetupKind, string> = {
     silver: "Silver Bullet 10–11 NY (scalp)",
     amd: "Power of 3 (AMD)",
     judas: "Judas 7–9 NY open fake",
+    asia: "Asia KZ / NDOG (HTF only)",
     scalp: "NY PM scalp 1:30–4",
     sweep: "Sweep + CISD (eq H/L)",
     breaker: "Breaker (failed OB flip)",
@@ -1304,7 +1371,8 @@ export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
   const notes: Record<SetupKind, string> = {
     silver: "TTrades AM Silver Bullet. Sweep the 9am hour, CISD, FVG. Scalp 1.5–2R.",
     amd: "Asia range, London wick, NY distribution.",
-    judas: "NY 7–9 raid of overnight high/low, then CISD reverse. Not the true move.",
+    judas: "NY 7–9 raid of overnight high/low, then CISD reverse. The fake open, not the true NY move.",
+    asia: "20:00–02:00 NY continuation in HTF. NDOG fade at midnight. Never fade the Asia range — London does that.",
     scalp: "PM session high/low raid + CISD. 1.5R, 4h time stop.",
     sweep: "Equal highs/lows then CISD. Sweep alone is not a trade.",
     breaker: "Order block closed through, then retested as the other side.",

@@ -735,7 +735,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     if ((s.ictStyle === "all" || s.ictStyle === "scalp" || s.ictStyle === "sweep") && b.candles5 && b.candles5.length >= 48) {
       for (const sig of scanIct(b.candles5, { skipSwing: true })) {
         if (!styleAllows(s.ictStyle, sig.setup)) continue;
-        if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "sweep" || sig.setup === "judas" || sig.setup === "ifvg") {
+        if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "sweep" || sig.setup === "judas" || sig.setup === "ifvg" || sig.setup === "asia") {
           s5.push({ ...sig, note: `${sig.note} · 5m` });
         }
       }

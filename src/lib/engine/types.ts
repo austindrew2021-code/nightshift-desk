@@ -19,6 +19,7 @@ export type SetupKind =
   | "ifvg"
   | "judas"
   | "weekly"
+  | "asia"
   | "published";
 
 export type TapeKind =
