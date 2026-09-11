@@ -30,6 +30,18 @@ function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
+function nextIctHint(now = Date.now()) {
+  const h = nyHour(now);
+  if (h >= 2 && h < 5) return "London AMD 2–5 NY · live";
+  if (h >= 7 && h < 10) return "Judas 7–10 NY · live";
+  if (h >= 10 && h < 11) return "Silver Bullet 10–11 NY · live";
+  if (h >= 13.5 && h < 16) return "PM scalp 1:30–4 NY · live";
+  if (h < 2) return "next London 2–5 NY";
+  if (h < 7) return "next Judas 7–10 NY";
+  if (h < 13.5) return "next PM 1:30–4 NY";
+  return "next London 2–5 NY (3–6 AM ADT)";
+}
+
 const TOGGLES: { id: ChartZone["kind"] | "orders"; label: string }[] = [
   { id: "fvg", label: "FVG" },
   { id: "ob", label: "OB" },
@@ -730,7 +742,7 @@ export function LiveChart({
                 return `${kind}  EN ${px(o.entry)}  SL ${o.stop ? px(o.stop) : "—"}  TP ${o.target ? px(o.target) : "—"}`;
               })
               .join(" · ")
-          : `no paper fill · boxes are levels · next London 2–5 NY (3–6 AM ADT)`}
+          : `no paper fill · boxes are levels · ${nextIctHint()}`}
       </p>
     </div>
   );

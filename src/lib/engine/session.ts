@@ -790,7 +790,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const eth = books.find((b) => b.id === "ETH");
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
-  const liveFrom = now - 25 * 60_000;
+  const liveFromOpen = now - 4 * 3600_000;
+  const liveFromClosed = now - 45 * 60_000;
   if (finite(s.dayLoss) >= s.startUsd * (s.mode === "ict" ? 0.4 : DAILY_LOSS_PCT)) {
     if (s.tickN % 30 === 1) {
       pushTape(s, {
@@ -805,8 +806,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   }
   let added = 0;
   const fresh: ClosedTrade[] = [];
-  for (const b of filtered) {
-    if (b.candles15.length < 40) continue;
+  const liveBooks = filtered.filter((b) => b.candles15.length >= 40);
+  s.stats.scanned = Math.max(s.stats.scanned, liveBooks.length);
+  for (const b of liveBooks) {
     const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
     const corr = b.id === "BTC" ? eth : btc;
     const extra =
@@ -840,7 +842,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     for (const t of sim) {
       const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
       const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
-      if (t.openedAt < liveFrom) continue;
+      if (stillOpen) {
+        if (t.openedAt < liveFromOpen) continue;
+      } else if (t.openedAt < liveFromClosed || t.closedAt < liveFromClosed) {
+        continue;
+      }
       const key = `${t.symbol}-${t.setup}-${t.openedAt}`;
       if (s.ictSeen.includes(key)) continue;
       s.ictSeen = [...s.ictSeen, key];
@@ -913,7 +919,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         added += 1;
         continue;
       }
-      if (t.closedAt < now - 25 * 60_000) continue;
+      if (t.closedAt < liveFromClosed) continue;
       if (s.open.some((p) => p.origin === "ict" && p.symbol === t.symbol)) continue;
       fresh.push({
         ...t,

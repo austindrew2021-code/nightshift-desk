@@ -35,7 +35,7 @@ export function isAsia(t: number): boolean {
   return h >= 20 || h < 2;
 }
 export function isJudas(t: number): boolean {
-  return inWindow(t, 7, 9);
+  return inWindow(t, 7, 10);
 }
 export function isNyPm(t: number): boolean {
   return inWindow(t, 13.5, 16);
@@ -386,8 +386,25 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
       if (nine) {
         const sweptLow = c.l < nine.l && c.c > nine.l;
         const sweptHigh = c.h > nine.h && c.c < nine.h;
-        const side: "long" | "short" | null = sweptLow ? "long" : sweptHigh ? "short" : null;
-        if (side && !(bias === 1 && side === "short") && !(bias === -1 && side === "long")) {
+        let side: "long" | "short" | null = sweptLow ? "long" : sweptHigh ? "short" : null;
+        let why = side
+          ? `swept 9am ${side === "long" ? "low" : "high"}`
+          : "";
+        // TTrades: if 9am itself was the raid of Asia and 10–11 CISDs away from
+        // that extreme (no second sweep), that is still the Silver Bullet.
+        if (!side) {
+          const asiaR = asia.get(day);
+          const nineRaidedHigh = Boolean(asiaR?.asiaReady && nine.h > asiaR.asiaH);
+          const nineRaidedLow = Boolean(asiaR?.asiaReady && nine.l < asiaR.asiaL);
+          if (nineRaidedHigh && c.c < nine.h && c.c < c.o) {
+            side = "short";
+            why = "9am Asia-high fail";
+          } else if (nineRaidedLow && c.c > nine.l && c.c > c.o) {
+            side = "long";
+            why = "9am Asia-low fail";
+          }
+        }
+        if (side) {
           const conf = cisd(cs, i, side);
           const want = side === "long" ? 1 : -1;
           const fvg =
@@ -407,7 +424,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
                 entry,
                 stop,
                 twoR(side, entry, stop, side === "long" ? nine.h : nine.l),
-                `SB 10–11 NY · swept 9am ${side === "long" ? "low" : "high"} · CISD · FVG`,
+                `SB 10–11 NY · ${why} · CISD · FVG`,
               ),
             );
           }
@@ -464,7 +481,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
         const sweptLow = c.l < ovnL && c.c > ovnL;
         const sweptHigh = c.h > ovnH && c.c < ovnH;
         const side: "long" | "short" | null =
-          sweptLow && bias !== -1 ? "long" : sweptHigh && bias !== 1 ? "short" : null;
+          sweptLow ? "long" : sweptHigh ? "short" : null;
         if (side) {
           const conf = cisd(cs, i, side);
           if (conf.ok && conf.fvg) {
@@ -481,7 +498,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
                 entry,
                 stop,
                 twoR(side, entry, stop, side === "long" ? ovnH : ovnL),
-                `Judas 7–9 NY · fake ${side === "long" ? "low" : "high"} · CISD · FVG`,
+                `Judas 7–10 NY · fake ${side === "long" ? "low" : "high"} · CISD · FVG`,
               ),
             );
           }
@@ -1253,9 +1270,9 @@ export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
     published: "Published outlier",
   };
   const notes: Record<SetupKind, string> = {
-    silver: "TTrades AM Silver Bullet. Sweep the 9am hour, CISD, FVG. Scalp 1.5–2R.",
+    silver: "TTrades AM Silver Bullet. Sweep the 9am hour OR CISD off a 9am Asia raid. Scalp 1.5–2R.",
     amd: "Asia range, London wick, NY distribution.",
-    judas: "NY 7–9 raid of overnight high/low, then CISD reverse. The fake open, not the true NY move.",
+    judas: "NY 7–10 raid of overnight high/low (9am true open included), then CISD reverse. The fake open, not the true NY move.",
     asia: "20:00–02:00 NY continuation in HTF. Trail BE at 1R, runner 3R. Never fade the Asia range.",
     scalp: "PM session high/low raid + CISD. 1.5R, 4h time stop.",
     sweep: "Equal highs/lows then CISD. Sweep alone is not a trade.",
