@@ -564,10 +564,33 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
 
     if (!inKill(c.t) || bias === 0) continue;
 
+    const sideBias: "long" | "short" = bias === 1 ? "long" : "short";
+    const liq = recentSweep(cs, sw, i, sideBias, 12);
+    const conf = cisd(cs, i, sideBias);
+    const contOk = Boolean(liq && conf.ok);
+
+    if (liq && conf.ok && conf.fvg) {
+      const entry = (conf.fvg.bot + conf.fvg.top) / 2;
+      const stop = sideBias === "long" ? liq.price - a * 0.18 : liq.price + a * 0.18;
+      const opp = lastFractal(sw, i, sideBias === "long" ? "high" : "low");
+      add(
+        pack(
+          conf.i,
+          cs[conf.i]!.t,
+          sideBias,
+          "sweep",
+          entry,
+          stop,
+          twoR(sideBias, entry, stop, opp?.price),
+          `Sweep ${liq.kind === "low" ? "SSL" : "BSL"} · CISD · FVG · tgt ${opp ? "opposing swing" : "2R"}`,
+        ),
+      );
+    }
+
     // Unicorn / advanced OB: last opposite candle overlapping a displacement FVG.
     const recentOb = [...obs].reverse().find((o) => o.i < i && o.i >= i - 18 && o.dir === bias);
     const recentFvg = [...fvgs].reverse().find((f) => f.i < i && f.i >= i - 18 && f.dir === bias);
-    if (recentOb && recentFvg && overlap(recentOb.top, recentOb.bot, recentFvg.top, recentFvg.bot)) {
+    if (contOk && recentOb && recentFvg && overlap(recentOb.top, recentOb.bot, recentFvg.top, recentFvg.bot)) {
       const top = Math.min(recentOb.top, recentFvg.top);
       const bot = Math.max(recentOb.bot, recentFvg.bot);
       const tapped = c.l <= top && c.h >= bot;
@@ -589,7 +612,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
           ),
         );
       }
-    } else if (recentOb) {
+    } else if (contOk && recentOb) {
       const tapped = c.l <= recentOb.top && c.h >= recentOb.bot;
       const holds = recentOb.dir === 1 ? c.c > recentOb.bot : c.c < recentOb.top;
       if (tapped && holds) {
@@ -612,7 +635,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
     }
 
     const br = [...brks].reverse().find((o) => o.i < i && o.i >= i - 36 && o.dir === bias);
-    if (br) {
+    if (contOk && br) {
       const tapped = c.l <= br.top && c.h >= br.bot;
       const holds = bias === 1 ? c.c > br.bot : c.c < br.top;
       if (tapped && holds) {
@@ -635,7 +658,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
     }
 
     const inv = [...ifvgs].reverse().find((f) => f.i < i && f.i >= i - 28 && f.dir === bias);
-    if (inv) {
+    if (contOk && inv) {
       const tapped = c.l <= inv.top && c.h >= inv.bot;
       const holds = bias === 1 ? c.c > inv.bot : c.c < inv.top;
       if (tapped && holds) {
@@ -657,7 +680,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
       }
     }
 
-    if (recentFvg) {
+    if (contOk && recentFvg) {
       const ce = (recentFvg.top + recentFvg.bot) / 2;
       const look = cs.slice(Math.max(0, i - 20), i + 1);
       const hi = Math.max(...look.map((x) => x.h));
@@ -791,7 +814,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
       }
     }
 
-    if (recentFvg) {
+    if (contOk && recentFvg) {
       const impulse = impulseRange(cs, i, bias);
       if (impulse) {
         const rng = impulse.high - impulse.low;
@@ -821,6 +844,25 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
 
   if (!opts?.skipSwing) for (const s of scanSwing(cs)) add(s);
   return pickDay(signals);
+}
+
+function lastFractal(sw: Swing[], i: number, kind: "high" | "low"): Swing | null {
+  const rows = sw.filter((x) => x.kind === kind && x.i < i - 1 && x.i >= i - 48);
+  return rows.at(-1) ?? null;
+}
+
+/** TTrades: take liquidity at the last swing high (BSL) or swing low (SSL), then reverse. */
+function recentSweep(cs: Candle[], sw: Swing[], i: number, side: "long" | "short", look = 12): Swing | null {
+  const kind = side === "long" ? "low" : "high";
+  const fx = lastFractal(sw, i, kind);
+  if (!fx) return null;
+  const from = Math.max(fx.i, i - look);
+  for (let k = i; k >= from; k--) {
+    const c = cs[k]!;
+    if (side === "long" && c.l < fx.price && c.c > fx.price) return fx;
+    if (side === "short" && c.h > fx.price && c.c < fx.price) return fx;
+  }
+  return null;
 }
 
 function equalPool(sw: Swing[], i: number, a: number): { kind: "high" | "low"; px: number } | null {
@@ -905,6 +947,10 @@ function scanSwing(cs: Candle[]): IctSignal[] {
     if (bias === 0) continue;
     if (!inKill(b.t)) continue;
     const a = atr(bars, k);
+    const sw1 = swings(bars, 2, 2);
+    const side0: "long" | "short" = bias === 1 ? "long" : "short";
+    const liq = recentSweep(bars, sw1, k, side0, 8);
+    if (!liq) continue;
     const ob = [...obs].reverse().find((o) => o.i < k && o.i >= k - 12 && o.dir === bias);
     const fvg = [...fvgs].reverse().find((f) => f.i < k && f.i >= k - 12 && f.dir === bias);
     const zone = ob && fvg && overlap(ob.top, ob.bot, fvg.top, fvg.bot)
@@ -929,7 +975,7 @@ function scanSwing(cs: Candle[]): IctSignal[] {
       entry,
       stop,
       twoR(side, entry, stop, undefined, 3),
-      `Swing ${zone.tag} · ${side} · 3R · hold through session`,
+      `Swing ${zone.tag} · swept ${liq.kind === "low" ? "SSL" : "BSL"} · ${side} · 3R · hold through session`,
       0.06,
     );
     if (sig) out.push(sig);
@@ -949,6 +995,10 @@ export function scanSwingNative(cs: Candle[]): IctSignal[] {
     if (bias === 0) continue;
     if (!inKill(b.t)) continue;
     const a = atr(cs, k);
+    const sw1 = swings(cs, 2, 2);
+    const side = bias === 1 ? "long" : "short";
+    const liq = recentSweep(cs, sw1, k, side, 8);
+    if (!liq) continue;
     const ob = [...obs].reverse().find((o) => o.i < k && o.i >= k - 12 && o.dir === bias);
     const fvg = [...fvgs].reverse().find((f) => f.i < k && f.i >= k - 12 && f.dir === bias);
     const zone = ob && fvg && overlap(ob.top, ob.bot, fvg.top, fvg.bot)
@@ -962,7 +1012,6 @@ export function scanSwingNative(cs: Candle[]): IctSignal[] {
     const tapped = b.l <= zone.top && b.h >= zone.bot;
     const holds = bias === 1 ? b.c > zone.bot : b.c < zone.top;
     if (!tapped || !holds) continue;
-    const side = bias === 1 ? "long" : "short";
     const entry = (zone.top + zone.bot) / 2;
     const stop = bias === 1 ? zone.bot - a * 0.2 : zone.top + a * 0.2;
     const sig = pack(
@@ -973,7 +1022,7 @@ export function scanSwingNative(cs: Candle[]): IctSignal[] {
       entry,
       stop,
       twoR(side, entry, stop, undefined, 3),
-      `Swing ${zone.tag} · ${side} · 3R`,
+      `Swing ${zone.tag} · swept ${liq.kind === "low" ? "SSL" : "BSL"} · ${side} · 3R`,
       0.06,
     );
     if (sig) out.push(sig);
