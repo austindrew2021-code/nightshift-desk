@@ -1,0 +1,17 @@
+{
+  "name": "NIGHTSHIFT",
+  "short_name": "NIGHTSHIFT",
+  "id": "/nightshift-desk/",
+  "start_url": "/nightshift-desk/",
+  "scope": "/nightshift-desk/",
+  "display": "standalone",
+  "background_color": "#070b09",
+  "theme_color": "#070b09",
+  "icons": [
+    {
+      "src": "/nightshift-desk/__grok/icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
