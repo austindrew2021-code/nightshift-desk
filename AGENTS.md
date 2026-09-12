@@ -10,6 +10,35 @@ theirs; the rules below name the file to open at each point it matters.
 
 ---
 
+## This repo is NIGHTSHIFT — work it through the bot crew
+
+This is no longer a blank workspace: it is a **deployed paper trading desk**
+(see `README.md`). Review, fix and upgrade work is divided between six bots with
+non-overlapping file ownership, so two can run at once without colliding.
+
+**Start at `GROK-BOTS.md` in the repo root.** Then:
+
+- `bots/_SHARED.md` — the contract every bot obeys. Read it first, always.
+- `bots/BOARD.md` — the live work queue, with verified findings and line
+  numbers. Re-confirm a row before fixing it.
+- `bots/{AUDITOR,TIMING,HUNTER,CHECKER,FLOOR,RIGGER}.md` — one hat each.
+- `bots/DESKBOSS.md` — triage and routing only; writes no product code.
+
+Ownership in one line: **AUDITOR** money math · **TIMING** ICT engine ·
+**HUNTER** live feeds · **CHECKER** claims vs code · **FLOOR** the desk UI ·
+**RIGGER** gates, CI and deploy.
+
+Four rules outrank everything else in this file: **paper only, forever** (never
+add a wallet, key, signer or live order path); **never loosen a risk brake to
+improve a number**; **never let the published Zostaff book read as a base rate**;
+and **gates green before handoff** (`npm run typecheck && npm run lint && npm
+test`).
+
+If you are asked to "review NIGHTSHIFT" with no further steer, wear DESKBOSS and
+return a queue before touching anything.
+
+---
+
 ## Skills (in `.grok/skills/` — consult BEFORE building)
 
 Skills are auto-listed with trigger words; open the matching `SKILL.md` (plus
