@@ -613,3 +613,89 @@ The honest next steps, in order:
    simulator and teaching tool — which is a real thing to be, and it is what the
    README already claims.
 3. Only if expectancy survives step 2 is position sizing worth discussing.
+
+
+---
+
+### 35 · Strategy search across every named family — nothing reaches the goal
+
+Implemented the families that were missing and tested all of them with a
+**three-way split** (train 50% develop / validation 25% select / holdout 25%
+scored once). The split matters: comparing 16 candidates against one test set
+means the winner is chosen *by* that set, so its score is selection material, not
+an estimate of the future.
+
+`src/lib/engine/strategies.ts` adds, all strictly causal (bar `i` sees only
+0..i, unlike `scanIct` — board row 20):
+
+- **volume profile / POC** — nothing previously used the `v` field at all.
+  `profile()` bins trailing volume, finds the POC and the 70% value area.
+  Setups: reversion from outside the value area, rejection off the POC, value-area
+  breakout.
+- **NY open** — real 09:30 cash open, 30-minute opening range, broken or faded in
+  the 10:00-11:30 window. `isNyAm` (07:00-10:00) never isolated this.
+- **NY close** — the 15:00-16:00 hour: day-extreme sweep reversal, and late-day
+  continuation.
+- **divergence, split** — `ict.ts` folds regular and hidden div into one `div`
+  setup, so which half carries the result was unmeasurable. Now separable.
+  (Hidden div was already implemented, `ict.ts:683` — it was never missing.)
+
+182 days, 11 books, costs on. Validation expectancy:
+
+```
+ICT all (shipped)      n=  379  +0.066R   t   0.9
+ICT all hours          n=  430  +0.009R   t   0.1
+POC breakout           n= 1748  -0.171R   t  -6.0
+NY open ORB            n=  517  -0.278R   t  -4.7
+div regular only       n= 2136  -0.365R   t -12.6
+NY open fade           n=  655  -0.374R   t  -6.8
+div hidden only        n= 2597  -0.425R   t -15.3
+POC reversion          n= 4142  -0.420R   t -17.0
+NY close reversal      n=   48  -0.502R   t  -2.6
+POC rejection          n= 6015  -0.649R   t -34.3
+NY close drift         n=  786  -0.854R   t -21.7
+everything combined    n=14290  -0.490R   t -40.1
+```
+
+**Every new family is decisively negative** — t from −5 to −40 on thousands of
+trades. That is not noise; these are reliable losers after costs.
+
+Selected (rule fixed in advance: highest validation t among candidates with ≥60
+validation trades and positive validation expectancy): **ICT all, as shipped.**
+
+```
+HOLDOUT (46 days, scored once)   n=435  win 52%  avgR +0.071R  t 1.0
+
+  risk  2% -> $189  maxDD 55%  1.10x/week
+  risk  6% -> $273  maxDD 88%  1.17x/week
+  risk 12% -> $550  maxDD 94%  1.30x/week
+  risk 25% -> $687  maxDD 92%  1.34x/week
+```
+
+At 25% risk a month returns about **$350**, with a 92% drawdown along the way —
+$100 down to $8 at the worst point, which is ruin in practice whatever the final
+figure says. And t = 1.0 means +0.071R is not distinguishable from zero, so those
+dollars are one lucky path, not an expectation.
+
+**Two honest caveats, both important:**
+
+1. **The new families over-trade.** Unfiltered `scanDiv` fires 9,545 times in 90
+   days across 11 books — roughly ten signals a day per book. At ~0.24R of cost
+   per trade, −0.38R is mostly cost drag on a zero edge. So the finding is "these
+   patterns raw, with no selectivity, lose to fees", not "these patterns can never
+   work". What the existing ICT stack contributes is **selectivity** (`pickDay`,
+   dedup, CISD confirmation, kill zones), not the patterns themselves — it takes
+   379 validation trades where the raw families take thousands.
+2. **This is the strongest evidence yet that row 20 is the whole story.** The
+   causal divergence scanner is −0.365R. The `div` setup inside `scanIct` — 83%
+   of which needs future bars to be detected — was the one positive contributor.
+   Same pattern family: causal loses, non-causal wins. The implementations differ
+   in filtering too, so this is suggestive rather than proof, but it points
+   hard at the apparent ICT edge being the lookahead.
+
+**Do not add a seventeenth candidate.** The search space has been covered at the
+family level and the answer was consistent and strongly negative. The one piece
+of work that can still change the verdict is closing row 20, then re-running
+this exact script. If ICT's expectancy survives causal signal emission, there is
+something to size. If it does not, there is nothing here to compound and the
+honest product is the simulator.

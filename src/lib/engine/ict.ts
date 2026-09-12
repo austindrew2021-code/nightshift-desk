@@ -259,7 +259,7 @@ export function htfBias(cs: Candle[], i: number): 1 | -1 | 0 {
   return 0;
 }
 
-function atr(cs: Candle[], i: number, n = 14): number {
+export function atr(cs: Candle[], i: number, n = 14): number {
   const start = Math.max(1, i - n);
   let s = 0;
   let k = 0;
@@ -309,7 +309,7 @@ function cisd(cs: Candle[], sweepI: number, side: "long" | "short"): { ok: boole
   return { ok: false, i: sweepI };
 }
 
-function rsiWilder(cs: Candle[], n = 14): number[] {
+export function rsiWilder(cs: Candle[], n = 14): number[] {
   const out = Array.from({ length: cs.length }, () => 50);
   if (cs.length <= n) return out;
   let gain = 0;
@@ -772,7 +772,7 @@ function equalPool(sw: Swing[], i: number, a: number): { kind: "high" | "low"; p
   return null;
 }
 
-function sessionHiLo(cs: Candle[], day: string, startH: number, endH: number): { h: number; l: number } | null {
+export function sessionHiLo(cs: Candle[], day: string, startH: number, endH: number): { h: number; l: number } | null {
   return hourRange(cs, day, startH, endH);
 }
 
