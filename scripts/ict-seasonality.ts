@@ -74,7 +74,7 @@ const bonf = 3.0;   // ~p<0.05/77, two-sided
 console.log(`WEEKDAY effect per pair (bp per day). ${nTests} tests -> significance bar |t| > ${bonf}`);
 console.log("pair    " + DOW.map((d) => d.padStart(9)).join(""));
 const pooled: Record<number, number[]> = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
-let flagged: string[] = [];
+const flagged: string[] = [];
 for (const b of books) {
   const rs = dailyReturns(b.cs);
   const cells = DOW.map((_, d) => {
