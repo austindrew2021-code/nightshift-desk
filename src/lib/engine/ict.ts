@@ -1233,6 +1233,13 @@ export const ZERO_ICT_COSTS: IctCosts = { feeRate: 0, slipRate: 0, fundingRate8h
 export interface IctSimOpts {
   /** Apply the breakeven+trail rule to every setup, not just the intraday ones. */
   trailAll?: boolean;
+  /**
+   * Disable the shipped trail entirely. It is on by default for asia, scalp,
+   * silver and judas — which are the setups with negative out-of-sample
+   * expectancy — and once intra-bar order is resolved honestly, trailing rules
+   * measure as a clear negative here. trailNone wins over trailAll.
+   */
+  trailNone?: boolean;
   /** Move the stop to entry once the trade has run 1R in favour. */
   beAt1R?: boolean;
   /** Rescale the target to N*R from entry, overriding the setup's own target. */
@@ -1241,6 +1248,14 @@ export interface IctSimOpts {
   exitOnOpposing?: boolean;
   /** Signal list searched for those reversals; pass the same list you scanned. */
   opposing?: IctSignal[];
+  /**
+   * Finer bars (e.g. 5m under a 15m series) used to sequence events INSIDE each
+   * coarse bar. Without them a bar that touches both the target and the stop is
+   * ambiguous, and any trailing rule resolves it pessimistically — moving the
+   * stop up on the same bar it then stops out on. Supply these and the order is
+   * known instead of assumed.
+   */
+  subBars?: Candle[];
 }
 
 /**
@@ -1265,6 +1280,22 @@ export function simulateIct(
   if (opts.exitOnOpposing) {
     for (const o of opts.opposing ?? []) opposingAt.set(o.i, o.side);
   }
+  const barMs = cs.length > 1 ? Math.max(60_000, cs[1]!.t - cs[0]!.t) : 15 * 60_000;
+  // Bucket each fine bar onto its coarse bar, anchored on cs[0] so it does not
+  // matter whether the series aligns to an epoch multiple.
+  let subIdx: Map<number, Candle[]> | null = null;
+  if (opts.subBars?.length && cs.length) {
+    const anchor = cs[0]!.t;
+    subIdx = new Map();
+    for (const sb of opts.subBars) {
+      if (sb.t < anchor) continue;
+      const bucket = anchor + Math.floor((sb.t - anchor) / barMs) * barMs;
+      const arr = subIdx.get(bucket);
+      if (arr) arr.push(sb);
+      else subIdx.set(bucket, [sb]);
+    }
+    for (const arr of subIdx.values()) arr.sort((a, b) => a.t - b.t);
+  }
   for (const s of signals) {
     let exit = s.entry;
     let reason: ClosedTrade["reason"] = "time";
@@ -1283,12 +1314,12 @@ export function simulateIct(
       entryPx = nextOpen;
       filled = true;
     }
-    const dt = cs.length > 1 ? Math.max(60_000, cs[1]!.t - cs[0]!.t) : 15 * 60_000;
     const trail =
-      opts.trailAll ||
-      s.setup === "asia" || s.setup === "scalp" || s.setup === "silver" || s.setup === "judas";
+      !opts.trailNone &&
+      (opts.trailAll ||
+        s.setup === "asia" || s.setup === "scalp" || s.setup === "silver" || s.setup === "judas");
     const hold = trail
-      ? Math.max(16, Math.round((3 * 3600_000) / dt))
+      ? Math.max(16, Math.round((3 * 3600_000) / barMs))
       : s.setup === "swing" || s.setup === "weekly" || s.setup === "breaker"
         ? 80
         : 32;
@@ -1302,68 +1333,83 @@ export function simulateIct(
     const risk = Math.abs(s.entry - s.stop) || 1;
     for (let i = s.i + 1; i < cs.length; i++) {
       const c = cs[i]!;
-      if (!filled) {
-        if (c.l <= entryPx && c.h >= entryPx) filled = true;
-        else if (i > s.i + hold) break;
-        else continue;
-      }
-      if (opts.beAt1R) {
-        const mfe = s.side === "long" ? c.h - entryPx : entryPx - c.l;
-        if (mfe >= risk) {
-          curStop =
-            s.side === "long" ? Math.max(curStop, entryPx) : Math.min(curStop, entryPx);
+      // One coarse bar, resolved as its fine bars when we have them.
+      const inner = subIdx?.get(c.t);
+      const steps: Candle[] = inner && inner.length ? inner : [c];
+      let closed = false;
+
+      for (const st of steps) {
+        if (!filled) {
+          if (st.l <= entryPx && st.h >= entryPx) filled = true;
+          else continue;
+        }
+        if (opts.beAt1R) {
+          const mfe = s.side === "long" ? st.h - entryPx : entryPx - st.l;
+          if (mfe >= risk) {
+            curStop =
+              s.side === "long" ? Math.max(curStop, entryPx) : Math.min(curStop, entryPx);
+          }
+        }
+        if (trail) {
+          const mfe = s.side === "long" ? st.h - entryPx : entryPx - st.l;
+          if (mfe >= risk) {
+            curStop =
+              s.side === "long" ? Math.max(curStop, entryPx) : Math.min(curStop, entryPx);
+          }
+          if (mfe >= risk * 1.2 && i >= 2) {
+            if (s.side === "long") {
+              curStop = Math.max(curStop, Math.min(cs[i]!.l, cs[i - 1]!.l, cs[i - 2]!.l));
+            } else {
+              curStop = Math.min(curStop, Math.max(cs[i]!.h, cs[i - 1]!.h, cs[i - 2]!.h));
+            }
+          }
+        }
+        if (s.side === "long") {
+          if (st.l <= curStop) {
+            // A stop is a market order: a bar that OPENED below the stop fills
+            // at the open, not at the stop.
+            exit = Math.min(st.o, curStop);
+            reason = curStop >= entryPx ? "target" : "stop";
+            closedAt = st.t;
+            closed = true;
+            break;
+          }
+          if (st.h >= curTgt) {
+            exit = curTgt;
+            reason = "target";
+            closedAt = st.t;
+            closed = true;
+            break;
+          }
+        } else {
+          if (st.h >= curStop) {
+            exit = Math.max(st.o, curStop);
+            reason = curStop <= entryPx ? "target" : "stop";
+            closedAt = st.t;
+            closed = true;
+            break;
+          }
+          if (st.l <= curTgt) {
+            exit = curTgt;
+            reason = "target";
+            closedAt = st.t;
+            closed = true;
+            break;
+          }
         }
       }
+      if (closed) break;
+
+      if (!filled) {
+        if (i > s.i + hold) break;
+        continue;
+      }
+      // Opposing signals are indexed by coarse bar, so this is checked here.
       if (opts.exitOnOpposing) {
         const opp = opposingAt.get(i);
         if (opp && opp !== s.side) {
           exit = c.c;
           reason = "trail";
-          closedAt = c.t;
-          break;
-        }
-      }
-      if (trail) {
-        const mfe = s.side === "long" ? c.h - s.entry : s.entry - c.l;
-        if (mfe >= risk) {
-          curStop = s.side === "long" ? Math.max(curStop, s.entry) : Math.min(curStop, s.entry);
-        }
-        if (mfe >= risk * 1.2 && i >= 2) {
-          if (s.side === "long") {
-            const sl = Math.min(cs[i]!.l, cs[i - 1]!.l, cs[i - 2]!.l);
-            curStop = Math.max(curStop, sl);
-          } else {
-            const sh = Math.max(cs[i]!.h, cs[i - 1]!.h, cs[i - 2]!.h);
-            curStop = Math.min(curStop, sh);
-          }
-        }
-      }
-      if (s.side === "long") {
-        if (c.l <= curStop) {
-          // A stop is a market order: if the bar OPENED below the stop the
-          // fill is the open, not the stop. Filling at the stop price on a
-          // gap understates every loss.
-          exit = Math.min(c.o, curStop);
-          reason = curStop >= entryPx ? "target" : "stop";
-          closedAt = c.t;
-          break;
-        }
-        if (c.h >= curTgt) {
-          exit = curTgt;
-          reason = "target";
-          closedAt = c.t;
-          break;
-        }
-      } else {
-        if (c.h >= curStop) {
-          exit = Math.max(c.o, curStop);
-          reason = curStop <= entryPx ? "target" : "stop";
-          closedAt = c.t;
-          break;
-        }
-        if (c.l <= curTgt) {
-          exit = curTgt;
-          reason = "target";
           closedAt = c.t;
           break;
         }

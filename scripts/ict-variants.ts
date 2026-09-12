@@ -27,15 +27,23 @@ import type { Candle } from "../src/lib/engine/types.ts";
 const BAR = process.argv[2] ?? "15m";
 const PAGES = process.argv[3] ?? "40";
 const CACHE = join(process.env.TMPDIR ?? "/tmp", `nightshift-bt-${BAR}-${PAGES}`);
+// 5m bars used to sequence events inside each 15m bar. Without them any
+// trailing rule is scored pessimistically — see board row 30.
+const SUB = process.env.ICT_SUB_CACHE ?? "/tmp/nightshift-bt-5m-sub";
+const USE_SUB = !process.argv.includes("--no-sub");
 
-const books: { sym: string; name: string; cs: Candle[]; sigs: IctSignal[] }[] = [];
+const books: { sym: string; name: string; cs: Candle[]; sub: Candle[]; sigs: IctSignal[] }[] = [];
 for (const a of ICT_ASSETS) {
   if (a.venue !== "okx") continue;
   const f = join(CACHE, `${a.instId}.json`);
   if (!existsSync(f)) continue;
   const cs = parseKlines(JSON.parse(readFileSync(f, "utf8")) as number[][]);
   if (cs.length < 120) continue;
-  books.push({ sym: a.symbol, name: a.name, cs, sigs: scanIct(cs, { killZoneOnly: true }) });
+  const sf = join(SUB, `${a.instId}.json`);
+  const sub = USE_SUB && existsSync(sf)
+    ? parseKlines(JSON.parse(readFileSync(sf, "utf8")) as number[][])
+    : [];
+  books.push({ sym: a.symbol, name: a.name, cs, sub, sigs: scanIct(cs, { killZoneOnly: true }) });
 }
 if (!books.length) {
   console.log(`no cache at ${CACHE} — run: npm run backtest:ict -- ${BAR} ${PAGES}`);
@@ -47,7 +55,11 @@ interface T { t: number; r: number; stopPct: number }
 function collect(opts: IctSimOpts): T[] {
   const out: T[] = [];
   for (const b of books) {
-    const o: IctSimOpts = opts.exitOnOpposing ? { ...opts, opposing: b.sigs } : opts;
+    const o: IctSimOpts = {
+      ...opts,
+      ...(opts.exitOnOpposing ? { opposing: b.sigs } : {}),
+      ...(b.sub.length ? { subBars: b.sub } : {}),
+    };
     for (const tr of simulateIct(b.cs, b.sigs, 1, b.sym, b.name, DEFAULT_ICT_COSTS, o)) {
       const sg = b.sigs.find((s) => s.t === tr.openedAt && s.setup === tr.setup);
       out.push({
@@ -97,6 +109,9 @@ const VARIANTS: { label: string; opts: IctSimOpts }[] = [
   { label: "exit on reversal",        opts: { exitOnOpposing: true } },
   { label: "breakeven at 1R",         opts: { beAt1R: true } },
   { label: "trail every setup",       opts: { trailAll: true } },
+  { label: "NO trail anywhere",       opts: { trailNone: true } },
+  { label: "no trail + exit reversal", opts: { trailNone: true, exitOnOpposing: true } },
+  { label: "no trail + 3R",           opts: { trailNone: true, targetMult: 3 } },
   { label: "target 1.5R",             opts: { targetMult: 1.5 } },
   { label: "target 3R",               opts: { targetMult: 3 } },
   { label: "BE@1R + trail all",       opts: { beAt1R: true, trailAll: true } },
@@ -105,7 +120,10 @@ const VARIANTS: { label: string; opts: IctSimOpts }[] = [
   { label: "BE@1R + trail + 3R",      opts: { beAt1R: true, trailAll: true, targetMult: 3 } },
 ];
 
-console.log(`${BAR} · ${books.length} books · killZoneOnly · costs on · $100 start, 6% risk/trade\n`);
+const subBars = books.reduce((n, b) => n + b.sub.length, 0);
+console.log(`${BAR} · ${books.length} books · killZoneOnly · costs on · $100 start, 6% risk/trade`);
+console.log(subBars ? `intra-bar: 5m sub-bars ON (${subBars} bars) — event order resolved\n`
+                    : `intra-bar: OFF — trailing variants are scored pessimistically\n`);
 console.log("variant                  │ TRAIN                        │ TEST (out of sample)");
 console.log("                         │   n  win   avgR    $   t     │   n  win   avgR    $   t    maxDD");
 console.log("─".repeat(101));

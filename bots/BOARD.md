@@ -491,3 +491,125 @@ that needs risk near 100% of book per trade, where a single stop is ruin. The
 honest ceiling on this data is weeks, not a week — and TRAIN at +0.015R means
 even 1.63x/week is plausible-but-unproven, not established. t-ish 2.1 is right at
 the edge of meaning anything.
+
+
+---
+
+### 31 · Intra-bar order now resolved from 5m sub-bars — CLOSED
+
+Row 30 reported `breakeven at 1R` and `trail every setup` as untested rather
+than disproven, because both checked favourable excursion against the same
+coarse bar they then tested for the stop. `simulateIct` now takes
+`opts.subBars` and, when given finer bars, walks them in order inside each
+coarse bar — so fill, trail update, stop and target are sequenced by what
+actually happened rather than by assumption. Verified on 130,900 5m bars against
+the same 41-day 15m window.
+
+The bias was real and large, and it cut both ways:
+
+```
+                         TEST avgR   before -> after
+breakeven at 1R            -0.398 -> -0.175      (win 19% -> 30%)
+trail every setup          -0.420 -> -0.220      (win 20% -> 30%)
+baseline                   +0.221 -> +0.210      (t 2.0 -> 1.9)
+exit on reversal           +0.229 -> +0.215      (t 2.1 -> 1.9)
+```
+
+So the trailing rules were being scored about twice as badly as they deserved —
+**and they are still clearly negative once corrected**. That is now a real
+result: a breakeven stop in this system cuts winners, dropping the win rate from
+55% to 30%. Meanwhile the two profitable variants were being scored slightly
+*optimistically*, because some trades credited with reaching target actually hit
+the stop first.
+
+### 32 · `trailNone` tested — hypothesis was wrong, shipped trail stays
+
+Row 30 suggested the shipped trail (on for `asia`, `scalp`, `silver`, `judas`)
+might be what makes those setups negative. Tested directly with `trailNone`:
+
+```
+baseline (trail on those 4)   TEST +0.210R  $308  t 1.9
+NO trail anywhere             TEST +0.192R  $279  t 1.7
+no trail + exit reversal       TEST +0.197R  $289  t 1.8
+```
+
+Disabling it is **worse**, not better. The trail is mildly helpful and stays on.
+Recorded so nobody re-runs this. Those setups are negative for some other
+reason.
+
+### 33 · No variant clears statistical significance — the sample is the problem
+
+Thirteen variants, 41 days, ~390 trades, costs on, intra-bar order resolved. Best
+is exit-on-reversal at TEST **+0.215R, t 1.9**. Every single variant is **below
+t = 2.0**, and TRAIN sits at −0.018R.
+
+TRAIN ≈ 0 and TEST ≈ +0.21 with t < 2 has one most-likely reading: the strategy
+is somewhere around breakeven, and the positive test figure is period-specific
+rather than a durable edge. It is not established either way — that is the point.
+
+The productive response is **not another variant**. Thirteen variants on 390
+trades will eventually produce something that looks good by chance; that is how
+backtests lie. The response is more data, so the t-statistic can settle. See
+row 34.
+
+
+---
+
+### 34 · Six months, 1,655 trades: there is no measurable edge — DECISIVE
+
+Row 33 said the answer was more data, not more variants. Ran it: **181 days,
+182,062 bars, 11 books, 1,655 trades**, killZoneOnly, costs on, same 60/40 split.
+
+```
+ALL     n=1655  win 50%  avgR -0.018  avgWin +1.31  avgLoss -1.32  t-ish -0.5
+TRAIN   n= 978  win 48%  avgR -0.045                                t-ish -1.0
+TEST    n= 677  win 51%  avgR +0.021  avgWin +1.31  avgLoss -1.34  t-ish  0.4
+
+TEST at 2% risk  -> $146   (maxDD 78%)
+TEST at 6% risk  -> ruin
+TEST at 12% risk -> ruin
+```
+
+**Out-of-sample expectancy is +0.021R with t = 0.4.** That is indistinguishable
+from zero. `avgWin +1.31` against `avgLoss -1.34` at a 50% win rate is a coin
+flip that pays slightly less than it costs — which is exactly what a strategy
+with no edge looks like once fees, spread, funding and honest gap fills are
+charged.
+
+The 41-day figure that looked promising (+0.215R, t 1.9) was **a favourable
+41-day window**, nothing more. Four times the sample erased it. This is the
+single most useful number produced in this whole effort, and it is the reason
+not to size up.
+
+Two caveats, both in the same direction:
+
+- **This is still optimistic.** Board row 20 is open: 71% of signals need future
+  bars to be detected, and `simulateIct` fills from the bar after the signal. The
+  true figure is likely below +0.021R, not above.
+- The "ruin" rows overstate the ending slightly. `positionSize`'s `$1` minimum
+  (row 16) means that once the book decays under ~$50 the floor risks more than
+  the intended percentage and finishes it. Without that floor the curve decays
+  asymptotically instead of touching zero. The direction is real; the exact zero
+  is partly that artifact.
+
+**What this means for the $100 → $1000 goal: it is not reachable with this
+strategy.** Not at 2%, not at 6%, not at 12%. With expectancy at zero, raising
+risk raises variance only — the higher-risk rows do not reach the target faster,
+they reach ruin faster. No stop/target/trail variant changed this; thirteen were
+tried.
+
+**Do not respond to this by hunting a fourteenth variant on this sample.** With
+1,655 trades and a true edge of zero, enough variants will eventually produce one
+that looks significant by chance. That is the mechanism by which backtests lie,
+and it is now the main risk to this project.
+
+The honest next steps, in order:
+
+1. **Close row 20 (lookahead).** Until signals are only emitted when they are
+   knowable, every number here is unreliable in the optimistic direction. This is
+   the only work that can change the verdict rather than decorate it.
+2. Then re-run this exact six-month test. If expectancy is still ~0, the ICT
+   implementation as written has no edge and the app's value is as an honest
+   simulator and teaching tool — which is a real thing to be, and it is what the
+   README already claims.
+3. Only if expectancy survives step 2 is position sizing worth discussing.
