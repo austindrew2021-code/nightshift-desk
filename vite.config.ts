@@ -174,7 +174,13 @@ export default defineConfig(({ command, isPreview }) => ({
         ? []
         : [
             nitro({
-              preset: process.env.NETLIFY ? "netlify" : "vercel",
+              // NITRO_PRESET wins, so a host can be switched without editing
+              // this file: "vercel" (free Hobby tier, the default here),
+              // "cloudflare", "node" for a VPS/container, etc. NETLIFY is set
+              // by netlify.toml. See HOSTING.md.
+              preset:
+                process.env.NITRO_PRESET ||
+                (process.env.NETLIFY ? "netlify" : "vercel"),
             }),
           ]
       : []),
