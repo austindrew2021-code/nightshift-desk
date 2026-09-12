@@ -837,7 +837,14 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       }
     }
     const sim = [
-      ...simulateIct(b.candles15, s15, riskFlat, b.symbol, b.name),
+      // exitOnOpposing: close when the engine that found the entry finds a
+      // reversal against it. Best of ten variants out of sample (+0.229R vs
+      // +0.221R baseline) and, more usefully, the lowest drawdown of any
+      // profitable variant (51% vs 55%). See scripts/ict-variants.ts, board 30.
+      ...simulateIct(b.candles15, s15, riskFlat, b.symbol, b.name, undefined, {
+        exitOnOpposing: true,
+        opposing: s15,
+      }),
       ...(b.candles5 ? simulateIct(b.candles5, s5, riskFlat, b.symbol, b.name) : []),
       ...(b.candles1h ? simulateIct(b.candles1h, s1h, riskFlat, b.symbol, b.name) : []),
     ].map((t) => ({

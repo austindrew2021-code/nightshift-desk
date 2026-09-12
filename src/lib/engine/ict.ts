@@ -335,6 +335,13 @@ function overlap(aTop: number, aBot: number, bTop: number, bBot: number) {
   return Math.min(aTop, bTop) > Math.max(aBot, bBot);
 }
 
+/**
+ * Minimum stop distance, as a multiple of ATR at the signal bar. A stop tighter
+ * than this is noise, not risk. Deliberately a sanity floor rather than a tuned
+ * parameter: it is not chosen to maximise returns, and it should not be.
+ */
+export const MIN_STOP_ATR = 0.25;
+
 function pack(
   i: number,
   t: number,
@@ -407,6 +414,18 @@ export function scanIct(
 
   const add = (sig: IctSignal | null) => {
     if (!sig) return;
+    // A stop closer to entry than a fraction of ATR is inside the noise band:
+    // ordinary jitter takes it out whatever the thesis says, and because R is
+    // normalised by stop distance a routine adverse bar then reports a huge
+    // negative R. pack() already rejects stops that are too WIDE (3% of price);
+    // nothing rejected ones that were absurdly tight. One amd signal on BTC had
+    // a stop 0.0032% of price - about $3 on a $95k chart - and returned -46.4R
+    // by itself, which was the whole of amd's -6.70R out-of-sample average.
+    // Board row 28.
+    const risk = Math.abs(sig.entry - sig.stop);
+    if (!(risk > 0)) return;
+    const noise = atr(cs, sig.i) * MIN_STOP_ATR;
+    if (noise > 0 && risk < noise) return;
     if (signals.some((x) => Math.abs(x.i - sig.i) < 4 && x.side === sig.side && x.setup === sig.setup)) return;
     signals.push(sig);
   };
@@ -1208,6 +1227,23 @@ export const DEFAULT_ICT_COSTS: IctCosts = {
 export const ZERO_ICT_COSTS: IctCosts = { feeRate: 0, slipRate: 0, fundingRate8h: 0 };
 
 /**
+ * Strategy variants, for `scripts/ict-variants.ts`. Everything defaults off, so
+ * omitting this reproduces the shipped behaviour exactly.
+ */
+export interface IctSimOpts {
+  /** Apply the breakeven+trail rule to every setup, not just the intraday ones. */
+  trailAll?: boolean;
+  /** Move the stop to entry once the trade has run 1R in favour. */
+  beAt1R?: boolean;
+  /** Rescale the target to N*R from entry, overriding the setup's own target. */
+  targetMult?: number;
+  /** Close at the bar close when an opposing signal fires — "exit on reversal". */
+  exitOnOpposing?: boolean;
+  /** Signal list searched for those reversals; pass the same list you scanned. */
+  opposing?: IctSignal[];
+}
+
+/**
  * Setups entered at market on the signal rather than on a return to a level.
  * They still cannot fill at the signal bar's close — that price is only known
  * once the bar has closed — so they fill at the NEXT bar's open.
@@ -1221,8 +1257,14 @@ export function simulateIct(
   symbol = "SOL",
   name = "Solana",
   costs: IctCosts = DEFAULT_ICT_COSTS,
+  opts: IctSimOpts = {},
 ): IctSimTrade[] {
   const trades: IctSimTrade[] = [];
+  // Opposing signals indexed by bar, so the reversal check is O(1) per bar.
+  const opposingAt = new Map<number, "long" | "short">();
+  if (opts.exitOnOpposing) {
+    for (const o of opts.opposing ?? []) opposingAt.set(o.i, o.side);
+  }
   for (const s of signals) {
     let exit = s.entry;
     let reason: ClosedTrade["reason"] = "time";
@@ -1243,6 +1285,7 @@ export function simulateIct(
     }
     const dt = cs.length > 1 ? Math.max(60_000, cs[1]!.t - cs[0]!.t) : 15 * 60_000;
     const trail =
+      opts.trailAll ||
       s.setup === "asia" || s.setup === "scalp" || s.setup === "silver" || s.setup === "judas";
     const hold = trail
       ? Math.max(16, Math.round((3 * 3600_000) / dt))
@@ -1250,7 +1293,12 @@ export function simulateIct(
         ? 80
         : 32;
     let curStop = s.stop;
-    let curTgt = trail ? twoR(s.side, s.entry, s.stop, s.target, 3) : s.target;
+    const baseR = Math.abs(s.entry - s.stop);
+    let curTgt = opts.targetMult
+      ? s.entry + (s.side === "long" ? 1 : -1) * opts.targetMult * baseR
+      : trail
+        ? twoR(s.side, s.entry, s.stop, s.target, 3)
+        : s.target;
     const risk = Math.abs(s.entry - s.stop) || 1;
     for (let i = s.i + 1; i < cs.length; i++) {
       const c = cs[i]!;
@@ -1258,6 +1306,22 @@ export function simulateIct(
         if (c.l <= entryPx && c.h >= entryPx) filled = true;
         else if (i > s.i + hold) break;
         else continue;
+      }
+      if (opts.beAt1R) {
+        const mfe = s.side === "long" ? c.h - entryPx : entryPx - c.l;
+        if (mfe >= risk) {
+          curStop =
+            s.side === "long" ? Math.max(curStop, entryPx) : Math.min(curStop, entryPx);
+        }
+      }
+      if (opts.exitOnOpposing) {
+        const opp = opposingAt.get(i);
+        if (opp && opp !== s.side) {
+          exit = c.c;
+          reason = "trail";
+          closedAt = c.t;
+          break;
+        }
       }
       if (trail) {
         const mfe = s.side === "long" ? c.h - s.entry : s.entry - c.l;

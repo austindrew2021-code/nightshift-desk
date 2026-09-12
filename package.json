@@ -23,7 +23,8 @@
     "probe:ict": "node --experimental-strip-types scripts/ict-probe.ts",
     "backtest:ict": "node --experimental-strip-types scripts/ict-backtest.ts",
     "test:app": "node --experimental-strip-types --test src/lib/engine/ict.test.ts src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts",
-    "test:template": "node --test 'scripts/**/*.test.mjs'"
+    "test:template": "node --test 'scripts/**/*.test.mjs'",
+    "variants:ict": "node --experimental-strip-types scripts/ict-variants.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

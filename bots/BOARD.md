@@ -407,3 +407,87 @@ taken: the template suite is scoped out of the gate, not deleted — run it with
 
 This also supersedes the narrower row 10: registration was never the only
 problem.
+
+
+---
+
+### 28 · `amd` at -6.70R was one broken stop — CLOSED
+
+Not a weak edge. Measured stop distance per setup across 41 days showed one
+`amd` signal on BTC with a stop **0.0032% of price** — roughly $3 on a $95k
+chart. R is normalised by stop distance, so an ordinary adverse bar on that
+trade reported **-46.4R**, and that single trade was essentially the whole of
+`amd`'s -6.70R out-of-sample average.
+
+Cause: `amd` builds `entry` from the FVG midpoint but `stop` from the swept Asia
+extreme plus a pad of only 6% of the Asia range (`ict.ts`, the AMD block). When
+those two references nearly coincide the stop collapses toward zero. `pack()`
+already rejected stops that were too **wide** (3% of price) and had no floor at
+all on the other side.
+
+Fixed with a volatility floor in `add()`, so it covers every setup including
+`scanSwing`'s: a signal whose stop is closer than `MIN_STOP_ATR` (0.25) times ATR
+at the signal bar is dropped. A stop inside the noise band is not risk. It is a
+sanity floor, deliberately not tuned for return.
+
+Effect — worst single trade per setup, before → after:
+
+```
+amd     -46.4R -> -1.6R     (n 16 -> 15: it removed exactly one trade)
+silver   -3.2R -> -2.2R
+ob       -3.7R -> -2.9R
+worst overall -46.4R -> -3.9R
+```
+
+And on the full out-of-sample run, TRAIN average went from **-0.090R to
+-0.006R** — the outlier was most of the training-set loss. TEST improved from
++0.227R to +0.241R, t-ish 2.0 to 2.2.
+
+### 30 · Strategy variant sweep — "exit on reversal" wins, two variants are untested
+
+`scripts/ict-variants.ts` (`npm run variants:ict`) scores variants on TRAIN and
+TEST. 15m, 11 books, killZoneOnly, costs on, $100 at 6% risk:
+
+```
+variant                TRAIN avgR   TEST avgR   TEST $   t    maxDD
+baseline (shipped)         +0.008      +0.221     $297   2.0    55%
+exit on reversal           +0.015      +0.229     $313   2.1    51%
+target 3R                  +0.048      +0.229     $235   1.7    69%
+target 1.5R                -0.065      +0.031     $118   0.4    61%
+breakeven at 1R            -0.525      -0.398       $4  -5.0    98%
+trail every setup          -0.526      -0.420       $0  -5.3   100%
+```
+
+**Adopted: exit on reversal.** Closes at the bar close when the same engine that
+found the entry finds an opposing signal. Marginally better expectancy than
+baseline and, more usefully, the lowest drawdown of any profitable variant. Now
+on in `session.ts` for the 15m pass.
+
+**`breakeven at 1R` and `trail every setup` are NOT disproven — the test is
+unsound.** Win rate collapsing to ~20% is not what a breakeven stop does; it is
+what an intra-bar ordering bug does. Both rules check max-favourable-excursion
+against the *same* bar that is then tested for the stop, so a bar that touches
+both +1R and the entry is scored as moving the stop up and then being stopped at
+it, when the real intra-bar path may have reached the target first. Resolving
+this needs 5m or 1m bars to sequence events inside each 15m bar. Until then
+neither variant has been evaluated.
+
+That bias also applies to the **pre-existing** `trail` path, which is on for
+`silver`, `judas`, `asia` and `scalp` — and those are among the negative setups
+(`silver` -0.30R, `judas` -0.26R out of sample). Worth checking whether the trail
+logic, not the setups, is what is losing. TIMING owns this.
+
+### What the numbers imply for the $100 target
+
+TEST window is 16.4 days. At 6% risk per trade, exit-on-reversal turned $100 into
+$313 — 3.13x, or about **1.63x per week**. Compounding at that rate:
+
+```
+$100 -> $1000   ~4.7 weeks (33 days)   maxDD 51%
+```
+
+One week would require **39% per day compounded**. At the measured +0.229R edge
+that needs risk near 100% of book per trade, where a single stop is ruin. The
+honest ceiling on this data is weeks, not a week — and TRAIN at +0.015R means
+even 1.63x/week is plausible-but-unproven, not established. t-ish 2.1 is right at
+the edge of meaning anything.
