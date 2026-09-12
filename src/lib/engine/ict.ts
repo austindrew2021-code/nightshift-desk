@@ -1,14 +1,48 @@
 import type { Candle, ClosedTrade, SetupKind, SetupOdds } from "./types";
 
-const NY_OFFSET_MS = 4 * 3600_000; // EDT in September
+/**
+ * New York wall-clock time, DST included.
+ *
+ * This was a flat `4 * 3600_000` ("EDT in September"), which is right from
+ * mid-March to the first Sunday in November and an hour out for the rest of the
+ * year. Every ICT window hangs off nyHour, so in EST the Silver Bullet fired
+ * 09:00-10:00 NY instead of 10:00-11:00 and the engine kept producing a
+ * confident, mistimed tape. Ask the timezone database instead of assuming.
+ */
+const NY_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hourCycle: "h23",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/**
+ * formatToParts is fast but scanIct calls nyHour once per bar per pass, so
+ * memoise by the minute. Bounded — cleared long before it could grow large.
+ */
+const NY_CACHE = new Map<number, { h: number; m: number; day: string }>();
 
 export function nyParts(t: number): { h: number; m: number; day: string } {
-  const shifted = t - NY_OFFSET_MS;
-  const d = new Date(shifted);
-  const h = d.getUTCHours();
-  const m = d.getUTCMinutes();
-  const day = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
-  return { h, m, day };
+  const key = Math.floor(t / 60_000);
+  const hit = NY_CACHE.get(key);
+  if (hit) return hit;
+  let y = 0, mo = 1, d = 1, h = 0, m = 0;
+  for (const part of NY_FMT.formatToParts(new Date(t))) {
+    const n = Number(part.value);
+    if (part.type === "year") y = n;
+    else if (part.type === "month") mo = n;
+    else if (part.type === "day") d = n;
+    else if (part.type === "hour") h = n % 24;
+    else if (part.type === "minute") m = n;
+  }
+  // Month stays 0-based so the key matches the previous getUTCMonth() format.
+  const out = { h, m, day: `${y}-${mo - 1}-${d}` };
+  if (NY_CACHE.size > 60_000) NY_CACHE.clear();
+  NY_CACHE.set(key, out);
+  return out;
 }
 
 export function nyHour(t: number): number {
@@ -181,9 +215,8 @@ function buildAsia(cs: Candle[]): Map<string, DayRange> {
     const p = nyParts(c.t);
     let day = p.day;
     if (p.h >= 20) {
-      const shifted = c.t - NY_OFFSET_MS + 24 * 3600_000;
-      const d = new Date(shifted);
-      day = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+      // Asia from 20:00 NY belongs to the next trading day.
+      day = nyParts(c.t + 24 * 3600_000).day;
     }
     if (!isAsia(c.t)) continue;
     let rec = map.get(day);
@@ -349,7 +382,18 @@ export interface IctSignal {
  *  Sweep alone is not a trade.
  *  Per NY day: Silver / AMD / scalp / swing kept; plus up to 2 continuation.
  */
-export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal[] {
+/**
+ * `killZoneOnly` drops signals whose bar falls outside London / NY AM / Silver
+ * Bullet / NY PM. This is the published method rather than a tuned filter —
+ * TTrades ICT is defined on those windows. Measured on 41 days of 15m across 11
+ * books with real costs, out of sample: keeping the 14 non-killzone trades moved
+ * average expectancy from +0.227R to -0.073R, because thin-hour bars gap through
+ * stops. See bots/BOARD.md row 27.
+ */
+export function scanIct(
+  cs: Candle[],
+  opts?: { skipSwing?: boolean; killZoneOnly?: boolean },
+): IctSignal[] {
   if (cs.length < 48) return [];
   const asia = buildAsia(cs);
   const fvgs = detectFvgs(cs);
@@ -669,7 +713,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
   }
 
   if (!opts?.skipSwing) for (const s of scanSwing(cs)) add(s);
-  return pickDay(signals);
+  const picked = pickDay(signals);
+  return opts?.killZoneOnly ? picked.filter((s) => inKill(s.t)) : picked;
 }
 
 function lastFractal(sw: Swing[], i: number, kind: "high" | "low"): Swing | null {
@@ -1038,9 +1083,8 @@ export function chartLayers(cs: Candle[], signals: IctSignal[] = []): ChartZone[
       const p = nyParts(c.t);
       let day = p.day;
       if (p.h >= 20) {
-        const shifted = c.t - NY_OFFSET_MS + 24 * 3600_000;
-        const d = new Date(shifted);
-        day = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+        // Asia from 20:00 NY belongs to the next trading day.
+        day = nyParts(c.t + 24 * 3600_000).day;
       }
       return day === rec.day && !isAsia(c.t);
     });
@@ -1141,19 +1185,62 @@ export interface IctSimTrade extends ClosedTrade {
   target: number;
 }
 
+/**
+ * What a round trip on a major actually costs. Defaults are deliberately
+ * mid-range for a retail perp account, not best-case:
+ *  - feeRate: taker, per side. 0.05% is typical; makers pay less.
+ *  - slipRate: half-spread crossed on each side, as a fraction of price.
+ *  - fundingRate8h: perp funding per 8h funding period.
+ * Set every field to 0 to reproduce the old frictionless numbers.
+ */
+export interface IctCosts {
+  feeRate: number;
+  slipRate: number;
+  fundingRate8h: number;
+}
+
+export const DEFAULT_ICT_COSTS: IctCosts = {
+  feeRate: 0.0005,
+  slipRate: 0.0002,
+  fundingRate8h: 0.0001,
+};
+
+export const ZERO_ICT_COSTS: IctCosts = { feeRate: 0, slipRate: 0, fundingRate8h: 0 };
+
+/**
+ * Setups entered at market on the signal rather than on a return to a level.
+ * They still cannot fill at the signal bar's close — that price is only known
+ * once the bar has closed — so they fill at the NEXT bar's open.
+ */
+const MARKET_ENTRY: ReadonlySet<SetupKind> = new Set<SetupKind>(["div"]);
+
 export function simulateIct(
   cs: Candle[],
   signals: IctSignal[],
   riskUsd = 10,
   symbol = "SOL",
   name = "Solana",
+  costs: IctCosts = DEFAULT_ICT_COSTS,
 ): IctSimTrade[] {
   const trades: IctSimTrade[] = [];
   for (const s of signals) {
     let exit = s.entry;
     let reason: ClosedTrade["reason"] = "time";
     let closedAt = cs[cs.length - 1]?.t ?? s.t;
-    let filled = s.setup === "div";
+    // Was `filled = s.setup === "div"`, which handed div setups a free fill at
+    // the exact signal price whether or not price ever traded there — div was
+    // half of all signals and the highest win rate, so this was the single
+    // largest source of phantom PnL. Market-entry setups now fill at the next
+    // bar's open, which is the first price actually obtainable.
+    const marketEntry = MARKET_ENTRY.has(s.setup);
+    const nextOpen = cs[s.i + 1]?.o;
+    let entryPx = s.entry;
+    let filled = false;
+    if (marketEntry) {
+      if (nextOpen === undefined) continue;
+      entryPx = nextOpen;
+      filled = true;
+    }
     const dt = cs.length > 1 ? Math.max(60_000, cs[1]!.t - cs[0]!.t) : 15 * 60_000;
     const trail =
       s.setup === "asia" || s.setup === "scalp" || s.setup === "silver" || s.setup === "judas";
@@ -1168,7 +1255,7 @@ export function simulateIct(
     for (let i = s.i + 1; i < cs.length; i++) {
       const c = cs[i]!;
       if (!filled) {
-        if (c.l <= s.entry && c.h >= s.entry) filled = true;
+        if (c.l <= entryPx && c.h >= entryPx) filled = true;
         else if (i > s.i + hold) break;
         else continue;
       }
@@ -1189,8 +1276,11 @@ export function simulateIct(
       }
       if (s.side === "long") {
         if (c.l <= curStop) {
-          exit = curStop;
-          reason = curStop >= s.entry ? "target" : "stop";
+          // A stop is a market order: if the bar OPENED below the stop the
+          // fill is the open, not the stop. Filling at the stop price on a
+          // gap understates every loss.
+          exit = Math.min(c.o, curStop);
+          reason = curStop >= entryPx ? "target" : "stop";
           closedAt = c.t;
           break;
         }
@@ -1202,8 +1292,8 @@ export function simulateIct(
         }
       } else {
         if (c.h >= curStop) {
-          exit = curStop;
-          reason = curStop <= s.entry ? "target" : "stop";
+          exit = Math.max(c.o, curStop);
+          reason = curStop <= entryPx ? "target" : "stop";
           closedAt = c.t;
           break;
         }
@@ -1223,8 +1313,19 @@ export function simulateIct(
     }
     if (!filled) continue;
     const dir = s.side === "long" ? 1 : -1;
-    const r = ((exit - s.entry) * dir) / Math.abs(s.entry - s.stop);
-    const pnlUsd = r * riskUsd;
+    const stopDist = Math.abs(entryPx - s.stop) || Math.abs(s.entry - s.stop) || 1;
+    // Cross the spread on the way in and on the way out.
+    const entryFill = entryPx * (1 + dir * costs.slipRate);
+    const exitFill = exit * (1 - dir * costs.slipRate);
+    const grossR = ((exitFill - entryFill) * dir) / stopDist;
+    // Notional is set by risk / stop distance, exactly as ictRiskUsd sizes it.
+    const stopPct = stopDist / Math.max(1e-9, entryPx);
+    const notional = riskUsd / Math.max(1e-9, stopPct);
+    const heldH = Math.max(0, (closedAt - s.t) / 3600_000);
+    const costUsd =
+      notional * costs.feeRate * 2 + notional * costs.fundingRate8h * (heldH / 8);
+    const pnlUsd = grossR * riskUsd - costUsd;
+    const r = pnlUsd / Math.max(1e-9, riskUsd);
     trades.push({
       id: `ict-${symbol}-${s.setup}-${s.i}`,
       symbol,
@@ -1233,9 +1334,9 @@ export function simulateIct(
       side: s.side,
       openedAt: s.t,
       closedAt,
-      entryUsd: s.entry,
+      entryUsd: entryPx,
       exitUsd: exit,
-      sizeSol: riskUsd / Math.abs(s.entry - s.stop),
+      sizeSol: riskUsd / stopDist,
       pnlSol: 0,
       pnlUsd,
       rMultiple: r,

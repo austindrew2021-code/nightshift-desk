@@ -11,9 +11,9 @@ commit that closed it, so the next bot knows it was considered.
 
 | # | Sev | Owner | Finding | Where |
 | --- | --- | --- | --- | --- |
-| 1 | **critical** | TIMING | NY offset hardcoded to EDT — every ICT window breaks 1 Nov 2026 | `ict.ts:3` |
+| 1 | ~~critical~~ | ~~TIMING~~ | ~~NY offset hardcoded to EDT~~ — fixed via `Intl.DateTimeFormat`, tested both offsets | closed |
 | 2 | **critical** | RIGGER | CI runs no gate; nothing can stop a regression | `pages.yml` |
-| 3 | **critical** | all | ~3,180 lines of engine math, zero tests | `src/lib/engine/` |
+| 3 | high | all | Engine tests started (8 in `ict.test.ts`); `session.ts` and `execution.ts` still bare | `src/lib/engine/` |
 | 4 | high | AUDITOR | Day-loss halt enforces 40% in ICT, prints 22% | `session.ts:795,801` |
 | 5 | high | AUDITOR | `dayLoss` never resets — a per-run cap called "daily" | `session.ts:188,340,662` |
 | 6 | high | CHECKER | README says 20 fills/day; code enforces 10 | `README.md:32` |
@@ -31,10 +31,10 @@ commit that closed it, so the next bot knows it was considered.
 | 18 | low | TIMING | `equalPool` / `impulseRange` written but never wired | `ict.ts:694,715` |
 | 19 | low | CHECKER | `high_risk` / `low_score` leak snake_case into the tape | `pipeline.ts:70` |
 | 20 | **critical** | TIMING | 71% of signals need future bars to be detected — lookahead | `ict.ts` `scanIct` |
-| 21 | **critical** | AUDITOR | `simulateIct` applies zero fees, spread, slippage or funding | `ict.ts:1223-1227` |
-| 22 | high | AUDITOR | Exits fill at the exact stop/target price, so R quantises to integers | `ict.ts:1190-1216` |
+| 21 | ~~critical~~ | ~~AUDITOR~~ | ~~`simulateIct` applies zero costs~~ — `IctCosts` added, on by default | closed |
+| 22 | ~~high~~ | ~~AUDITOR~~ | ~~Exits fill at exact stop price~~ — stops now fill at the bar open on a gap | closed |
 | 23 | high | AUDITOR | 12% risk/trade is what produces the 13x, not edge | `types.ts:254` |
-| 24 | high | AUDITOR | `div` setups auto-fill at signal price without price trading there | `ict.ts:1156` |
+| 24 | ~~high~~ | ~~AUDITOR~~ | ~~`div` auto-fills at signal price~~ — market entries fill at the next open | closed |
 | 25 | ~~med~~ | ~~FLOOR~~ | ~~PWA not installable: manifest named "Grok App", icon 404s~~ | closed `b7499b2`+ |
 | 26 | ~~low~~ | ~~RIGGER~~ | ~~eslint had no `.netlify/**` ignore; a local build broke lint~~ | closed |
 
@@ -339,3 +339,71 @@ relative URLs so it resolves under both `/` and `/nightshift-desk/`. The templat
 `NETLIFY` is set, which `netlify.toml` does. So anyone running a production build
 locally then linting got hundreds of errors from vendored third-party bundles.
 Added `.netlify/**` and `.tanstack/**`.
+
+
+---
+
+### 27 · Off-hours ICT signals are the biggest single loss — NEW, actioned
+
+Backtested 2026-09-12 on **414 trades over 41 days**, 44,000 bars of 15m across
+the 11 OKX books, with `DEFAULT_ICT_COSTS` applied (0.05% fee/side, 0.02%
+slip/side, 0.01% funding/8h) and a 60/40 train/test split.
+
+Out of sample, gating signals to London / NY AM / Silver Bullet / NY PM:
+
+```
+all hours      n=185  win 55%  avgR -0.073  t-ish -0.3   2% risk -> $192  maxDD 20%
+killZoneOnly   n=171  win 57%  avgR +0.227  t-ish  2.0   2% risk -> $213  maxDD 19%
+```
+
+The 14 off-hours trades averaged roughly **-3.7R each** — thin-hour bars gap
+straight through stops, which only became visible once row 22 made gap fills
+honest. This is the published method rather than a tuned filter, and it is
+confirmed out of sample, so `scanIct` gained `killZoneOnly` and `session.ts`
+passes it for both the 15m and 5m passes.
+
+### 28 · `amd` (Power of 3) is broken, not just unprofitable — OPEN, TIMING
+
+Same backtest, per setup, train vs test average R:
+
+```
+div       train n=147 +0.13R   test n=115 +0.42R   holds up
+swing     train n=  2 -1.52R   test n= 19 -0.14R   negative
+breaker   train n= 16 -0.00R   test n= 16 -0.12R   negative
+silver    train n= 28 -0.65R   test n= 13 -0.13R   negative
+amd       train n=  8 -0.77R   test n=  8 -6.70R   negative
+ob        train n= 17 +0.00R   test n=  6 -0.43R   negative
+judas     train n=  6 -0.89R   test n=  6 -0.26R   negative
+ifvg      train n=  5 -1.29R   test n=  2 +1.26R   thin
+```
+
+**-6.70R average** on 8 trades is not a bad edge, it is a bug — a correct 2R
+setup cannot lose almost seven times its risk unless the stop is wrong, inverted,
+or effectively absent. Prime suspect is `stopPad` at the 9am bar
+(`(nine.h - nine.l) * 0.08 || entry * 0.002`): on a doji that pad collapses, the
+stop distance goes near zero, and `notional = risk / stopPct` explodes. Find it,
+fix it, add a test asserting no setup can lose more than ~2R after slippage.
+
+`silver` at -0.65R train / -0.13R test also deserves a look — the Silver Bullet
+is the headline setup in the README and it currently loses money.
+
+Do **not** respond to this table by deleting the negative setups. Selecting
+setups on the test set is fitting the test set; the table says which
+implementations to go and read.
+
+### 29 · `npm test` never ran the app's own tests — CLOSED
+
+The `test` script was `node --test 'scripts/**/*.test.mjs' && node
+--experimental-strip-types --test src/...`. The template suite fails (row 9), so
+`&&` short-circuited and **the entire `src/` suite never ran** — 63 tests,
+including the auth and app-data ones that predate this work, all invisible. They
+were green the whole time; nobody could see it.
+
+Split into `test:app` (src, the gate) and `test:template` (scripts, known-red
+template harness), with `npm test` pointing at `test:app`. `npm test` is now
+**63 passing, 0 failing** and means something. Row 9's decision is therefore
+taken: the template suite is scoped out of the gate, not deleted — run it with
+`npm run test:template`.
+
+This also supersedes the narrower row 10: registration was never the only
+problem.

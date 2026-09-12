@@ -813,11 +813,17 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     const corr = b.id === "BTC" ? eth : btc;
     const extra =
       corr && corr.id !== b.id ? scanSmt(b.candles15, corr.candles15, corr.symbol) : [];
-    const s15 = [...scanIct(b.candles15), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
+    // killZoneOnly: the published method only trades London / NY AM / Silver
+    // Bullet / NY PM. Measured out of sample on 41 days of 15m across 11 books
+    // with real costs, the off-hours signals averaged about -3.7R each and
+    // dragged expectancy from +0.227R to -0.073R. Board row 27.
+    const s15 = [...scanIct(b.candles15, { killZoneOnly: true }), ...extra].filter((x) =>
+      styleAllows(s.ictStyle, x.setup),
+    );
     const s5: typeof s15 = [];
     const s1h: typeof s15 = [];
     if ((s.ictStyle === "all" || s.ictStyle === "scalp" || s.ictStyle === "sweep") && b.candles5 && b.candles5.length >= 48) {
-      for (const sig of scanIct(b.candles5, { skipSwing: true })) {
+      for (const sig of scanIct(b.candles5, { skipSwing: true, killZoneOnly: true })) {
         if (!styleAllows(s.ictStyle, sig.setup)) continue;
         if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "judas" || sig.setup === "ifvg" || sig.setup === "ob" || sig.setup === "amd") {
           s5.push({ ...sig, note: `${sig.note} · 5m` });
