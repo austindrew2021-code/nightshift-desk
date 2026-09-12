@@ -30,7 +30,7 @@ commit that closed it, so the next bot knows it was considered.
 | 17 | low | AUDITOR | `?? 30` duplicates `VIRTUAL_SOL_FALLBACK` | `session.ts:255,289` |
 | 18 | low | TIMING | `equalPool` / `impulseRange` written but never wired | `ict.ts:694,715` |
 | 19 | low | CHECKER | `high_risk` / `low_score` leak snake_case into the tape | `pipeline.ts:70` |
-| 20 | **critical** | TIMING | 71% of signals need future bars to be detected — lookahead | `ict.ts` `scanIct` |
+| 20 | ~~critical~~ | ~~TIMING~~ | ~~71% of signals need future bars~~ — closed: causal emission built, edge did not survive | closed, row 37 |
 | 21 | ~~critical~~ | ~~AUDITOR~~ | ~~`simulateIct` applies zero costs~~ — `IctCosts` added, on by default | closed |
 | 22 | ~~high~~ | ~~AUDITOR~~ | ~~Exits fill at exact stop price~~ — stops now fill at the bar open on a gap | closed |
 | 23 | high | AUDITOR | 12% risk/trade is what produces the 13x, not edge | `types.ts:254` |
@@ -762,3 +762,115 @@ The cause is unchanged and is not a money-management problem: full-sample
 expectancy is **-0.018R at t -0.5** (board row 34). Banking and sizing
 redistribute outcomes; they cannot create them. Closing row 20 is still the only
 open work that can change the verdict rather than redistribute it.
+
+
+---
+
+### 37 · Row 20 closed: the ICT edge WAS the lookahead — DECISIVE
+
+`src/lib/engine/causal.ts` implements `scanIctCausal`. It walks the series
+forward and at each bar shows the scanner only bars up to that bar, keeping a
+signal only if the scanner reports it forming on that bar. A rolling 240-bar
+window keeps it O(N x 240) — every detector here has bounded lookback — so it
+runs in ~15s per book instead of O(N^2).
+
+Same data, same split, same costs, same margin and banking. The only difference
+is whether the scanner may see bars that had not happened:
+
+```
+                       train              validation          HOLDOUT
+NAIVE  (lookahead)   -0.102R t -2.1     +0.066R t  0.9     +0.071R t  1.0
+CAUSAL (knowable)    -0.426R t -7.0     -0.317R t -3.7     -0.466R t -5.4
+```
+
+At every risk level the causal account goes to **zero**.
+
+The causal run is dominated by `swing` (n=980 vs 19 naive), because `pickDay`'s
+per-NY-day filtering only sees a partial day inside a rolling window. That is a
+harness artifact, so it was isolated:
+
+```
+CAUSAL no-swing      -0.385R t -4.9     -0.098R t -0.9     -0.274R t -2.2
+NAIVE  no-swing      -0.102R t -2.1     +0.066R t  0.9     +0.087R t  1.3
+```
+
+Still clearly negative. The verdict holds without the artifact.
+
+The decisive number is `div`, the only setup that was ever positive:
+
+```
+naive    div  n=1149   +0.12R
+causal   div  n= 207   -0.17R
+```
+
+**82% of divergence signals cannot be known at the bar they fire on, and the 18%
+that can lose money.** Every causal setup is negative: div −0.17R, silver
+−0.28R, judas −0.39R, amd −0.71R.
+
+Not wired into `session.ts`: at ~15s per book it would make the desk unusable.
+The live desk is already causal at runtime — it only ever holds bars up to now —
+so the lookahead corrupted replay and backtests, not live ticking. Making the
+*replay* honest needs an incremental scanner (detectors updating per bar instead
+of rescanning a window), which is real work and belongs to TIMING.
+
+### 38 · Calendar patterns per pair: no weekday effect, one real but untradeable hour
+
+`npm run season:ict`. 11 pairs, 182 days, close-to-close returns in bp, with a
+Bonferroni bar because 11 pairs x 7 weekdays is 77 tests and ~4 would clear
+p<0.05 by chance.
+
+**Weekday: nothing.** Not one of the 77 pair-weekday cells clears |t| > 3. The
+largest pooled cell is Sunday +50bp at t 3.4, and that t is inflated because the
+pairs are correlated. 182 days is only 26 observations per weekday per pair,
+which is the binding limit. No pair in this universe has a usable day-of-week
+pattern.
+
+**Hour of the NY day: five hours clear the bar, gross.**
+
+```
+14:00 NY  -8.5bp  t -5.8      7:00 NY  +6.3bp  t +4.8
+ 5:00 NY  -5.3bp  t -4.2     16:00 NY  +5.5bp  t +3.8
+18:00 NY  -5.1bp  t -3.2
+```
+
+14:00 NY is the strongest and it is a genuine effect. But two corrections decide
+whether it is tradeable, and both were initially wrong in this script:
+
+1. **Clustering.** Treating each pair-hour as independent gave t −5.8. One
+   observation per NY day (the equal-weight basket) is the honest unit, and that
+   drops gross holdout t to **2.0** on n=73 days.
+2. **Cost.** An earlier version charged 0.28bp by mangling a percent conversion.
+   `feeRate 0.0005` is 0.05% = **5bp per side**, so a round trip is 10bp of fees
+   plus 2bp slippage per side = **14bp**.
+
+```
+short the basket at 14:00 NY, hold 1h, one obs/day:
+  train    n=109  gross +7.45bp t 1.4    NET  -6.55bp t -1.3
+  HOLDOUT  n= 73  gross +9.98bp t 2.0    NET  -4.02bp t -0.8
+  full sample NET -5.54bp/day     $100 compounded -> $90.21
+```
+
+**A real anomaly that is smaller than the cost of trading it.** The move is
+~8-10bp; the round trip is 14bp. Even at zero fees the gross holdout t is only
+2.0 on 73 days, so it is not a foundation for anything aggressive. At
+institutional cost (maker rebates, ~4-5bp round trip) it would be marginally
+net-positive with t near 1 — which is a fact about fee tiers, not an edge worth
+sizing.
+
+### Where the search now stands
+
+Exhausted, on this data, honestly:
+
+```
+ICT engine, causal            -0.27R to -0.47R   t -2.2 to -5.4   ruin
+6 new strategy families       -0.17R to -0.85R   t -5 to -40
+13 exit/entry variants        best +0.215R       t 1.9, fails causally
+money management              improves median $34->$80, cannot create edge
+weekday seasonality           nothing clears 77-test correction
+hour-of-day seasonality       real gross, net negative after 14bp costs
+```
+
+Nothing here compounds $100 to $1,000. The honest constraint is not effort or
+aggression — it is that a ~10bp signal cannot pay a 14bp toll, and the ICT stack's
+apparent edge was information it could not have had. Further searching of these
+182 days will produce false positives, not edge; that is now the main risk.

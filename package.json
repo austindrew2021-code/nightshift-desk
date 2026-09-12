@@ -26,7 +26,9 @@
     "test:template": "node --test 'scripts/**/*.test.mjs'",
     "variants:ict": "node --experimental-strip-types scripts/ict-variants.ts",
     "research:ict": "node --experimental-strip-types scripts/ict-research.ts",
-    "money:ict": "node --experimental-strip-types scripts/ict-money.ts"
+    "money:ict": "node --experimental-strip-types scripts/ict-money.ts",
+    "causal:ict": "node --experimental-strip-types scripts/ict-causal-test.ts",
+    "season:ict": "node --experimental-strip-types scripts/ict-seasonality.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
