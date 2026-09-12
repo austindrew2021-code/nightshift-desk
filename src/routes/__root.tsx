@@ -23,13 +23,22 @@ export const Route = createRootRoute({
           "Five Grok agents on a paper trading desk. Live backtest, ICT playbook, pump.fun pipeline.",
       },
       { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-title", content: "NIGHTSHIFT" },
+      { name: "theme-color", content: "#070b09" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: `${BASE}favicon.svg` },
       { rel: "stylesheet", href: appCss },
-      { rel: "manifest", href: `${BASE}__grok/manifest.webmanifest` },
-      { rel: "apple-touch-icon", href: `${BASE}__grok/icon-180.png` },
+      // Our own manifest, not the template's /__grok/ one: that is synthesised
+      // per-request from the hostname, so off a *.grok.me host it names the
+      // installed app "Grok App" and points at an icon that is not in this
+      // repo (public/__grok/ is gitignored) — which makes the app
+      // un-installable on Android. Relative URLs inside the manifest resolve
+      // against the manifest itself, so this works on both "/" and
+      // "/nightshift-desk/".
+      { rel: "manifest", href: `${BASE}manifest.webmanifest` },
+      { rel: "apple-touch-icon", sizes: "180x180", href: `${BASE}icon-180.png` },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {

@@ -1,0 +1,18 @@
+{
+  "name": "NIGHTSHIFT",
+  "short_name": "NIGHTSHIFT",
+  "description": "Five Grok agents on a paper trading desk. Watch the backtest. No wallet. No live execution.",
+  "id": ".",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070b09",
+  "theme_color": "#070b09",
+  "categories": ["finance", "education"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -30,9 +30,18 @@ commit that closed it, so the next bot knows it was considered.
 | 17 | low | AUDITOR | `?? 30` duplicates `VIRTUAL_SOL_FALLBACK` | `session.ts:255,289` |
 | 18 | low | TIMING | `equalPool` / `impulseRange` written but never wired | `ict.ts:694,715` |
 | 19 | low | CHECKER | `high_risk` / `low_score` leak snake_case into the tape | `pipeline.ts:70` |
+| 20 | **critical** | TIMING | 71% of signals need future bars to be detected — lookahead | `ict.ts` `scanIct` |
+| 21 | **critical** | AUDITOR | `simulateIct` applies zero fees, spread, slippage or funding | `ict.ts:1223-1227` |
+| 22 | high | AUDITOR | Exits fill at the exact stop/target price, so R quantises to integers | `ict.ts:1190-1216` |
+| 23 | high | AUDITOR | 12% risk/trade is what produces the 13x, not edge | `types.ts:254` |
+| 24 | high | AUDITOR | `div` setups auto-fill at signal price without price trading there | `ict.ts:1156` |
+| 25 | ~~med~~ | ~~FLOOR~~ | ~~PWA not installable: manifest named "Grok App", icon 404s~~ | closed `b7499b2`+ |
+| 26 | ~~low~~ | ~~RIGGER~~ | ~~eslint had no `.netlify/**` ignore; a local build broke lint~~ | closed |
 
-Recommended first three: **2** (gates), **1** (the clock), **4** (the brake that
-lies). After those, everything else stays fixed once fixed.
+Recommended first three: **20** (lookahead), **21** (costs), **2** (gates). Rows 20
+and 21 outrank everything else on this board: until they are fixed, no number the
+desk reports about profitability means anything, so no strategy work is worth
+doing. Then **1** (the clock) and **4** (the brake that lies). After those, everything else stays fixed once fixed.
 
 ---
 
@@ -208,3 +217,125 @@ that is intended, because the tape is telling the user *why* it passed.
 Not a defect; the fix that retires a whole class of them. A test that reads
 `README.md` and asserts every risk number matches its exported constant makes
 rows 4, 5, 6 and 11 permanently self-policing.
+
+
+---
+
+### 20 · 71% of ICT signals require future bars — critical — TIMING
+
+Measured 2026-09-12 against live OKX 15m candles, 11 books, 300 bars each. For
+each signal emitted at bar `i`, the series was truncated to `0..i` and `scanIct`
+re-run. **36 of 51 signals vanished** — they cannot be detected at the bar they
+claim to fire on:
+
+```
+div       20 / 24   83%
+ob         8 /  8  100%
+breaker    3 /  3  100%
+ifvg       2 /  2  100%
+swing      3 /  8   38%
+```
+
+`simulateIct` then begins looking for the fill at `s.i + 1` (`ict.ts:1168`), so
+entries are placed on information that did not exist yet. Some of this may be
+legitimate detection *lag* rather than true lookahead — a fractal needs bars to
+its right before it is known — but the effect on the backtest is identical: the
+trade is entered before the signal was knowable. Either way it must be fixed at
+the same place, by giving every signal an "earliest knowable bar" and refusing
+to fill before it.
+
+`div` is the sharpest case: 83% lookahead-dependent, 24 of 49 signals, and the
+highest win rate in the book. It is carrying the results.
+
+Reproduce: the probe in `scripts/ict-probe.ts` plus the truncation loop described
+above. Turn it into a permanent test — `ict.test.ts` should assert that every
+signal survives truncation at its own bar.
+
+### 21 · `simulateIct` models no trading costs at all — critical — AUDITOR
+
+```ts
+const r = ((exit - s.entry) * dir) / Math.abs(s.entry - s.stop);
+const pnlUsd = r * riskUsd;                    // ict.ts:1223-1227
+```
+
+That is the whole PnL calculation. No exchange fee, no spread, no slippage, no
+funding — on a position `ictRiskUsd` sizes up to **12× book notional**
+(`ICT_MARGIN_PCT 0.8 × ICT_LEVERAGE 15`). Meanwhile `execution.ts` carefully
+models 1% pump fee, Jito tip and curve slippage for the meme path, so the ICT
+path is the one place costs were skipped.
+
+Scale of the omission: at the measured **median stop distance of 0.41% of
+price**, round-trip taker fees at 0.05% a side cost `0.001 / 0.0041 ≈ 0.24R`
+per trade — before funding. A quarter of an R off every trade, on a strategy
+whose honest edge is unknown.
+
+Fix: charge fee, spread and funding inside `simulateIct` (or return a cost
+breakdown the caller applies), then re-measure every `SetupOdds` number.
+
+### 22 · Exits fill at exact stop/target prices — high — AUDITOR
+
+`exit = curTgt` and `exit = curStop` (`ict.ts:1190-1216`) fill at the precise
+level whenever the bar's range touches it. Real fills gap through stops and slip
+on targets. The tell is in the output: across 38 trades `avgR` came out at
+**exactly +1.000**, and every per-setup average landed on an exact integer
+(−1.00, +1.00, +2.00). Price action does not do that; quantised fills do.
+
+This biases in one direction — losses are capped at exactly −1R when a real gap
+would take more, and wins are booked at exactly the target when a real fill
+would be worse. Add gap handling: if a bar opens beyond the stop, fill at the
+open, not the stop.
+
+### 23 · The 13x is position size, not edge — high — AUDITOR
+
+`ICT_MAX_RISK_PCT = 0.12` (`types.ts:254`) risks **12% of book per trade**, about
+six times the conventional 2%. `ictRiskUsd` is called with a flat 1% stop
+assumption (`session.ts:793`, `ictRiskUsd(s, 0.01)`), which lands notional on the
+`book × 0.8 × 15` cap, so risk resolves to 12% of book on essentially every
+trade.
+
+Compounding is the whole story: roughly twelve net 2R wins at 12% risk is
+`1.24^12 ≈ 12.8×`. A $100 start reaching ~$1,300 needs no edge beyond a coin
+flip biased slightly right — which is exactly what rows 20-22 manufacture. On the
+same trade list, 2% risk with costs applied returns about 1.6×, not 17×.
+
+`maybeBank` (50% of every $100 into a vault) is a genuinely good brake and does
+dampen this. It does not change the conclusion.
+
+Do not treat this as "reduce the number". Treat it as: the number is currently
+doing the work that edge is supposed to do, and that will not be visible until
+rows 20-22 are closed.
+
+### 24 · `div` setups fill for free — high — AUDITOR
+
+```ts
+let filled = s.setup === "div";                // ict.ts:1156
+```
+
+Every other setup must wait for price to trade through the entry
+(`c.l <= s.entry && c.h >= s.entry`). `div` is marked filled at the signal price
+immediately, whether or not price was ever there. `div` was 24 of 49 signals and
+the highest-winning setup. Combined with row 20 (83% of `div` signals need future
+bars) this is the single largest source of fake PnL in the engine.
+
+### 25 · PWA install — CLOSED
+
+The manifest was the template's `/__grok/manifest.webmanifest`, synthesised
+per-request from the hostname: off a `*.grok.me` host `appNameFromHost` falls
+back to `DEFAULT_APP_NAME = "Grok App"`, and the only icon it declares
+(`/__grok/icon-180.png`) is not in the repo because `.gitignore:15` ignores
+`public/__grok/`. Verified against a real Netlify-preset build: manifest 200 but
+named "Grok App", icon **404** — and an icon that does not load costs Android
+installability outright.
+
+Now ships its own `public/manifest.webmanifest` (name NIGHTSHIFT, standalone,
+phosphor `#070b09`, 192/512/maskable icons generated from `favicon.svg`) with
+relative URLs so it resolves under both `/` and `/nightshift-desk/`. The template
+`__grok` middleware is untouched. Verified 200 on every asset.
+
+### 26 · eslint linted build output — CLOSED
+
+`eslint.config.mjs` ignored `dist`, `.output`, `.vercel` and `.nitro` but not
+`.netlify` — yet `vite.config.ts:177` selects the **netlify** preset whenever
+`NETLIFY` is set, which `netlify.toml` does. So anyone running a production build
+locally then linting got hundreds of errors from vendored third-party bundles.
+Added `.netlify/**` and `.tanstack/**`.

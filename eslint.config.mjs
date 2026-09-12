@@ -12,7 +12,13 @@ export default tseslint.config(
       "dist/**",
       ".output/**",
       ".vercel/**",
+      // vite.config.ts picks the netlify nitro preset when NETLIFY is set
+      // (netlify.toml sets it), so a local Netlify build drops vendored
+      // bundles here. Without this, `npm run lint` reports hundreds of
+      // errors from third-party code.
+      ".netlify/**",
       ".nitro/**",
+      ".tanstack/**",
       "node_modules/**",
       "src/routeTree.gen.ts",
     ],

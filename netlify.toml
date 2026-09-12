@@ -5,3 +5,16 @@
 [build.environment]
   NODE_VERSION = "22"
   NETLIFY = "true"
+
+# A .webmanifest is served as application/octet-stream by default, which makes
+# Chrome warn and can cost installability. The spec type is manifest+json.
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json; charset=utf-8"
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/icon-*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
