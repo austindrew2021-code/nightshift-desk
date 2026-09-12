@@ -49,6 +49,11 @@ const TOGGLES: { id: ChartZone["kind"] | "orders"; label: string }[] = [
   { id: "ob", label: "OB" },
   { id: "asia", label: "ASIA" },
   { id: "nine", label: "9AM" },
+  { id: "daily", label: "DAY" },
+  { id: "weekly", label: "WK" },
+  { id: "fib", label: "FIB" },
+  { id: "ote", label: "OTE" },
+  { id: "grab", label: "GRAB" },
   { id: "kill", label: "KZ" },
   { id: "entry", label: "FILLS" },
   { id: "orders", label: "ORDERS" },
@@ -288,6 +293,80 @@ export function LiveChart({
           ctx.fillStyle = UP;
           ctx.font = "10px ui-monospace, monospace";
           ctx.fillText("9AM", labelX(x0 + 4), y0 + 12);
+        }
+        if (z.kind === "daily" && vis("daily")) {
+          const x0 = xAt(z.t0);
+          const x1 = Math.max(x0 + 8, xAt(z.t1));
+          const eq = (z.top + z.bot) / 2;
+          ctx.setLineDash([6, 5]);
+          ctx.strokeStyle = "rgba(138,162,255,0.7)";
+          ctx.beginPath();
+          ctx.moveTo(x0, yAt(z.top));
+          ctx.lineTo(x1, yAt(z.top));
+          ctx.moveTo(x0, yAt(z.bot));
+          ctx.lineTo(x1, yAt(z.bot));
+          ctx.stroke();
+          ctx.strokeStyle = "rgba(138,162,255,0.35)";
+          ctx.beginPath();
+          ctx.moveTo(x0, yAt(eq));
+          ctx.lineTo(x1, yAt(eq));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = "rgba(138,162,255,0.85)";
+          ctx.font = "9px ui-monospace, monospace";
+          ctx.fillText("PDH", labelX(x0 + 4), yAt(z.top) + 11);
+          ctx.fillText("PDL", labelX(x0 + 4), yAt(z.bot) - 3);
+          ctx.fillText("EQ", labelX(x0 + 4), yAt(eq) - 3);
+        }
+        if (z.kind === "weekly" && vis("weekly")) {
+          const x0 = xAt(z.t0);
+          const x1 = Math.max(x0 + 8, xAt(z.t1));
+          ctx.setLineDash([2, 6]);
+          ctx.strokeStyle = "rgba(255,196,90,0.65)";
+          ctx.beginPath();
+          ctx.moveTo(x0, yAt(z.top));
+          ctx.lineTo(x1, yAt(z.top));
+          ctx.moveTo(x0, yAt(z.bot));
+          ctx.lineTo(x1, yAt(z.bot));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = "rgba(255,196,90,0.85)";
+          ctx.font = "9px ui-monospace, monospace";
+          ctx.fillText("PWH", labelX(x0 + 4), yAt(z.top) + 11);
+          ctx.fillText("PWL", labelX(x0 + 4), yAt(z.bot) - 3);
+        }
+        if (z.kind === "fib" && vis("fib")) {
+          const x0 = xAt(z.t0);
+          const x1 = Math.max(x0 + 8, xAt(z.t1));
+          const strong = z.label === "61.8" || z.label === "70.5" || z.label === "78.6";
+          ctx.setLineDash(z.label === "50" ? [8, 4] : [3, 5]);
+          ctx.strokeStyle = strong ? "rgba(215,239,224,0.55)" : "rgba(122,154,134,0.35)";
+          ctx.beginPath();
+          ctx.moveTo(x0, yAt(z.top));
+          ctx.lineTo(x1, yAt(z.top));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = strong ? "rgba(215,239,224,0.85)" : MUTED;
+          ctx.font = "8px ui-monospace, monospace";
+          ctx.fillText(z.label, labelX(x1 - 28), yAt(z.top) - 3);
+        }
+        if (z.kind === "ote" && vis("ote")) {
+          const x0 = xAt(z.t0);
+          const x1 = Math.max(x0 + 8, xAt(z.t1));
+          ctx.fillStyle = z.dir === 1 ? "rgba(61,255,138,0.08)" : "rgba(255,107,107,0.08)";
+          ctx.fillRect(x0, yAt(z.top), x1 - x0, yAt(z.bot) - yAt(z.top));
+          ctx.fillStyle = z.dir === 1 ? UP : DN;
+          ctx.font = "8px ui-monospace, monospace";
+          ctx.fillText(z.label, labelX(x0 + 4), yAt((z.top + z.bot) / 2) + 3);
+        }
+        if (z.kind === "grab" && vis("grab")) {
+          const x0 = xAt(z.t0);
+          const x1 = Math.max(x0 + 4, xAt(z.t1));
+          ctx.fillStyle = z.dir === 1 ? "rgba(61,255,138,0.28)" : "rgba(255,107,107,0.28)";
+          ctx.fillRect(x0 - 1, yAt(z.top), Math.max(6, x1 - x0 + 2), yAt(z.bot) - yAt(z.top));
+          ctx.fillStyle = z.dir === 1 ? UP : DN;
+          ctx.font = "8px ui-monospace, monospace";
+          ctx.fillText(z.label, labelX(x0 + 2), yAt(z.dir === 1 ? z.bot : z.top) + (z.dir === 1 ? 10 : -2));
         }
         if (z.kind === "fvg" && vis("fvg")) {
           ctx.fillStyle = z.dir === 1 ? "rgba(61,255,138,0.16)" : "rgba(255,107,107,0.16)";

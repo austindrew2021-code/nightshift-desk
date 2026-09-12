@@ -4,7 +4,7 @@ import {
 } from "@/lib/engine/session";
 import type { DeskMode, TapeEvent } from "@/lib/engine/types";
 
-const KEY = "nightshift.engine.v3";
+const KEY = "nightshift.engine.v4";
 const START_KEY = "nightshift.startUsd";
 const MODES: DeskMode[] = ["watch", "live", "ict", "zostaff"];
 
@@ -92,6 +92,8 @@ export function loadEngine(): EngineState | null {
       ictSeen: Array.isArray(e.ictSeen) ? e.ictSeen : [],
       ictFilter: typeof e.ictFilter === "string" ? e.ictFilter : "ALL",
       ictStyle: e.ictStyle === "sweep" || e.ictStyle === "scalp" || e.ictStyle === "swing" ? e.ictStyle : "all",
+      ictRiskPct: e.ictRiskPct === 0.12 || e.ictRiskPct === 0.3 ? e.ictRiskPct : 0.18,
+      ictLev: e.ictLev === 10 || e.ictLev === 15 ? e.ictLev : 20,
       zPlan: Array.isArray(e.zPlan) ? e.zPlan : [],
       zCursor: finite(e.zCursor),
       zDone: Boolean(e.zDone),

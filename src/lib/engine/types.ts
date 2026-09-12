@@ -18,6 +18,7 @@ export type SetupKind =
   | "breaker"
   | "ifvg"
   | "judas"
+  | "daily"
   | "weekly"
   | "asia"
   | "published";
@@ -248,13 +249,14 @@ export const TRAIL_PCT = 0.35;
 export const MAX_HOLD_MS = 3_600_000;
 export const MIN_SCORE = 0.65;
 
-/** ICT paper: 10% of tradable per 1R on A+ only. Bank 25% of each +$200 after the first $200. 15x is the notional ceiling. */
-export const ICT_LEVERAGE = 15;
-export const ICT_MARGIN_PCT = 0.8;
-export const ICT_MAX_RISK_PCT = 0.10;
+/** ICT paper: 20× leverage, 50% of the book as default margin (10× notional). 1R aims at 18% of equity (hard cap = 1R). Bank 25% of each +$200 after the first $200. 12% and 30% are user chips. */
+export const ICT_LEVERAGE = 20;
+export const ICT_MARGIN_PCT = 0.5;
+export const ICT_MAX_RISK_PCT = 0.18;
+export const ICT_HARD_RISK_PCT = 0.18;
 export const BANK_EVERY_USD = 200;
 export const BANK_RATE = 0.25;
-export const ICT_DAILY_LOSS_PCT = 0.28;
+export const ICT_DAILY_LOSS_PCT = 0.22;
 
 /** @deprecated use DEFAULT_START_USD — kept so older imports keep compiling */
 export const START_USD = DEFAULT_START_USD;

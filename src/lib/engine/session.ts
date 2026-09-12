@@ -5,9 +5,9 @@ import {
   ICT_LEVERAGE,
   ICT_MARGIN_PCT,
   ICT_MAX_RISK_PCT,
+  ICT_HARD_RISK_PCT,
   BANK_EVERY_USD,
   BANK_RATE,
-  ICT_DAILY_LOSS_PCT,
   MAX_DAILY_TRADES,
   MAX_HOLD_MS,
   MAX_OPEN,
@@ -31,7 +31,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { inKill, nyHour, nyParts, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
+import { inKill, lockRFromMfe, nyHour, nyParts, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -88,6 +88,8 @@ export interface EngineState {
   ictFilter: string;
   ictSeen: string[];
   ictStyle: import("./types").IctStyle;
+  ictRiskPct: number;
+  ictLev: number;
   tickN: number;
   dayLoss: number;
   zPlan: ZostaffStep[];
@@ -125,13 +127,30 @@ export function tradableUsd(s: EngineState): number {
   return Math.max(0, finite(s.equityUsd, s.startUsd) - finite(s.bankedUsd));
 }
 
-/** 10% of tradable per 1R. 15x×80% is the notional ceiling, not a 2% clip. */
+/** 20× on 50% is the default 10× notional. 1R follows ictRiskPct (12/18/30). Hard cap = that 1R. */
 export function ictRiskUsd(s: EngineState, stopPct = 0.01): { risk: number; notional: number } {
   const book = Math.max(s.startUsd * 0.25, tradableUsd(s) || s.startUsd);
-  const risk = Math.max(1, book * ICT_MAX_RISK_PCT);
-  const notionalCap = book * ICT_MARGIN_PCT * ICT_LEVERAGE;
-  const notional = Math.min(risk / Math.max(1e-6, stopPct), notionalCap);
-  return { risk: notional * Math.max(1e-6, stopPct), notional };
+  const sp = Math.max(1e-6, stopPct);
+  const lev = s.ictLev || ICT_LEVERAGE;
+  const riskPct = s.ictRiskPct || ICT_MAX_RISK_PCT;
+  const floor = book * ICT_MARGIN_PCT * lev;
+  const cap = book * lev;
+  const fromRisk = (book * riskPct) / sp;
+  let notional = Math.min(cap, Math.max(floor, fromRisk));
+  let risk = notional * sp;
+  const hard = book * Math.max(riskPct, ICT_HARD_RISK_PCT);
+  if (risk > hard) {
+    notional = hard / sp;
+    risk = hard;
+  }
+  return { risk: Math.max(1, risk), notional };
+}
+
+function ictHaltPct(s: EngineState) {
+  const r = s.ictRiskPct || ICT_MAX_RISK_PCT;
+  if (r >= 0.28) return 0.32;
+  if (r >= 0.16) return 0.22;
+  return 0.28;
 }
 
 function maybeBank(s: EngineState) {
@@ -186,6 +205,8 @@ export function createEngine(solUsd = 100, startUsd = DEFAULT_START_USD): Engine
     ictFilter: "ALL",
     ictSeen: [],
     ictStyle: "all",
+    ictRiskPct: ICT_MAX_RISK_PCT,
+    ictLev: ICT_LEVERAGE,
     tickN: 0,
     dayLoss: 0,
     zPlan: [],
@@ -705,7 +726,7 @@ function tickIct(s: EngineState, market: MarketSnapshot | null) {
 
 function markIct(s: EngineState, market: MarketSnapshot | null) {
   const books = market?.books ?? [];
-  const trailSet = new Set(["asia", "scalp", "silver", "judas", "amd"]);
+  const trailSet = new Set(["asia", "scalp", "silver", "judas", "amd", "daily", "sweep"]);
   for (const p of s.open) {
     if (p.origin !== "ict") continue;
     const b = books.find((x) => x.symbol === p.symbol || x.id === p.symbol);
@@ -729,7 +750,6 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
         continue;
       }
       if (mfe >= risk) {
-        stopPx = p.side === "long" ? Math.max(stopPx, p.entryUsd) : Math.min(stopPx, p.entryUsd);
         if (!p.partialed) {
           const half = finite(p.sizeUsd) * 0.5;
           const pnl = half * p.stopPct;
@@ -772,18 +792,16 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
             tone: "up",
           });
         }
+        const lock = lockRFromMfe(mfe, risk);
+        if (lock >= 0) {
+          const lockPx = p.side === "long" ? p.entryUsd + lock * risk : p.entryUsd - lock * risk;
+          stopPx = p.side === "long" ? Math.max(stopPx, lockPx) : Math.min(stopPx, lockPx);
+        }
       }
-      if (mfe >= risk * 1.2 && series.length >= 3) {
-        const a = series[series.length - 1]!;
-        const d = series[series.length - 2]!;
-        const e = series[series.length - 3]!;
-        if (p.side === "long") stopPx = Math.max(stopPx, Math.min(a.l, d.l, e.l));
-        else stopPx = Math.min(stopPx, Math.max(a.h, d.h, e.h));
-      }
-      tgtPx = p.side === "long" ? p.entryUsd + risk * 3 : p.entryUsd - risk * 3;
+      tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
       p.stopUsd = stopPx;
       p.targetUsd = tgtPx;
-      p.targetR = 3;
+      p.targetR = 5;
     }
     if (p.side === "long" && lo <= stopPx) {
       s.open = s.open.filter((x) => x.id !== p.id);
@@ -836,13 +854,13 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const now = Date.now();
   const liveFromOpen = now - 4 * 3600_000;
   const liveFromClosed = now - 45 * 60_000;
-  if (finite(s.dayLoss) >= s.startUsd * (s.mode === "ict" ? ICT_DAILY_LOSS_PCT : DAILY_LOSS_PCT)) {
+  if (finite(s.dayLoss) >= s.startUsd * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT)) {
     if (s.tickN % 30 === 1) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `daily loss halt · $${s.dayLoss.toFixed(0)} / ${(s.mode === "ict" ? ICT_DAILY_LOSS_PCT * 100 : DAILY_LOSS_PCT * 100).toFixed(0)}% · Reset to trade again`,
+        text: `daily loss halt · $${s.dayLoss.toFixed(0)} / ${((s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT) * 100).toFixed(0)}% · Reset to trade again`,
         tone: "warn",
       });
     }
@@ -863,7 +881,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     if ((s.ictStyle === "all" || s.ictStyle === "scalp" || s.ictStyle === "sweep") && b.candles5 && b.candles5.length >= 48) {
       for (const sig of scanIct(b.candles5, { skipSwing: true })) {
         if (!styleAllows(s.ictStyle, sig.setup)) continue;
-        if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "judas" || sig.setup === "amd") {
+        if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "judas" || sig.setup === "amd" || sig.setup === "sweep") {
           s5.push({ ...sig, note: `${sig.note} · 5m` });
         }
       }
@@ -903,7 +921,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       );
       if (cooled) continue;
       const sameSideOpen = s.open.filter((p) => p.origin === "ict" && p.side === t.side);
-      if (sameSideOpen.length >= 2) continue;
+      const rangeFade = t.setup === "daily" || t.setup === "weekly" || t.setup === "sweep";
+      if (rangeFade && sameSideOpen.length >= 1) continue;
+      if (!rangeFade && sameSideOpen.length >= 2) continue;
       const isAlt = t.symbol !== "BTC" && t.symbol !== "ETH";
       if (
         isAlt &&
@@ -921,7 +941,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           s.open.length >= MAX_OPEN
         )
           continue;
-        const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas" || t.setup === "amd";
+        const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas" || t.setup === "amd" || t.setup === "daily" || t.setup === "sweep";
         const stopDist = Math.abs(t.entryUsd - t.stop);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
         const sized = ictRiskUsd(s, stopPct);
@@ -932,8 +952,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const pnlUsd = ((mark - t.entryUsd) / Math.max(1e-9, t.entryUsd)) * sizeUsd * dir;
         const targetUsd = trail
           ? t.side === "long"
-            ? t.entryUsd + stopDist * 3
-            : t.entryUsd - stopDist * 3
+            ? t.entryUsd + stopDist * 5
+            : t.entryUsd - stopDist * 5
           : t.target;
         s.open = [
           ...s.open,
@@ -949,15 +969,15 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             sizeSol: sizeUsd / Math.max(1e-6, s.solUsd),
             sizeUsd,
             stopPct,
-            targetR: trail ? 3 : Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
+            targetR: trail ? 5 : Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
             markUsd: mark,
             pnlSol: pnlUsd / Math.max(1e-6, s.solUsd),
             pnlUsd,
             peakUsd: mark,
             agent: "timing",
             note: trail
-              ? `${t.note} · trail BE@1R → 3R · 15x ${ICT_MARGIN_PCT * 100}%`
-              : `${t.note} · 15x ${ICT_MARGIN_PCT * 100}%`,
+              ? `${t.note} · ½@1R ratchet → 5R · ${s.ictLev || 20}x`
+              : `${t.note} · ${s.ictLev || 20}x`,
             origin: "ict",
             stopUsd: t.stop,
             targetUsd,
@@ -1116,7 +1136,7 @@ function repairIctCash(s: EngineState) {
       t: s.simT || Date.now(),
       kind: "note",
       symbol: "ICT",
-      text: `ICT cash repaired · was ${was.toFixed(0)} · now $${next.toFixed(0)} · 1% risk, not full notional · open swings kept`,
+      text: `ICT cash repaired · was ${was.toFixed(0)} · now $${next.toFixed(0)} · 20x×50% notional, 1R capped 18% · open swings kept`,
       tone: "warn",
     });
   }
@@ -1208,7 +1228,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle} from $${s.startUsd.toFixed(0)} · live fills only · sweep/scalp/swing + 5m/1H`,
+      text: `ICT ${ictFilter} ${s.ictStyle} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x / ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ½@1R ratchet → 5R`,
       tone: "mute",
     });
   }

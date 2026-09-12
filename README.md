@@ -6,7 +6,7 @@ Five Grok agents on a paper trading desk. Watch the backtest. No wallet. No live
 
 A phosphor-green trading floor modeled on the public @zostaff five-agent pump.fun pipeline, wired to:
 
-- **TTrades ICT** — A+ only: raid → CISD → FVG/Unicorn in premium/discount. Power of 3, Judas, Silver Bullet 10–11 + 2–3 NY
+- **TTrades ICT** — A+ only: raid → CISD → FVG/Unicorn in premium/discount of the daily/weekly range. Power of 3, Judas, Silver Bullet 10–11 + 2–3 NY, PDH/PDL reversals. 20× / 50% margin
 - **CoinGlass-style tape** — SOL/BTC, funding, open interest, long/short, Fear & Greed (OKX + Alternative.me)
 - **Live pump.fun mints** — hunter feed from the public frontend API, marked to live mcap
 - **Starting balance** — type $100 (or tap a preset). Every mode resets from scratch at that start
@@ -18,7 +18,7 @@ A phosphor-green trading floor modeled on the public @zostaff five-agent pump.fu
 | --- | --- |
 | Watch | Same Zostaff method, faster hunter on the live queue. Fees still apply |
 | Live paper | Zostaff method on today's mints. 0.1 SOL cap, 50% stop, 1% fee + Jito + curve slip. Marks follow live mcap. Can lose |
-| ICT · majors | Mechanical TTrades A+ (raid → CISD → FVG in PD) on live 15m: BTC ETH SOL XRP XLM TAO NPC + BNB DOGE AVAX LINK HYPE. 10%/1R, bank 25% of +$200 after $200. Not scripted |
+| ICT · majors | Mechanical TTrades A+ plus daily/weekly range (PDH/PDL, PWH/PWL) on live 15m: BTC ETH SOL XRP XLM TAO NPC + BNB DOGE AVAX LINK HYPE. 20× on 50% of the book, 1R capped at 18%. Bank 25% of +$200 after $200. Not scripted |
 | Zostaff run | Published 1 SOL → 80 SOL book ($1k → $80k), scaled to your start. Tickers never released |
 
 ## Zostaff numbers (26 Aug 2026)

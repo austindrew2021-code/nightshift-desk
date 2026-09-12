@@ -47,6 +47,29 @@ export function inKill(t: number): boolean {
   return isLondon(t) || isNyAm(t) || isSilver(t) || isSilverPm(t) || isNyPm(t);
 }
 
+/** London/NY killzones, 9:30 cash open, and the three crypto funding hours — when desks hunt stops. */
+export function isHuntWindow(t: number): boolean {
+  if (inKill(t)) return true;
+  const h = nyHour(t);
+  if (h >= 9.5 && h < 10.5) return true;
+  if (h >= 3.75 && h < 4.5) return true;
+  if (h >= 11.75 && h < 12.5) return true;
+  if (h >= 19.75 && h < 20.5) return true;
+  return false;
+}
+
+/** ICT OTE of an impulse. Longs buy a 62–79% retrace from the high; shorts sell it from the low. 70.5 is the sweet spot. */
+export function oteZone(dH: number, dL: number, side: "long" | "short"): { top: number; bot: number; sweet: number } {
+  const rng = dH - dL;
+  if (!(rng > 0)) return { top: dH, bot: dL, sweet: (dH + dL) / 2 };
+  if (side === "long") {
+    const top = dH - 0.618 * rng;
+    const bot = dH - 0.786 * rng;
+    return { top, bot, sweet: dH - 0.705 * rng };
+  }
+  return { top: dL + 0.786 * rng, bot: dL + 0.618 * rng, sweet: dL + 0.705 * rng };
+}
+
 export interface Swing {
   i: number;
   t: number;
@@ -244,15 +267,16 @@ function atr(cs: Candle[], i: number, n = 14): number {
 }
 
 /** CISD: close through the candle series that made the swept swing. */
-function cisd(cs: Candle[], sweepI: number, side: "long" | "short"): { ok: boolean; i: number; fvg?: FVG } {
+function cisd(cs: Candle[], sweepI: number, side: "long" | "short", fromBar?: number): { ok: boolean; i: number; fvg?: FVG } {
   const fvgs = detectFvgs(cs);
   const from = Math.max(0, sweepI - 8);
+  const start = fromBar ?? sweepI + 1;
   if (side === "long") {
     let seriesHigh = cs[sweepI]!.h;
     for (let k = from; k <= sweepI; k++) {
       if (cs[k]!.c <= cs[k]!.o) seriesHigh = Math.max(seriesHigh, cs[k]!.h);
     }
-    for (let k = sweepI + 1; k <= Math.min(cs.length - 1, sweepI + 8); k++) {
+    for (let k = start; k <= Math.min(cs.length - 1, sweepI + 8); k++) {
       const n = cs[k]!;
       const body = Math.abs(n.c - n.o);
       const range = n.h - n.l || 1;
@@ -266,7 +290,7 @@ function cisd(cs: Candle[], sweepI: number, side: "long" | "short"): { ok: boole
     for (let k = from; k <= sweepI; k++) {
       if (cs[k]!.c >= cs[k]!.o) seriesLow = Math.min(seriesLow, cs[k]!.l);
     }
-    for (let k = sweepI + 1; k <= Math.min(cs.length - 1, sweepI + 8); k++) {
+    for (let k = start; k <= Math.min(cs.length - 1, sweepI + 8); k++) {
       const n = cs[k]!;
       const body = Math.abs(n.c - n.o);
       const range = n.h - n.l || 1;
@@ -318,6 +342,7 @@ function pack(
 ): IctSignal | null {
   const risk = Math.abs(entry - stop);
   if (!Number.isFinite(entry) || !Number.isFinite(stop) || risk <= 0) return null;
+  if (risk / entry < 0.002) return null;
   if (risk / entry > maxRisk) return null;
   if (side === "long" && target <= entry) return null;
   if (side === "short" && target >= entry) return null;
@@ -327,10 +352,15 @@ function pack(
 function twoR(side: "long" | "short", entry: number, stop: number, erl?: number, mult = 2): number {
   const risk = Math.abs(entry - stop);
   const raw = side === "long" ? entry + risk * mult : entry - risk * mult;
-  if (erl == null || !Number.isFinite(erl)) return raw;
-  const erlR = Math.abs(erl - entry) / risk;
-  if (erlR < 1.2) return raw;
-  return side === "long" ? Math.max(erl, raw) : Math.min(erl, raw);
+  let out = raw;
+  if (erl != null && Number.isFinite(erl)) {
+    const erlR = Math.abs(erl - entry) / risk;
+    if (erlR >= 1.7 && erlR <= 3.5) {
+      out = side === "long" ? Math.max(erl, raw) : Math.min(erl, raw);
+    }
+  }
+  const cap = risk * Math.max(3.5, mult);
+  return side === "long" ? Math.min(out, entry + cap) : Math.max(out, entry - cap);
 }
 
 interface RaidMem {
@@ -405,6 +435,95 @@ function hourExtremeIndex(
   return best;
 }
 
+export interface DayHl {
+  day: string;
+  h: number;
+  l: number;
+  c: number;
+}
+
+/** Causal NY-day high/low up to index `upTo` (no future bars). */
+export function buildDayMap(cs: Candle[], upTo: number): DayHl[] {
+  const map = new Map<string, DayHl>();
+  const last = Math.min(upTo, cs.length - 1);
+  for (let i = 0; i <= last; i++) {
+    const c = cs[i]!;
+    const day = nyParts(c.t).day;
+    const rec = map.get(day);
+    if (!rec) map.set(day, { day, h: c.h, l: c.l, c: c.c });
+    else {
+      rec.h = Math.max(rec.h, c.h);
+      rec.l = Math.min(rec.l, c.l);
+      rec.c = c.c;
+    }
+  }
+  return [...map.values()];
+}
+
+export function prevDayOf(days: DayHl[], day: string): DayHl | null {
+  const i = days.findIndex((d) => d.day === day);
+  return i > 0 ? days[i - 1]! : null;
+}
+
+/** Prior 5 completed NY days — crypto's working "week" without lookahead. */
+export function weekOf(days: DayHl[], day: string): { h: number; l: number } | null {
+  const i = days.findIndex((d) => d.day === day);
+  const prior = days.slice(Math.max(0, i - 5), Math.max(0, i));
+  if (prior.length < 3) return null;
+  return { h: Math.max(...prior.map((d) => d.h)), l: Math.min(...prior.map((d) => d.l)) };
+}
+
+function locIn(px: number, rng: { h: number; l: number } | null): number {
+  if (!rng || rng.h <= rng.l) return 0.5;
+  return (px - rng.l) / (rng.h - rng.l);
+}
+
+/** Discount ≤ 0.55 for longs, premium ≥ 0.45 for shorts. Missing range = allow. */
+function inRangePd(side: "long" | "short", px: number, rng: { h: number; l: number } | null, longMax = 0.55, shortMin = 0.45): boolean {
+  if (!rng || rng.h <= rng.l) return true;
+  const loc = locIn(px, rng);
+  return side === "long" ? loc <= longMax : loc >= shortMin;
+}
+
+/**
+ * Institutional stop-hunt / flash crash: an ATR-spike wick through a pool that
+ * closes back inside. Long the reclaim of a low grab, short the reclaim of a high grab.
+ */
+function flashGrab(
+  cs: Candle[],
+  i: number,
+  level: number,
+  side: "long" | "short",
+  a: number,
+): { ok: boolean; sweepI: number; sweepPx: number } {
+  const c = cs[i]!;
+  const prev = i > 0 ? cs[i - 1]! : c;
+  const range = c.h - c.l;
+  const prevRange = prev.h - prev.l;
+  if (side === "long") {
+    const same = c.l < level && c.c > level && range >= a * 1.7 && Math.min(c.o, c.c) - c.l >= range * 0.4;
+    if (same) return { ok: true, sweepI: i, sweepPx: c.l };
+    const two =
+      prev.l < level &&
+      prevRange >= a * 1.5 &&
+      c.c > level &&
+      c.c > c.o &&
+      c.l <= prev.l * 1.001;
+    if (two) return { ok: true, sweepI: i - 1, sweepPx: Math.min(prev.l, c.l) };
+  } else {
+    const same = c.h > level && c.c < level && range >= a * 1.7 && c.h - Math.max(c.o, c.c) >= range * 0.4;
+    if (same) return { ok: true, sweepI: i, sweepPx: c.h };
+    const two =
+      prev.h > level &&
+      prevRange >= a * 1.5 &&
+      c.c < level &&
+      c.c < c.o &&
+      c.h >= prev.h * 0.999;
+    if (two) return { ok: true, sweepI: i - 1, sweepPx: Math.max(prev.h, c.h) };
+  }
+  return { ok: false, sweepI: i, sweepPx: level };
+}
+
 /** 24h open→close. Flatter than the 6h 0.35% slope, closer to a daily bias. */
 function dailyBias(cs: Candle[], i: number): 1 | -1 | 0 {
   const dt = i > 0 ? Math.max(60_000, cs[i]!.t - cs[i - 1]!.t) : 15 * 60_000;
@@ -446,8 +565,15 @@ function aPlus(
   note: string,
   targetMult: number,
   maxRisk = 0.055,
+  flash = false,
 ): IctSignal | null {
-  const conf = cisd(cs, raid.sweepI, raid.side);
+  let conf = cisd(cs, raid.sweepI, raid.side, flash ? raid.sweepI : undefined);
+  if (!conf.ok && flash) {
+    const want: 1 | -1 = raid.side === "long" ? 1 : -1;
+    const fvg = [...fvgs].reverse().find((f) => f.dir === want && f.i >= raid.sweepI && f.i <= raid.sweepI + 5);
+    const ob = [...obs].reverse().find((o) => o.dir === want && o.i >= Math.max(0, raid.sweepI - 2) && o.i <= raid.sweepI + 5);
+    if (fvg || ob) conf = { ok: true, i: fvg?.i ?? ob!.i, fvg };
+  }
   if (!conf.ok) return null;
   const want: 1 | -1 = raid.side === "long" ? 1 : -1;
   const fvg =
@@ -475,9 +601,16 @@ function aPlus(
   dL = Math.min(dL, raid.sweepPx);
   if (!Number.isFinite(dH) || dH <= dL) return null;
   const eq = (dH + dL) / 2;
-  const entry = (zone.top + zone.bot) / 2;
+  const ote = oteZone(dH, dL, raid.side);
+  const oteHit = overlap(zone.top, zone.bot, ote.top, ote.bot);
   if (raid.side === "short" && zone.top < eq) return null;
   if (raid.side === "long" && zone.bot > eq) return null;
+  let entry = (zone.top + zone.bot) / 2;
+  if (oteHit) {
+    const top = Math.min(zone.top, ote.top);
+    const bot = Math.max(zone.bot, ote.bot);
+    entry = ote.sweet >= bot && ote.sweet <= top ? ote.sweet : (top + bot) / 2;
+  }
   const a = atr(cs, conf.i);
   const stopPad = a * 0.12;
   const stop = raid.side === "long" ? raid.sweepPx - stopPad : raid.sweepPx + stopPad;
@@ -487,7 +620,7 @@ function aPlus(
   if (dol != null && Math.abs(dol - entry) / risk < 1.7) return null;
   const tgt = twoR(raid.side, entry, stop, dol, targetMult);
   if (Math.abs(tgt - entry) / risk < 1.7) return null;
-  const grade = uni ? "A+" : "A";
+  const grade = uni && oteHit ? "A+" : oteHit ? "A OTE" : uni ? "A Unicorn" : "A";
   return pack(
     conf.i,
     cs[conf.i]!.t,
@@ -496,7 +629,7 @@ function aPlus(
     entry,
     stop,
     tgt,
-    `${note} · ${raid.src} · CISD · ${zone.tag} · ${grade} · ${targetMult.toFixed(1)}R`,
+    `${note} · ${raid.src} · CISD · ${zone.tag}${oteHit ? " ∩ OTE 62–79" : ""} · ${grade} · ${targetMult.toFixed(1)}R`,
     maxRisk,
   );
 }
@@ -516,9 +649,10 @@ export interface IctSignal {
  * TTrades A+ on 15m/5m:
  *  daily bias, AMD London wick of Asia, Judas 7–10 NY (incl. 9am true open),
  *  Silver Bullet 10–11 NY on the 9am hour, PM Silver Bullet 2–3 NY,
+ *  previous-day / previous-week range extremes (PDH/PDL, PWH/PWL),
  *  CISD, Unicorn OB∩FVG, FVG CE in premium/discount of the displacement,
  *  DOL ≥ 1.7R. Sweep alone is not a trade. RSI-div is not a trade.
- *  Per NY day: session models kept; at most one Unicorn continuation.
+ *  HTF filter: longs only in daily+weekly discount, shorts only in premium.
  */
 export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing?: boolean }): IctSignal[] {
   if (cs.length < 48) return [];
@@ -530,10 +664,19 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
   const asiaRaid = new Map<string, RaidMem>();
   const ovnRaid = new Map<string, RaidMem>();
   const amRaid = new Map<string, RaidMem>();
+  const dayRaid = new Map<string, RaidMem>();
+  const grabRaid = new Map<string, RaidMem>();
 
-  const add = (sig: IctSignal | null) => {
+  const add = (sig: IctSignal | null, days: DayHl[], day: string) => {
     if (!sig) return;
     if (signals.some((x) => Math.abs(x.i - sig.i) < 4 && x.side === sig.side)) return;
+    const today = days.find((d) => d.day === day) ?? null;
+    const pd = prevDayOf(days, day);
+    const wk = weekOf(days, day);
+    const dealing = today && today.h > today.l ? today : pd;
+    const fade = sig.setup === "daily" || sig.setup === "weekly" || sig.setup === "sweep";
+    if (!fade && !inRangePd(sig.side, sig.entry, dealing, 0.58, 0.42)) return;
+    if (!inRangePd(sig.side, sig.entry, wk, 0.62, 0.38)) return;
     signals.push(sig);
   };
 
@@ -544,6 +687,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
     const london = hourRangeAt(cs, day, 2, 5, i);
     const ovnH = Math.max(range?.asiaH ?? -Infinity, london?.h ?? -Infinity);
     const ovnL = Math.min(range?.asiaL ?? Infinity, london?.l ?? Infinity);
+    const days = buildDayMap(cs, i);
+    const pd = prevDayOf(days, day);
 
     if (range?.asiaReady) {
       if (c.h > range.asiaH) {
@@ -572,6 +717,15 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
       }
     }
 
+    if (pd && pd.h > pd.l) {
+      if (c.h > pd.h && c.c < pd.h) {
+        rememberRaid(dayRaid, day, { side: "short", sweepI: i, sweepPx: c.h, src: "PDH" });
+      }
+      if (c.l < pd.l && c.c > pd.l) {
+        rememberRaid(dayRaid, day, { side: "long", sweepI: i, sweepPx: c.l, src: "PDL" });
+      }
+    }
+
     if (isLondon(c.t) && asiaRaid.has(day)) {
       add(
         aPlus(
@@ -584,6 +738,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
           "AMD · London raid of Asia",
           3,
         ),
+        days,
+        day,
       );
     }
 
@@ -599,6 +755,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
           "Judas 7–10 NY · fake open",
           2,
         ),
+        days,
+        day,
       );
     }
 
@@ -619,6 +777,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
               "SB 10–11 NY · swept 9am high",
               2,
             ),
+            days,
+            day,
           );
         } else if (sweptLow) {
           add(
@@ -632,6 +792,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
               "SB 10–11 NY · swept 9am low",
               2,
             ),
+            days,
+            day,
           );
         } else {
           const asiaR = asia.get(day);
@@ -653,6 +815,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
                 "SB 10–11 NY · 9am fail-through",
                 2,
               ),
+              days,
+              day,
             );
           } else if (asiaR?.asiaReady && nineDone.l < asiaR.asiaL && c.c > nineDone.l && c.c > c.o) {
             const extI = hourExtremeIndex(cs, day, 9, 10, i, "long");
@@ -672,6 +836,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
                 "SB 10–11 NY · 9am fail-through",
                 2,
               ),
+              days,
+              day,
             );
           }
         }
@@ -690,6 +856,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
           "SB 2–3 NY · AM session raid",
           2,
         ),
+        days,
+        day,
       );
     }
 
@@ -705,11 +873,73 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
           "PM scalp 1:30–4 NY",
           2,
         ),
+        days,
+        day,
       );
+    }
+
+    if (inKill(c.t) && dayRaid.has(day)) {
+      const raid = dayRaid.get(day)!;
+      add(
+        aPlus(
+          cs,
+          fvgs,
+          obs,
+          sw,
+          raid,
+          "daily",
+          raid.side === "long" ? "Daily range · PDL reversal" : "Daily range · PDH reversal",
+          2,
+        ),
+        days,
+        day,
+      );
+    }
+
+    if (isHuntWindow(c.t)) {
+      const dt = i > 0 ? cs[i]!.t - cs[i - 1]!.t : 15 * 60_000;
+      if (dt <= 6 * 60_000) {
+      const a = atr(cs, i);
+      const levels: { px: number; side: "long" | "short"; src: string }[] = [];
+      if (pd && pd.h > pd.l) {
+        levels.push({ px: pd.h, side: "short", src: "PDH grab" }, { px: pd.l, side: "long", src: "PDL grab" });
+      }
+      if (range?.asiaReady) {
+        levels.push({ px: range.asiaH, side: "short", src: "Asia grab" }, { px: range.asiaL, side: "long", src: "Asia grab" });
+      }
+      const fxH = lastFractal(sw, i, "high");
+      const fxL = lastFractal(sw, i, "low");
+      if (fxH) levels.push({ px: fxH.price, side: "short", src: "BSL grab" });
+      if (fxL) levels.push({ px: fxL.price, side: "long", src: "SSL grab" });
+      const eqp = equalPool(sw, i, a);
+      if (eqp?.kind === "high") levels.push({ px: eqp.px, side: "short", src: "EQH grab" });
+      if (eqp?.kind === "low") levels.push({ px: eqp.px, side: "long", src: "EQL grab" });
+      for (const lv of levels) {
+        const g = flashGrab(cs, i, lv.px, lv.side, a);
+        if (!g.ok) continue;
+        rememberRaid(grabRaid, day, { side: lv.side, sweepI: g.sweepI, sweepPx: g.sweepPx, src: lv.src });
+      }
+      if (grabRaid.has(day)) {
+        const raid = grabRaid.get(day)!;
+        const sig = aPlus(
+          cs,
+          fvgs,
+          obs,
+          sw,
+          raid,
+          "sweep",
+          raid.side === "long" ? "Flash crash · long the low grab" : "Liquidity grab · short the high",
+          2,
+          0.06,
+          true,
+        );
+        if (sig) add(sig, days, day);
+      }
+      }
     }
   }
 
-  if (opts?.includeSwing) for (const s of scanSwing(cs)) add(s);
+  if (opts?.includeSwing) for (const s of scanSwing(cs)) add(s, buildDayMap(cs, cs.length - 1), nyParts(s.t).day);
   return pickDay(signals);
 }
 
@@ -938,28 +1168,29 @@ export function scanWeekly(cs: Candle[]): IctSignal[] {
 }
 
 export function styleAllows(style: string, setup: SetupKind): boolean {
-  if (style === "sweep") return setup === "sweep" || setup === "amd" || setup === "judas";
-  if (style === "scalp") return setup === "scalp" || setup === "silver" || setup === "judas" || setup === "asia";
+  if (style === "sweep") return setup === "sweep" || setup === "amd" || setup === "judas" || setup === "daily" || setup === "weekly";
+  if (style === "scalp") return setup === "scalp" || setup === "silver" || setup === "judas" || setup === "asia" || setup === "daily" || setup === "sweep";
   if (style === "swing") return setup === "swing" || setup === "weekly" || setup === "breaker" || setup === "ifvg";
   return true;
 }
 
 const SETUP_RANK: Record<SetupKind, number> = {
   silver: 0,
-  amd: 1,
-  judas: 2,
-  asia: 3,
-  scalp: 4,
-  swing: 5,
-  weekly: 6,
-  sweep: 7,
-  breaker: 8,
-  ifvg: 9,
-  ob: 10,
-  fvg: 11,
-  div: 12,
-  curve: 13,
-  published: 14,
+  sweep: 1,
+  amd: 2,
+  judas: 3,
+  daily: 4,
+  weekly: 5,
+  asia: 6,
+  scalp: 7,
+  swing: 8,
+  breaker: 9,
+  ifvg: 10,
+  ob: 11,
+  fvg: 12,
+  div: 13,
+  curve: 14,
+  published: 15,
 };
 
 /** Keep the session models; don't let early OBs spend the day's budget. */
@@ -978,7 +1209,7 @@ function pickDay(raw: IctSignal[]): IctSignal[] {
       if (uniq.some((x) => Math.abs(x.i - s.i) < 4 && x.side === s.side)) continue;
       uniq.push(s);
     }
-    const pinned = ["silver", "amd", "judas", "scalp", "swing", "weekly"] as const;
+    const pinned = ["silver", "amd", "judas", "scalp"] as const;
     const kept: IctSignal[] = [];
     for (const kind of pinned) {
       const hit = uniq.find((s) => s.setup === kind);
@@ -1037,7 +1268,7 @@ export function scanSmt(cs: Candle[], other: Candle[], otherSym: string): IctSig
   return out.slice(0, 2);
 }
 
-export type ZoneKind = "fvg" | "ob" | "asia" | "nine" | "kill" | "entry" | "stop" | "target";
+export type ZoneKind = "fvg" | "ob" | "asia" | "nine" | "kill" | "entry" | "stop" | "target" | "daily" | "weekly" | "fib" | "ote" | "grab";
 
 export interface ChartZone {
   kind: ZoneKind;
@@ -1098,6 +1329,7 @@ export function chartLayers(cs: Candle[], signals: IctSignal[] = []): ChartZone[
   }
 
   const days = new Set(view.map((c) => nyParts(c.t).day));
+  const allDays = buildDayMap(cs, cs.length - 1);
   for (const day of days) {
     const nine = hourRange(cs, day, 9, 10);
     if (!nine) continue;
@@ -1112,6 +1344,66 @@ export function chartLayers(cs: Candle[], signals: IctSignal[] = []): ChartZone[
       label: "9am",
       dir: 0,
     });
+  }
+
+  for (const day of days) {
+    const bars = view.filter((c) => nyParts(c.t).day === day);
+    if (!bars.length) continue;
+    const pd = prevDayOf(allDays, day);
+    if (pd && pd.h > pd.l) {
+      out.push({
+        kind: "daily",
+        t0: bars[0]!.t,
+        t1: bars[bars.length - 1]!.t,
+        top: pd.h,
+        bot: pd.l,
+        label: "PDH/PDL",
+        dir: 0,
+      });
+      const rng = pd.h - pd.l;
+      const t0d = bars[0]!.t;
+      const t1d = bars[bars.length - 1]!.t;
+      for (const [f, lab] of [
+        [0.382, "38.2"],
+        [0.5, "50"],
+        [0.618, "61.8"],
+        [0.705, "70.5"],
+        [0.786, "78.6"],
+      ] as const) {
+        const px = pd.l + f * rng;
+        out.push({ kind: "fib", t0: t0d, t1: t1d, top: px, bot: px, label: lab, dir: 0 });
+      }
+      out.push({
+        kind: "ote",
+        t0: t0d,
+        t1: t1d,
+        top: pd.l + 0.382 * rng,
+        bot: pd.l + (1 - 0.786) * rng,
+        label: "OTE L",
+        dir: 1,
+      });
+      out.push({
+        kind: "ote",
+        t0: t0d,
+        t1: t1d,
+        top: pd.l + 0.786 * rng,
+        bot: pd.l + 0.618 * rng,
+        label: "OTE S",
+        dir: -1,
+      });
+    }
+    const wk = weekOf(allDays, day);
+    if (wk && wk.h > wk.l) {
+      out.push({
+        kind: "weekly",
+        t0: bars[0]!.t,
+        t1: bars[bars.length - 1]!.t,
+        top: wk.h,
+        bot: wk.l,
+        label: "PWH/PWL",
+        dir: 0,
+      });
+    }
   }
 
   const fvgs = detectFvgs(cs).filter((f) => f.i >= from).slice(-10);
@@ -1142,6 +1434,38 @@ export function chartLayers(cs: Candle[], signals: IctSignal[] = []): ChartZone[
       label: o.dir === 1 ? "Bull OB" : "Bear OB",
       dir: o.dir,
     });
+  }
+
+  const dt = view.length > 1 ? Math.max(60_000, view[1]!.t - view[0]!.t) : 15 * 60_000;
+  for (let i = Math.max(from + 2, 14); i < cs.length; i++) {
+    if (!isHuntWindow(cs[i]!.t)) continue;
+    const a = atr(cs, i);
+    const c = cs[i]!;
+    const range = c.h - c.l;
+    if (range < a * 1.7) continue;
+    const upWick = c.h - Math.max(c.o, c.c);
+    const dnWick = Math.min(c.o, c.c) - c.l;
+    if (dnWick >= range * 0.4 && c.c > c.o) {
+      out.push({
+        kind: "grab",
+        t0: c.t,
+        t1: Math.min(c.t + dt, lastT),
+        top: Math.min(c.o, c.c),
+        bot: c.l,
+        label: "GRAB L",
+        dir: 1,
+      });
+    } else if (upWick >= range * 0.4 && c.c < c.o) {
+      out.push({
+        kind: "grab",
+        t0: c.t,
+        t1: Math.min(c.t + dt, lastT),
+        top: c.h,
+        bot: Math.max(c.o, c.c),
+        label: "GRAB S",
+        dir: -1,
+      });
+    }
   }
 
   for (const s of signals) {
@@ -1182,13 +1506,27 @@ export interface IctSimTrade extends ClosedTrade {
   target: number;
 }
 
+export type TrailMode = "be3" | "ratchet" | "full";
+
+export function lockRFromMfe(mfe: number, risk: number): number {
+  if (mfe >= 4 * risk) return 3;
+  if (mfe >= 3 * risk) return 2;
+  if (mfe >= 2.5 * risk) return 1.5;
+  if (mfe >= 2 * risk) return 1;
+  if (mfe >= 1.5 * risk) return 0.5;
+  if (mfe >= risk) return 0;
+  return -1;
+}
+
 export function simulateIct(
   cs: Candle[],
   signals: IctSignal[],
   riskUsd = 10,
   symbol = "SOL",
   name = "Solana",
+  opts?: { mode?: TrailMode },
 ): IctSimTrade[] {
+  const mode = opts?.mode ?? "ratchet";
   const trades: IctSimTrade[] = [];
   for (const s of signals) {
     let exit = s.entry;
@@ -1197,36 +1535,36 @@ export function simulateIct(
     let filled = s.setup === "div";
     const dt = cs.length > 1 ? Math.max(60_000, cs[1]!.t - cs[0]!.t) : 15 * 60_000;
     const trail =
-      s.setup === "asia" || s.setup === "scalp" || s.setup === "silver" || s.setup === "judas" || s.setup === "amd";
-    const hold = trail
-      ? Math.max(16, Math.round((3 * 3600_000) / dt))
+      s.setup === "asia" || s.setup === "scalp" || s.setup === "silver" || s.setup === "judas" || s.setup === "amd" || s.setup === "daily" || s.setup === "sweep";
+    const holdBars = trail
+      ? Math.max(16, Math.round(((mode === "be3" ? 3 : 6) * 3600_000) / dt))
       : s.setup === "swing" || s.setup === "weekly" || s.setup === "breaker"
         ? 80
         : 32;
     let curStop = s.stop;
-    let curTgt = trail ? twoR(s.side, s.entry, s.stop, s.target, 3) : s.target;
+    const tgtR = mode === "be3" ? 3 : 5;
+    let curTgt = trail ? twoR(s.side, s.entry, s.stop, s.target, tgtR) : s.target;
     const risk = Math.abs(s.entry - s.stop) || 1;
     let hit1 = false;
     for (let i = s.i + 1; i < cs.length; i++) {
       const c = cs[i]!;
       if (!filled) {
         if (c.l <= s.entry && c.h >= s.entry) filled = true;
-        else if (i > s.i + hold) break;
+        else if (i > s.i + holdBars) break;
         else continue;
       }
       if (trail) {
         const mfe = s.side === "long" ? c.h - s.entry : s.entry - c.l;
-        if (mfe >= risk) {
-          hit1 = true;
-          curStop = s.side === "long" ? Math.max(curStop, s.entry) : Math.min(curStop, s.entry);
-        }
-        if (mfe >= risk * 1.2 && i >= 2) {
-          if (s.side === "long") {
-            const sl = Math.min(cs[i]!.l, cs[i - 1]!.l, cs[i - 2]!.l);
-            curStop = Math.max(curStop, sl);
-          } else {
-            const sh = Math.max(cs[i]!.h, cs[i - 1]!.h, cs[i - 2]!.h);
-            curStop = Math.min(curStop, sh);
+        if (mfe >= risk) hit1 = true;
+        if (mode === "be3") {
+          if (mfe >= risk) {
+            curStop = s.side === "long" ? Math.max(curStop, s.entry) : Math.min(curStop, s.entry);
+          }
+        } else {
+          const lock = lockRFromMfe(mfe, risk);
+          if (lock >= 0) {
+            const lockPx = s.side === "long" ? s.entry + lock * risk : s.entry - lock * risk;
+            curStop = s.side === "long" ? Math.max(curStop, lockPx) : Math.min(curStop, lockPx);
           }
         }
       }
@@ -1257,7 +1595,7 @@ export function simulateIct(
           break;
         }
       }
-      if (i > s.i + hold) {
+      if (i > s.i + holdBars) {
         exit = c.c;
         reason = "time";
         closedAt = c.t;
@@ -1267,8 +1605,8 @@ export function simulateIct(
     if (!filled) continue;
     const dir = s.side === "long" ? 1 : -1;
     const rawR = ((exit - s.entry) * dir) / Math.abs(s.entry - s.stop);
-    // TTrades partial: bank 0.5R at 1R, runner is the rest. BE after 1R is +0.5R not 0.
-    const r = hit1 ? 0.5 + 0.5 * rawR : rawR;
+    const partial = mode !== "full";
+    const r = partial && hit1 ? 0.5 + 0.5 * rawR : rawR;
     const pnlUsd = r * riskUsd;
     trades.push({
       id: `ict-${symbol}-${s.setup}-${s.i}`,
@@ -1296,21 +1634,22 @@ export function simulateIct(
 }
 
 export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
-  const kinds: SetupKind[] = ["silver", "amd", "judas", "asia", "scalp", "sweep", "breaker", "ifvg", "fvg", "ob", "div", "swing", "weekly"];
+  const kinds: SetupKind[] = ["silver", "amd", "judas", "daily", "weekly", "asia", "scalp", "sweep", "breaker", "ifvg", "fvg", "ob", "div", "swing"];
   const labels: Record<SetupKind, string> = {
     silver: "Silver Bullet 10–11 + 2–3 NY (scalp)",
     amd: "Power of 3 (AMD)",
     judas: "Judas 7–10 NY open fake",
+    daily: "Daily range · PDH/PDL reversal",
+    weekly: "Weekly range · PWH/PWL reversal",
     asia: "Asia KZ / NDOG (HTF only)",
     scalp: "NY PM scalp 1:30–4",
-    sweep: "Sweep + CISD (eq H/L)",
+    sweep: "Flash crash / liquidity grab",
     breaker: "Breaker (failed OB flip)",
     ifvg: "Inversion FVG",
     fvg: "FVG CE + OTE 62–79",
     ob: "Order block / Unicorn",
     div: "RSI / hidden / SMT",
     swing: "1H swing OB/FVG 3R",
-    weekly: "Weekly high/low raid 3R",
     curve: "Pump.fun early curve",
     published: "Published outlier",
   };
@@ -1318,16 +1657,17 @@ export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
     silver: "TTrades Silver Bullet 10–11 NY and 2–3 NY. Sweep the 9am hour (AM) or AM session (PM), or CISD off a 9am Asia raid. Partial 0.5R at 1R, runner 2–3R.",
     amd: "Asia range, London wick, NY distribution. 3R, partial at 1R.",
     judas: "NY 7–10 raid of overnight high/low (9am true open included), then CISD reverse. The fake open, not the true NY move.",
+    daily: "Previous-day high/low (and today’s extreme). Long the discount, short the premium, only with CISD + FVG. Target EQ then the other side.",
+    weekly: "Prior 5-day high/low raid + CISD. Long only in weekly discount, short only in premium. 3R swing.",
     asia: "20:00–02:00 NY continuation in HTF. Trail BE at 1R, runner 3R. Never fade the Asia range.",
     scalp: "PM session high/low raid + CISD. 1.5R, 4h time stop.",
-    sweep: "Equal highs/lows then CISD. Sweep alone is not a trade.",
+    sweep: "ATR-spike wick through PDH/PDL, Asia, SSL/BSL or equal H/L that closes back inside. Long the low grab, short the high. Same pattern desks use to run stops, then fade.",
     breaker: "Order block closed through, then retested as the other side.",
     ifvg: "FVG filled the wrong way, then used as continuation.",
-    fvg: "Displacement FVG or OTE 62–79 retrace in PD.",
+    fvg: "Displacement FVG or OTE 62–79 retrace of the impulse. Entry at 70.5 when the FVG overlaps.",
     ob: "Last opposite candle. Unicorn = OB overlapping FVG.",
     div: "Regular and hidden RSI divergence plus BTC/ETH SMT.",
     swing: "Native 1H order block / FVG. 3R, holds the session.",
-    weekly: "Prior-week high/low raid on 1H + CISD. 3R swing.",
     curve: "Bonding-curve filter from the five-agent desk.",
     published: "Reconstructed from the public @zostaff writeup.",
   };

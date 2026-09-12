@@ -28,6 +28,8 @@ interface DeskStore {
   hydrateBooks: (books: IctBook[]) => void;
   setIctFilter: (id: string) => void;
   setIctStyle: (id: IctStyle) => void;
+  setIctRiskPct: (n: number) => void;
+  setIctLev: (n: number) => void;
   setMarketError: (e: string | null) => void;
   setLoading: (v: boolean) => void;
   play: () => void;
@@ -102,6 +104,16 @@ export const useDesk = create<DeskStore>((set, get) => ({
     set({ engine });
     saveEngine(engine);
   },
+  setIctRiskPct: (n) => {
+    const engine = { ...get().engine, ictRiskPct: n };
+    set({ engine });
+    saveEngine(engine);
+  },
+  setIctLev: (n) => {
+    const engine = { ...get().engine, ictLev: n };
+    set({ engine });
+    saveEngine(engine);
+  },
   setMarketError: (e) => set({ marketError: e, loadingMarket: false }),
   setLoading: (v) => set({ loadingMarket: v }),
   play: () =>
@@ -125,7 +137,11 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const sol = market?.solUsd ?? get().engine.solUsd;
     const start = get().engine.startUsd;
     const launches = market?.launches ?? [];
-    const engine = resetEngine(m, sol, start, launches, get().engine.ictFilter);
+    const prev = get().engine;
+    const engine = resetEngine(m, sol, start, launches, prev.ictFilter);
+    engine.ictStyle = prev.ictStyle;
+    engine.ictRiskPct = prev.ictRiskPct;
+    engine.ictLev = prev.ictLev;
     if (market) applyMarket(engine, market);
     if (m === "ict" && market?.books?.length) ingestIct(engine, market);
     set({ engine, grokNote: null });
@@ -135,10 +151,14 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const start = clampStart(n);
     writeSavedStart(start);
     const market = get().market;
-    const sol = market?.solUsd ?? get().engine.solUsd;
-    const mode = get().engine.mode;
+    const prev = get().engine;
+    const sol = market?.solUsd ?? prev.solUsd;
+    const mode = prev.mode;
     const launches = market?.launches ?? [];
-    const engine = resetEngine(mode, sol, start, launches, get().engine.ictFilter);
+    const engine = resetEngine(mode, sol, start, launches, prev.ictFilter);
+    engine.ictStyle = prev.ictStyle;
+    engine.ictRiskPct = prev.ictRiskPct;
+    engine.ictLev = prev.ictLev;
     if (market) applyMarket(engine, market);
     if (mode === "ict" && market?.books?.length) ingestIct(engine, market);
     set({ engine, grokNote: null });
@@ -152,7 +172,11 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const sol = market?.solUsd ?? get().engine.solUsd;
     const start = get().engine.startUsd;
     const launches = market?.launches ?? [];
-    const engine = resetEngine(m, sol, start, launches, get().engine.ictFilter);
+    const prev = get().engine;
+    const engine = resetEngine(m, sol, start, launches, prev.ictFilter);
+    engine.ictStyle = prev.ictStyle;
+    engine.ictRiskPct = prev.ictRiskPct;
+    engine.ictLev = prev.ictLev;
     if (market) applyMarket(engine, market);
     if (m === "ict" && market?.books?.length) ingestIct(engine, market);
     clearEngineSave();
