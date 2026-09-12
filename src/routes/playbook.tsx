@@ -17,16 +17,16 @@ const AGENTS = [
 ];
 
 const ICT = [
-  { t: "Bias first", d: "TTrades: 5h slope first. No long into a sell day, no short into a buy day." },
+  { t: "Bias first", d: "TTrades: 24h open→close first. No long into a sell day, no short into a buy day — except Judas/Silver Bullet, which fade the fake." },
   { t: "Power of 3", d: "Asia accumulates, London puts the daily wick, NY is the body. Drawn as the Asia box on the 15m chart." },
-  { t: "Asia", d: "20:00–02:00 NY is accumulation. We do not trade it. London 2–5 raids the Asia range (AMD). 7-day test: Asia continuation was −17R." },
-  { t: "15x / bank", d: "ICT risks 12% of tradable per 1R (Unicorn OB∩FVG, divergence, 1H swing, London AMD). Each +$100 profit banks 50%. Asia is not traded. This is sized to hunt hundreds–$1k weeks on $100 — a red cluster can give a large chunk back." },
-  { t: "Judas", d: "NY 7–10 raid of overnight high/low (includes the 9am true-open spike), then CISD reverse. The fake open, not the true NY move. HTF bias does not veto this — the raid is the fake." },
-  { t: "Scalps", d: "Silver Bullet 10–11 NY: sweep of the 9am hour, or CISD away from a 9am Asia raid if price never makes a second sweep. PM 1:30–4 NY. Same models on 5m. 1.5R, short hold." },
-  { t: "Swings / weekly", d: "Native 1H OB/FVG 3R, plus prior-week high/low raid. Tap SWING." },
-  { t: "Breaker / iFVG", d: "Failed order block flipped. FVG closed the wrong way then used as continuation." },
-  { t: "Order block / Unicorn / OTE", d: "Last opposite candle. Unicorn = OB∩FVG. OTE is the 62–79 retrace of displacement." },
-  { t: "FVG + divergence", d: "FVG entry at CE in premium/discount. Regular + hidden RSI. SMT: BTC vs ETH failed swing." },
+  { t: "Asia", d: "20:00–02:00 NY is accumulation. We do not trade it. London 2–5 raids the Asia range (AMD)." },
+  { t: "A+ only / 10% / bank", d: "A trade needs all four: liquidity raid, CISD displacement, FVG or Unicorn in premium (short) / discount (long), and at least 1.7R to the next draw on liquidity. Live book is Silver Bullet + Judas + London AMD only — continuation Unicorn/div/1H swing were −11R in week one. 10% of tradable per 1R. Bank 25% of each +$200 after the first $200. 14-day walk-forward on the 12 majors: $100 → $232, 72% win, +0.22R expectancy, both weeks green. That compounds toward $1k in a few weeks, not in one. A red cluster can still give a chunk back — daily halt is 28%." },
+  { t: "Judas", d: "NY 7–10 raid of overnight high/low (includes the 9am true-open spike), then CISD reverse. The fake open, not the true NY move. HTF bias does not veto this." },
+  { t: "Scalps", d: "Silver Bullet 10–11 NY: sweep of the 9am hour, or CISD away from a 9am Asia raid. PM Silver Bullet 2–3 NY: sweep of the AM session. PM scalp 1:30–4. Half off at 1R, runner to 2–3R." },
+  { t: "Swings / weekly", d: "Off the default book — they were −11R in week one of the walk-forward. Tap SWING if you want native 1H OB/FVG and weekly raids; they are optional, not the compound path." },
+  { t: "Breaker / iFVG", d: "Failed order block flipped only when it overlaps an FVG. iFVG only in premium/discount of the day." },
+  { t: "Order block / Unicorn / OTE", d: "Last opposite candle. Unicorn = OB∩FVG = A+. Entry at the CE of that zone, never mid-range." },
+  { t: "FVG + divergence", d: "FVG entry at CE in premium/discount. SMT: BTC vs ETH failed swing. Standalone RSI-div is off — it was noise." },
 ];
 
 function PlaybookPage() {
@@ -74,7 +74,7 @@ function PlaybookPage() {
             },
             {
               t: "3. ICT · majors — live 15m",
-              d: "Tap ICT · majors. Boxes are history. The $ book takes new fills plus today's still-open A+ (sweep/scalp/swing). Naked sweeps are not trades. Leave it through a NY 10–11 or 1:30–4 window.",
+              d: "Tap ICT · majors. Boxes are history. The $ book only takes A+ fills (raid + CISD + FVG in premium/discount) plus today's still-open ones. Naked sweeps are not trades. Leave it through London 2–5, Judas 7–10, Silver Bullet 10–11 or 2–3 NY.",
             },
             {
               t: "4. What “accurate” means",

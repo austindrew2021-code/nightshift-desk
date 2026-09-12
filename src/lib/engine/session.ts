@@ -7,6 +7,7 @@ import {
   ICT_MAX_RISK_PCT,
   BANK_EVERY_USD,
   BANK_RATE,
+  ICT_DAILY_LOSS_PCT,
   MAX_DAILY_TRADES,
   MAX_HOLD_MS,
   MAX_OPEN,
@@ -124,7 +125,7 @@ export function tradableUsd(s: EngineState): number {
   return Math.max(0, finite(s.equityUsd, s.startUsd) - finite(s.bankedUsd));
 }
 
-/** 12% of tradable per 1R. 15x×80% is the notional ceiling, not a 2% clip. */
+/** 10% of tradable per 1R. 15x×80% is the notional ceiling, not a 2% clip. */
 export function ictRiskUsd(s: EngineState, stopPct = 0.01): { risk: number; notional: number } {
   const book = Math.max(s.startUsd * 0.25, tradableUsd(s) || s.startUsd);
   const risk = Math.max(1, book * ICT_MAX_RISK_PCT);
@@ -136,6 +137,7 @@ export function ictRiskUsd(s: EngineState, stopPct = 0.01): { risk: number; noti
 function maybeBank(s: EngineState) {
   if (s.mode !== "ict") return;
   const lifetime = finite(s.equityUsd) - s.startUsd;
+  if (lifetime < BANK_EVERY_USD) return;
   const targetVault = Math.floor(lifetime / BANK_EVERY_USD) * (BANK_EVERY_USD * BANK_RATE);
   const take = targetVault - finite(s.bankedUsd);
   if (take < 1) return;
@@ -148,7 +150,7 @@ function maybeBank(s: EngineState) {
     t: s.simT || Date.now(),
     kind: "note",
     symbol: "BANK",
-    text: `banked ${moved.toFixed(0)} · 50% of +$${BANK_EVERY_USD} · vault $${s.bankedUsd.toFixed(0)} · trade $${(finite(s.equityUsd) - s.bankedUsd).toFixed(0)}`,
+    text: `banked ${moved.toFixed(0)} · 25% of +$${BANK_EVERY_USD} after first $${BANK_EVERY_USD} · vault $${s.bankedUsd.toFixed(0)} · trade $${(finite(s.equityUsd) - s.bankedUsd).toFixed(0)}`,
     tone: "up",
   });
 }
@@ -703,7 +705,7 @@ function tickIct(s: EngineState, market: MarketSnapshot | null) {
 
 function markIct(s: EngineState, market: MarketSnapshot | null) {
   const books = market?.books ?? [];
-  const trailSet = new Set(["asia", "scalp", "silver", "judas"]);
+  const trailSet = new Set(["asia", "scalp", "silver", "judas", "amd"]);
   for (const p of s.open) {
     if (p.origin !== "ict") continue;
     const b = books.find((x) => x.symbol === p.symbol || x.id === p.symbol);
@@ -728,6 +730,48 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
       }
       if (mfe >= risk) {
         stopPx = p.side === "long" ? Math.max(stopPx, p.entryUsd) : Math.min(stopPx, p.entryUsd);
+        if (!p.partialed) {
+          const half = finite(p.sizeUsd) * 0.5;
+          const pnl = half * p.stopPct;
+          p.partialed = true;
+          p.sizeUsd = half;
+          p.sizeSol = half / Math.max(1e-6, s.solUsd);
+          s.cashUsd = finite(s.cashUsd) + pnl;
+          s.closed = [
+            {
+              id: `${p.id}-p1`,
+              symbol: p.symbol,
+              name: p.name,
+              setup: p.setup,
+              side: p.side,
+              openedAt: p.openedAt,
+              closedAt: s.simT,
+              entryUsd: p.entryUsd,
+              exitUsd: p.side === "long" ? p.entryUsd + risk : p.entryUsd - risk,
+              sizeSol: p.sizeSol,
+              pnlSol: pnl / Math.max(1e-6, s.solUsd),
+              pnlUsd: pnl,
+              rMultiple: 0.5,
+              reason: "target" as const,
+              score: 0.75,
+              note: `${p.note} · ½ @ 1R`,
+              origin: "ict" as const,
+              stopUsd: p.stopUsd,
+              targetUsd: p.targetUsd,
+            },
+            ...s.closed,
+          ].slice(0, 80);
+          s.stats.wins += 1;
+          p.note = `${p.note} · runner ½`;
+          pushTape(s, {
+            t: s.simT,
+            kind: "close",
+            agent: "timing",
+            symbol: p.symbol,
+            text: `½ @ 1R ${p.symbol} +${pnl.toFixed(2)} · runner on`,
+            tone: "up",
+          });
+        }
       }
       if (mfe >= risk * 1.2 && series.length >= 3) {
         const a = series[series.length - 1]!;
@@ -792,13 +836,13 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const now = Date.now();
   const liveFromOpen = now - 4 * 3600_000;
   const liveFromClosed = now - 45 * 60_000;
-  if (finite(s.dayLoss) >= s.startUsd * (s.mode === "ict" ? 0.4 : DAILY_LOSS_PCT)) {
+  if (finite(s.dayLoss) >= s.startUsd * (s.mode === "ict" ? ICT_DAILY_LOSS_PCT : DAILY_LOSS_PCT)) {
     if (s.tickN % 30 === 1) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `daily loss halt · $${s.dayLoss.toFixed(0)} / ${(DAILY_LOSS_PCT * 100).toFixed(0)}% · Reset to trade again`,
+        text: `daily loss halt · $${s.dayLoss.toFixed(0)} / ${(s.mode === "ict" ? ICT_DAILY_LOSS_PCT * 100 : DAILY_LOSS_PCT * 100).toFixed(0)}% · Reset to trade again`,
         tone: "warn",
       });
     }
@@ -819,12 +863,12 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     if ((s.ictStyle === "all" || s.ictStyle === "scalp" || s.ictStyle === "sweep") && b.candles5 && b.candles5.length >= 48) {
       for (const sig of scanIct(b.candles5, { skipSwing: true })) {
         if (!styleAllows(s.ictStyle, sig.setup)) continue;
-        if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "judas" || sig.setup === "ifvg" || sig.setup === "ob" || sig.setup === "amd") {
+        if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "judas" || sig.setup === "amd") {
           s5.push({ ...sig, note: `${sig.note} · 5m` });
         }
       }
     }
-    if ((s.ictStyle === "all" || s.ictStyle === "swing") && b.candles1h && b.candles1h.length >= 24) {
+    if (s.ictStyle === "swing" && b.candles1h && b.candles1h.length >= 24) {
       for (const sig of [...scanSwingNative(b.candles1h), ...scanWeekly(b.candles1h)]) {
         if (!styleAllows(s.ictStyle, sig.setup)) continue;
         s1h.push({ ...sig, note: `${sig.note} · 1H` });
@@ -858,13 +902,26 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           now - c.closedAt < 90 * 60_000,
       );
       if (cooled) continue;
+      const sameSideOpen = s.open.filter((p) => p.origin === "ict" && p.side === t.side);
+      if (sameSideOpen.length >= 2) continue;
+      const isAlt = t.symbol !== "BTC" && t.symbol !== "ETH";
+      if (
+        isAlt &&
+        s.open.some(
+          (p) =>
+            p.origin === "ict" &&
+            (p.symbol === "BTC" || p.symbol === "ETH") &&
+            p.side === t.side,
+        )
+      )
+        continue;
       if (stillOpen) {
         if (
           s.open.some((p) => p.id === t.id || (p.origin === "ict" && p.symbol === t.symbol)) ||
           s.open.length >= MAX_OPEN
         )
           continue;
-        const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas";
+        const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas" || t.setup === "amd";
         const stopDist = Math.abs(t.entryUsd - t.stop);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
         const sized = ictRiskUsd(s, stopPct);

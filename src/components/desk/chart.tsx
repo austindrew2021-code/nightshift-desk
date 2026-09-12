@@ -35,10 +35,12 @@ function nextIctHint(now = Date.now()) {
   if (h >= 2 && h < 5) return "London AMD 2–5 NY · live";
   if (h >= 7 && h < 10) return "Judas 7–10 NY · live";
   if (h >= 10 && h < 11) return "Silver Bullet 10–11 NY · live";
+  if (h >= 14 && h < 15) return "PM Silver Bullet 2–3 NY · live";
   if (h >= 13.5 && h < 16) return "PM scalp 1:30–4 NY · live";
   if (h < 2) return "next London 2–5 NY";
   if (h < 7) return "next Judas 7–10 NY";
-  if (h < 13.5) return "next PM 1:30–4 NY";
+  if (h < 10) return "next Silver Bullet 10–11 NY";
+  if (h < 14) return "next PM Silver Bullet 2–3 NY";
   return "next London 2–5 NY (3–6 AM ADT)";
 }
 

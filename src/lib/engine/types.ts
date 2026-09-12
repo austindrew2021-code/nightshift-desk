@@ -124,6 +124,7 @@ export interface Position {
   slippagePct?: number;
   virtualSol?: number;
   realSol?: number;
+  partialed?: boolean;
 }
 
 export interface ClosedTrade {
@@ -247,12 +248,13 @@ export const TRAIL_PCT = 0.35;
 export const MAX_HOLD_MS = 3_600_000;
 export const MIN_SCORE = 0.65;
 
-/** ICT paper: 12% of tradable per 1R (not 2%). Bank 50% each +$100. 15x is the notional ceiling. */
+/** ICT paper: 10% of tradable per 1R on A+ only. Bank 25% of each +$200 after the first $200. 15x is the notional ceiling. */
 export const ICT_LEVERAGE = 15;
 export const ICT_MARGIN_PCT = 0.8;
-export const ICT_MAX_RISK_PCT = 0.12;
-export const BANK_EVERY_USD = 100;
-export const BANK_RATE = 0.5;
+export const ICT_MAX_RISK_PCT = 0.10;
+export const BANK_EVERY_USD = 200;
+export const BANK_RATE = 0.25;
+export const ICT_DAILY_LOSS_PCT = 0.28;
 
 /** @deprecated use DEFAULT_START_USD — kept so older imports keep compiling */
 export const START_USD = DEFAULT_START_USD;

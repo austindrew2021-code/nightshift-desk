@@ -37,11 +37,14 @@ export function isAsia(t: number): boolean {
 export function isJudas(t: number): boolean {
   return inWindow(t, 7, 10);
 }
+export function isSilverPm(t: number): boolean {
+  return inWindow(t, 14, 15);
+}
 export function isNyPm(t: number): boolean {
   return inWindow(t, 13.5, 16);
 }
 export function inKill(t: number): boolean {
-  return isLondon(t) || isNyAm(t) || isSilver(t) || isNyPm(t);
+  return isLondon(t) || isNyAm(t) || isSilver(t) || isSilverPm(t) || isNyPm(t);
 }
 
 export interface Swing {
@@ -249,11 +252,11 @@ function cisd(cs: Candle[], sweepI: number, side: "long" | "short"): { ok: boole
     for (let k = from; k <= sweepI; k++) {
       if (cs[k]!.c <= cs[k]!.o) seriesHigh = Math.max(seriesHigh, cs[k]!.h);
     }
-    for (let k = sweepI + 1; k <= Math.min(cs.length - 1, sweepI + 6); k++) {
+    for (let k = sweepI + 1; k <= Math.min(cs.length - 1, sweepI + 8); k++) {
       const n = cs[k]!;
       const body = Math.abs(n.c - n.o);
       const range = n.h - n.l || 1;
-      if (n.c > seriesHigh && n.c > n.o && body / range >= 0.45 && body >= atr(cs, k) * 0.45) {
+      if (n.c > seriesHigh && n.c > n.o && body / range >= 0.4 && body >= atr(cs, k) * 0.35) {
         const fvg = fvgs.find((f) => f.i === k && f.dir === 1);
         return { ok: true, i: k, fvg };
       }
@@ -263,11 +266,11 @@ function cisd(cs: Candle[], sweepI: number, side: "long" | "short"): { ok: boole
     for (let k = from; k <= sweepI; k++) {
       if (cs[k]!.c >= cs[k]!.o) seriesLow = Math.min(seriesLow, cs[k]!.l);
     }
-    for (let k = sweepI + 1; k <= Math.min(cs.length - 1, sweepI + 6); k++) {
+    for (let k = sweepI + 1; k <= Math.min(cs.length - 1, sweepI + 8); k++) {
       const n = cs[k]!;
       const body = Math.abs(n.c - n.o);
       const range = n.h - n.l || 1;
-      if (n.c < seriesLow && n.c < n.o && body / range >= 0.45 && body >= atr(cs, k) * 0.45) {
+      if (n.c < seriesLow && n.c < n.o && body / range >= 0.4 && body >= atr(cs, k) * 0.35) {
         const fvg = fvgs.find((f) => f.i === k && f.dir === -1);
         return { ok: true, i: k, fvg };
       }
@@ -311,7 +314,7 @@ function pack(
   stop: number,
   target: number,
   note: string,
-  maxRisk = 0.03,
+  maxRisk = 0.055,
 ): IctSignal | null {
   const risk = Math.abs(entry - stop);
   if (!Number.isFinite(entry) || !Number.isFinite(stop) || risk <= 0) return null;
@@ -330,6 +333,174 @@ function twoR(side: "long" | "short", entry: number, stop: number, erl?: number,
   return side === "long" ? Math.max(erl, raw) : Math.min(erl, raw);
 }
 
+interface RaidMem {
+  side: "long" | "short";
+  sweepI: number;
+  sweepPx: number;
+  src: string;
+}
+
+function rememberRaid(map: Map<string, RaidMem>, day: string, raid: RaidMem) {
+  const prev = map.get(day);
+  if (!prev) {
+    map.set(day, raid);
+    return;
+  }
+  if (raid.side !== prev.side) {
+    // Fresh opposite raid replaces — last liquidity taken is the one we fade.
+    map.set(day, raid);
+    return;
+  }
+  if (raid.side === "short" && raid.sweepPx >= prev.sweepPx) map.set(day, raid);
+  if (raid.side === "long" && raid.sweepPx <= prev.sweepPx) map.set(day, raid);
+}
+
+function hourRangeAt(
+  cs: Candle[],
+  day: string,
+  startH: number,
+  endH: number,
+  upTo: number,
+): { h: number; l: number } | null {
+  let h = -Infinity;
+  let l = Infinity;
+  const last = Math.min(upTo, cs.length - 1);
+  for (let i = 0; i <= last; i++) {
+    const c = cs[i]!;
+    if (nyParts(c.t).day !== day) continue;
+    const hr = nyHour(c.t);
+    if (hr < startH || hr >= endH) continue;
+    h = Math.max(h, c.h);
+    l = Math.min(l, c.l);
+  }
+  if (!Number.isFinite(h) || !Number.isFinite(l) || h <= l) return null;
+  return { h, l };
+}
+
+function hourExtremeIndex(
+  cs: Candle[],
+  day: string,
+  startH: number,
+  endH: number,
+  upTo: number,
+  side: "long" | "short",
+): number {
+  let best = -1;
+  let px = side === "long" ? Infinity : -Infinity;
+  const last = Math.min(upTo, cs.length - 1);
+  for (let i = 0; i <= last; i++) {
+    const c = cs[i]!;
+    if (nyParts(c.t).day !== day) continue;
+    const hr = nyHour(c.t);
+    if (hr < startH || hr >= endH) continue;
+    if (side === "short" && c.h >= px) {
+      px = c.h;
+      best = i;
+    }
+    if (side === "long" && c.l <= px) {
+      px = c.l;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/** 24h open→close. Flatter than the 6h 0.35% slope, closer to a daily bias. */
+function dailyBias(cs: Candle[], i: number): 1 | -1 | 0 {
+  const dt = i > 0 ? Math.max(60_000, cs[i]!.t - cs[i - 1]!.t) : 15 * 60_000;
+  const look = Math.min(i, Math.max(16, Math.round((24 * 3600_000) / dt)));
+  if (look < 16) return htfBias(cs, i);
+  const a = cs[i - look]!.o;
+  const b = cs[i]!.c;
+  if (a <= 0) return 0;
+  const ch = (b - a) / a;
+  if (ch > 0.005) return 1;
+  if (ch < -0.005) return -1;
+  return 0;
+}
+
+function dolPrice(sw: Swing[], i: number, side: "long" | "short", entry: number): number | undefined {
+  const kind = side === "long" ? "high" : "low";
+  const rows = sw.filter((x) => x.kind === kind && x.i <= i && x.i >= i - 72);
+  if (!rows.length) return undefined;
+  if (side === "long") {
+    const above = rows.filter((x) => x.price > entry * 1.001);
+    return above.length ? Math.max(...above.map((x) => x.price)) : Math.max(...rows.map((x) => x.price));
+  }
+  const below = rows.filter((x) => x.price < entry * 0.999);
+  return below.length ? Math.min(...below.map((x) => x.price)) : Math.min(...rows.map((x) => x.price));
+}
+
+/**
+ * TTrades A+: liquidity raid → CISD/MSS with displacement → FVG or OB in
+ * premium (short) / discount (long) of that displacement → DOL ≥ 1.7R.
+ * Sweep alone is not a trade. Unicorn (OB∩FVG) grades A+.
+ */
+function aPlus(
+  cs: Candle[],
+  fvgs: FVG[],
+  obs: OrderBlock[],
+  sw: Swing[],
+  raid: RaidMem,
+  setup: SetupKind,
+  note: string,
+  targetMult: number,
+  maxRisk = 0.055,
+): IctSignal | null {
+  const conf = cisd(cs, raid.sweepI, raid.side);
+  if (!conf.ok) return null;
+  const want: 1 | -1 = raid.side === "long" ? 1 : -1;
+  const fvg =
+    conf.fvg ??
+    [...fvgs]
+      .reverse()
+      .find((f) => f.dir === want && f.i <= conf.i && f.i >= Math.max(0, raid.sweepI - 2));
+  const ob = [...obs]
+    .reverse()
+    .find((o) => o.dir === want && o.i <= conf.i && o.i >= Math.max(0, raid.sweepI - 8));
+  const uni = Boolean(fvg && ob && overlap(ob.top, ob.bot, fvg.top, fvg.bot));
+  if (!fvg && !ob) return null;
+  const zone = uni && fvg && ob
+    ? { top: Math.min(ob.top, fvg.top), bot: Math.max(ob.bot, fvg.bot), tag: "Unicorn OB∩FVG" }
+    : fvg
+      ? { top: fvg.top, bot: fvg.bot, tag: "FVG CE" }
+      : { top: ob!.top, bot: ob!.bot, tag: "OB" };
+  let dH = -Infinity;
+  let dL = Infinity;
+  for (let k = raid.sweepI; k <= conf.i; k++) {
+    dH = Math.max(dH, cs[k]!.h);
+    dL = Math.min(dL, cs[k]!.l);
+  }
+  dH = Math.max(dH, raid.sweepPx);
+  dL = Math.min(dL, raid.sweepPx);
+  if (!Number.isFinite(dH) || dH <= dL) return null;
+  const eq = (dH + dL) / 2;
+  const entry = (zone.top + zone.bot) / 2;
+  if (raid.side === "short" && zone.top < eq) return null;
+  if (raid.side === "long" && zone.bot > eq) return null;
+  const a = atr(cs, conf.i);
+  const stopPad = a * 0.12;
+  const stop = raid.side === "long" ? raid.sweepPx - stopPad : raid.sweepPx + stopPad;
+  const dol = dolPrice(sw, conf.i, raid.side, entry);
+  const risk = Math.abs(entry - stop);
+  if (risk <= 0) return null;
+  if (dol != null && Math.abs(dol - entry) / risk < 1.7) return null;
+  const tgt = twoR(raid.side, entry, stop, dol, targetMult);
+  if (Math.abs(tgt - entry) / risk < 1.7) return null;
+  const grade = uni ? "A+" : "A";
+  return pack(
+    conf.i,
+    cs[conf.i]!.t,
+    raid.side,
+    setup,
+    entry,
+    stop,
+    tgt,
+    `${note} · ${raid.src} · CISD · ${zone.tag} · ${grade} · ${targetMult.toFixed(1)}R`,
+    maxRisk,
+  );
+}
+
 export interface IctSignal {
   i: number;
   t: number;
@@ -342,129 +513,164 @@ export interface IctSignal {
 }
 
 /**
- * TTrades stack on 15m:
- *  HTF bias, AMD London wick, Silver Bullet 10–11 on the 9am hour,
- *  CISD, order-block / unicorn (OB∩FVG), FVG CE, RSI regular + hidden divergence,
- *  equal H/L sweep, NY PM scalp, OTE 62–79, 1H swing.
- *  Sweep alone is not a trade.
- *  Per NY day: Silver / AMD / scalp / swing kept; plus up to 2 continuation.
+ * TTrades A+ on 15m/5m:
+ *  daily bias, AMD London wick of Asia, Judas 7–10 NY (incl. 9am true open),
+ *  Silver Bullet 10–11 NY on the 9am hour, PM Silver Bullet 2–3 NY,
+ *  CISD, Unicorn OB∩FVG, FVG CE in premium/discount of the displacement,
+ *  DOL ≥ 1.7R. Sweep alone is not a trade. RSI-div is not a trade.
+ *  Per NY day: session models kept; at most one Unicorn continuation.
  */
-export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal[] {
+export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing?: boolean }): IctSignal[] {
   if (cs.length < 48) return [];
   const asia = buildAsia(cs);
   const fvgs = detectFvgs(cs);
   const obs = detectObs(cs);
-  const brks = detectBreakers(cs);
-  const ifvgs = detectIfvg(cs);
-  const rsi = rsiWilder(cs);
   const sw = swings(cs, 3, 2);
   const signals: IctSignal[] = [];
-  const londonRaid = new Map<string, "high" | "low">();
+  const asiaRaid = new Map<string, RaidMem>();
+  const ovnRaid = new Map<string, RaidMem>();
+  const amRaid = new Map<string, RaidMem>();
 
   const add = (sig: IctSignal | null) => {
     if (!sig) return;
-    if (signals.some((x) => Math.abs(x.i - sig.i) < 4 && x.side === sig.side && x.setup === sig.setup)) return;
+    if (signals.some((x) => Math.abs(x.i - sig.i) < 4 && x.side === sig.side)) return;
     signals.push(sig);
   };
 
   for (let i = 24; i < cs.length; i++) {
     const c = cs[i]!;
     const day = nyParts(c.t).day;
-    const bias = htfBias(cs, i);
-    const a = atr(cs, i);
+    const range = asia.get(day);
+    const london = hourRangeAt(cs, day, 2, 5, i);
+    const ovnH = Math.max(range?.asiaH ?? -Infinity, london?.h ?? -Infinity);
+    const ovnL = Math.min(range?.asiaL ?? Infinity, london?.l ?? Infinity);
 
-    if (isLondon(c.t)) {
-      const range = asia.get(day);
-      if (range?.asiaReady) {
-        if (c.h > range.asiaH && c.c < range.asiaH) londonRaid.set(day, "high");
-        if (c.l < range.asiaL && c.c > range.asiaL) londonRaid.set(day, "low");
+    if (range?.asiaReady) {
+      if (c.h > range.asiaH) {
+        rememberRaid(asiaRaid, day, { side: "short", sweepI: i, sweepPx: c.h, src: "Asia high" });
       }
+      if (c.l < range.asiaL) {
+        rememberRaid(asiaRaid, day, { side: "long", sweepI: i, sweepPx: c.l, src: "Asia low" });
+      }
+    }
+    if (Number.isFinite(ovnH) && Number.isFinite(ovnL) && ovnH > ovnL) {
+      if (c.h > ovnH) {
+        rememberRaid(ovnRaid, day, { side: "short", sweepI: i, sweepPx: c.h, src: "overnight high" });
+      }
+      if (c.l < ovnL) {
+        rememberRaid(ovnRaid, day, { side: "long", sweepI: i, sweepPx: c.l, src: "overnight low" });
+      }
+    }
+
+    const am = hourRangeAt(cs, day, 7, 13.5, i);
+    if (am && nyHour(c.t) >= 13.5) {
+      if (c.h > am.h) {
+        rememberRaid(amRaid, day, { side: "short", sweepI: i, sweepPx: c.h, src: "AM session high" });
+      }
+      if (c.l < am.l) {
+        rememberRaid(amRaid, day, { side: "long", sweepI: i, sweepPx: c.l, src: "AM session low" });
+      }
+    }
+
+    if (isLondon(c.t) && asiaRaid.has(day)) {
+      add(
+        aPlus(
+          cs,
+          fvgs,
+          obs,
+          sw,
+          asiaRaid.get(day)!,
+          "amd",
+          "AMD · London raid of Asia",
+          3,
+        ),
+      );
+    }
+
+    if (isJudas(c.t) && ovnRaid.has(day)) {
+      add(
+        aPlus(
+          cs,
+          fvgs,
+          obs,
+          sw,
+          ovnRaid.get(day)!,
+          "judas",
+          "Judas 7–10 NY · fake open",
+          2,
+        ),
+      );
     }
 
     if (isSilver(c.t)) {
-      const nine = hourRange(cs, day, 9, 10);
-      if (nine) {
-        const sweptLow = c.l < nine.l && c.c > nine.l;
-        const sweptHigh = c.h > nine.h && c.c < nine.h;
-        let side: "long" | "short" | null = sweptLow ? "long" : sweptHigh ? "short" : null;
-        let why = side
-          ? `swept 9am ${side === "long" ? "low" : "high"}`
-          : "";
-        // TTrades: if 9am itself was the raid of Asia and 10–11 CISDs away from
-        // that extreme (no second sweep), that is still the Silver Bullet.
-        if (!side) {
+      const nineDone = hourRangeAt(cs, day, 9, 10, i);
+      if (nineDone) {
+        const sweptLow = c.l < nineDone.l && c.c > nineDone.l;
+        const sweptHigh = c.h > nineDone.h && c.c < nineDone.h;
+        if (sweptHigh) {
+          add(
+            aPlus(
+              cs,
+              fvgs,
+              obs,
+              sw,
+              { side: "short", sweepI: i, sweepPx: c.h, src: "9am high" },
+              "silver",
+              "SB 10–11 NY · swept 9am high",
+              2,
+            ),
+          );
+        } else if (sweptLow) {
+          add(
+            aPlus(
+              cs,
+              fvgs,
+              obs,
+              sw,
+              { side: "long", sweepI: i, sweepPx: c.l, src: "9am low" },
+              "silver",
+              "SB 10–11 NY · swept 9am low",
+              2,
+            ),
+          );
+        } else {
           const asiaR = asia.get(day);
-          const nineRaidedHigh = Boolean(asiaR?.asiaReady && nine.h > asiaR.asiaH);
-          const nineRaidedLow = Boolean(asiaR?.asiaReady && nine.l < asiaR.asiaL);
-          if (nineRaidedHigh && c.c < nine.h && c.c < c.o) {
-            side = "short";
-            why = "9am Asia-high fail";
-          } else if (nineRaidedLow && c.c > nine.l && c.c > c.o) {
-            side = "long";
-            why = "9am Asia-low fail";
-          }
-        }
-        if (side) {
-          const conf = cisd(cs, i, side);
-          const want = side === "long" ? 1 : -1;
-          const fvg =
-            conf.fvg ??
-            [...fvgs].reverse().find((f) => f.dir === want && f.i <= (conf.ok ? conf.i : i) && f.i >= i - 8);
-          if (conf.ok && fvg) {
-            const sweepPx = side === "long" ? Math.min(c.l, nine.l) : Math.max(c.h, nine.h);
-            const entry = (fvg.bot + fvg.top) / 2;
-            const stopPad = (nine.h - nine.l) * 0.08 || entry * 0.002;
-            const stop = side === "long" ? sweepPx - stopPad : sweepPx + stopPad;
+          if (asiaR?.asiaReady && nineDone.h > asiaR.asiaH && c.c < nineDone.h && c.c < c.o) {
+            const extI = hourExtremeIndex(cs, day, 9, 10, i, "short");
             add(
-              pack(
-                conf.i,
-                cs[conf.i]!.t,
-                side,
+              aPlus(
+                cs,
+                fvgs,
+                obs,
+                sw,
+                {
+                  side: "short",
+                  sweepI: extI >= 0 ? extI : i,
+                  sweepPx: nineDone.h,
+                  src: "9am Asia-high fail",
+                },
                 "silver",
-                entry,
-                stop,
-                twoR(side, entry, stop, side === "long" ? nine.h : nine.l),
-                `SB 10–11 NY · ${why} · CISD · FVG`,
+                "SB 10–11 NY · 9am fail-through",
+                2,
               ),
             );
-          }
-        }
-      }
-    }
-
-    if (isLondon(c.t)) {
-      const range = asia.get(day);
-      if (range?.asiaReady) {
-        const sweptLow = c.l < range.asiaL && c.c > range.asiaL;
-        const sweptHigh = c.h > range.asiaH && c.c < range.asiaH;
-        let side: "long" | "short" | null = null;
-        let sweepPx = 0;
-        let note = "";
-        if (sweptLow && bias !== -1) {
-          side = "long";
-          sweepPx = Math.min(c.l, range.asiaL);
-          note = "AMD · London raid on Asia low";
-        } else if (sweptHigh && bias !== 1) {
-          side = "short";
-          sweepPx = Math.max(c.h, range.asiaH);
-          note = "AMD · London raid on Asia high";
-        }
-        if (side) {
-          const conf = cisd(cs, i, side);
-          if (conf.ok && (conf.fvg || true)) {
-            const entry = conf.fvg ? (conf.fvg.bot + conf.fvg.top) / 2 : cs[conf.i]!.c;
-            const stopPad = (range.asiaH - range.asiaL) * 0.06 || entry * 0.0025;
-            const stop = side === "long" ? sweepPx - stopPad : sweepPx + stopPad;
+          } else if (asiaR?.asiaReady && nineDone.l < asiaR.asiaL && c.c > nineDone.l && c.c > c.o) {
+            const extI = hourExtremeIndex(cs, day, 9, 10, i, "long");
             add(
-              pack(
-                conf.i,
-                cs[conf.i]!.t,
-                side,
-                "amd",
-                entry,
-                stop,
-                twoR(side, entry, stop, side === "long" ? range.asiaH : range.asiaL, 3),
-                `${note} · CISD${conf.fvg ? " · FVG" : ""} · ${bias === 1 ? "bull HTF" : bias === -1 ? "bear HTF" : "flat HTF"} · 3R`,
+              aPlus(
+                cs,
+                fvgs,
+                obs,
+                sw,
+                {
+                  side: "long",
+                  sweepI: extI >= 0 ? extI : i,
+                  sweepPx: nineDone.l,
+                  src: "9am Asia-low fail",
+                },
+                "silver",
+                "SB 10–11 NY · 9am fail-through",
+                2,
               ),
             );
           }
@@ -472,203 +678,38 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean }): IctSignal
       }
     }
 
-    if (isJudas(c.t)) {
-      const range = asia.get(day);
-      const london = hourRange(cs, day, 2, 5);
-      const ovnH = Math.max(range?.asiaH ?? -Infinity, london?.h ?? -Infinity);
-      const ovnL = Math.min(range?.asiaL ?? Infinity, london?.l ?? Infinity);
-      if (Number.isFinite(ovnH) && Number.isFinite(ovnL) && ovnH > ovnL) {
-        const sweptLow = c.l < ovnL && c.c > ovnL;
-        const sweptHigh = c.h > ovnH && c.c < ovnH;
-        const side: "long" | "short" | null =
-          sweptLow ? "long" : sweptHigh ? "short" : null;
-        if (side) {
-          const conf = cisd(cs, i, side);
-          if (conf.ok && conf.fvg) {
-            const sweepPx = side === "long" ? Math.min(c.l, ovnL) : Math.max(c.h, ovnH);
-            const entry = (conf.fvg.bot + conf.fvg.top) / 2;
-            const stopPad = (ovnH - ovnL) * 0.06 || entry * 0.002;
-            const stop = side === "long" ? sweepPx - stopPad : sweepPx + stopPad;
-            add(
-              pack(
-                conf.i,
-                cs[conf.i]!.t,
-                side,
-                "judas",
-                entry,
-                stop,
-                twoR(side, entry, stop, side === "long" ? ovnH : ovnL),
-                `Judas 7–10 NY · fake ${side === "long" ? "low" : "high"} · CISD · FVG`,
-              ),
-            );
-          }
-        }
-      }
+    if (isSilverPm(c.t) && amRaid.has(day)) {
+      add(
+        aPlus(
+          cs,
+          fvgs,
+          obs,
+          sw,
+          amRaid.get(day)!,
+          "silver",
+          "SB 2–3 NY · AM session raid",
+          2,
+        ),
+      );
     }
 
-    // Asia is ICT accumulation. London raids it. Do not trade the Asia session — 7d test −16.7R.
-
-    if (!inKill(c.t) || bias === 0) continue;
-
-    const sideBias: "long" | "short" = bias === 1 ? "long" : "short";
-    const liq = recentSweep(cs, sw, i, sideBias, 12);
-    const conf = cisd(cs, i, sideBias);
-    const contOk = Boolean(liq && conf.ok);
-
-    // Unicorn / advanced OB: last opposite candle overlapping a displacement FVG.
-    const recentOb = [...obs].reverse().find((o) => o.i < i && o.i >= i - 18 && o.dir === bias);
-    const recentFvg = [...fvgs].reverse().find((f) => f.i < i && f.i >= i - 18 && f.dir === bias);
-    if (contOk && recentOb && recentFvg && overlap(recentOb.top, recentOb.bot, recentFvg.top, recentFvg.bot)) {
-      const top = Math.min(recentOb.top, recentFvg.top);
-      const bot = Math.max(recentOb.bot, recentFvg.bot);
-      const tapped = c.l <= top && c.h >= bot;
-      const holds = bias === 1 ? c.c > bot : c.c < top;
-      if (tapped && holds) {
-        const entry = (top + bot) / 2;
-        const stop = bias === 1 ? bot - a * 0.15 : top + a * 0.15;
-        const side = bias === 1 ? "long" : "short";
-        add(
-          pack(
-            i,
-            c.t,
-            side,
-            "ob",
-            entry,
-            stop,
-            twoR(side, entry, stop, undefined, 3),
-            `Unicorn OB∩FVG · ${side} · ${bias === 1 ? "bull" : "bear"} HTF · 3R`,
-          ),
-        );
-      }
-    }
-
-    const br = [...brks].reverse().find((o) => o.i < i && o.i >= i - 36 && o.dir === bias);
-    if (contOk && br) {
-      const tapped = c.l <= br.top && c.h >= br.bot;
-      const holds = bias === 1 ? c.c > br.bot : c.c < br.top;
-      if (tapped && holds) {
-        const side = bias === 1 ? "long" : "short";
-        const entry = (br.top + br.bot) / 2;
-        const stop = bias === 1 ? br.bot - a * 0.18 : br.top + a * 0.18;
-        add(
-          pack(
-            i,
-            c.t,
-            side,
-            "breaker",
-            entry,
-            stop,
-            twoR(side, entry, stop),
-            `Breaker · failed OB flipped · ${side}`,
-          ),
-        );
-      }
-    }
-
-    const inv = [...ifvgs].reverse().find((f) => f.i < i && f.i >= i - 28 && f.dir === bias);
-    if (contOk && inv) {
-      const tapped = c.l <= inv.top && c.h >= inv.bot;
-      const holds = bias === 1 ? c.c > inv.bot : c.c < inv.top;
-      if (tapped && holds) {
-        const side = bias === 1 ? "long" : "short";
-        const entry = (inv.top + inv.bot) / 2;
-        const stop = bias === 1 ? inv.bot - a * 0.15 : inv.top + a * 0.15;
-        add(
-          pack(
-            i,
-            c.t,
-            side,
-            "ifvg",
-            entry,
-            stop,
-            twoR(side, entry, stop),
-            `iFVG · inverted gap · ${side}`,
-          ),
-        );
-      }
-    }
-
-    const highs = sw.filter((x) => x.kind === "high" && x.i <= i && x.i >= i - 36).slice(-2);
-    const lows = sw.filter((x) => x.kind === "low" && x.i <= i && x.i >= i - 36).slice(-2);
-    if (highs.length === 2 && i - highs[1]!.i <= 2) {
-      const [p, q] = highs;
-      const rp = rsi[p!.i] ?? 50;
-      const rq = rsi[q!.i] ?? 50;
-      const regular = q!.price > p!.price && rq < rp && rq > 48;
-      const hidden = q!.price < p!.price && rq > rp && bias === -1;
-      if ((regular && bias !== 1) || hidden) {
-        const stop = q!.price + a * 0.2;
-        add(
-          pack(
-            i,
-            c.t,
-            "short",
-            "div",
-            c.c,
-            stop,
-            twoR("short", c.c, stop),
-            hidden ? "hidden bearish div · continuation" : "regular bearish div · HH / RSI LH",
-          ),
-        );
-      }
-    }
-    if (lows.length === 2 && i - lows[1]!.i <= 2) {
-      const [p, q] = lows;
-      const rp = rsi[p!.i] ?? 50;
-      const rq = rsi[q!.i] ?? 50;
-      const regular = q!.price < p!.price && rq > rp && rq < 52;
-      const hidden = q!.price > p!.price && rq < rp && bias === 1;
-      if ((regular && bias !== -1) || hidden) {
-        const stop = q!.price - a * 0.2;
-        add(
-          pack(
-            i,
-            c.t,
-            "long",
-            "div",
-            c.c,
-            stop,
-            twoR("long", c.c, stop),
-            hidden ? "hidden bullish div · continuation" : "regular bullish div · LL / RSI HL",
-          ),
-        );
-      }
-    }
-
-    if (isNyPm(c.t)) {
-      const sess = sessionHiLo(cs, day, 0, 13.5);
-      if (sess) {
-        const side: "long" | "short" | null =
-          c.l < sess.l && c.c > sess.l && bias !== -1
-            ? "long"
-            : c.h > sess.h && c.c < sess.h && bias !== 1
-              ? "short"
-              : null;
-        if (side) {
-          const conf = cisd(cs, i, side);
-          if (conf.ok && conf.fvg) {
-            const entry = (conf.fvg.bot + conf.fvg.top) / 2;
-            const sweepPx = side === "long" ? sess.l : sess.h;
-            const stop = side === "long" ? sweepPx - a * 0.12 : sweepPx + a * 0.12;
-            add(
-              pack(
-                conf.i,
-                cs[conf.i]!.t,
-                side,
-                "scalp",
-                entry,
-                stop,
-                twoR(side, entry, stop, undefined, 1.5),
-                `PM scalp 1:30–4 NY · session ${side === "long" ? "low" : "high"} · CISD · 1.5R`,
-              ),
-            );
-          }
-        }
-      }
+    if (isNyPm(c.t) && amRaid.has(day)) {
+      add(
+        aPlus(
+          cs,
+          fvgs,
+          obs,
+          sw,
+          amRaid.get(day)!,
+          "scalp",
+          "PM scalp 1:30–4 NY",
+          2,
+        ),
+      );
     }
   }
 
-  if (!opts?.skipSwing) for (const s of scanSwing(cs)) add(s);
+  if (opts?.includeSwing) for (const s of scanSwing(cs)) add(s);
   return pickDay(signals);
 }
 
@@ -769,7 +810,7 @@ function scanSwing(cs: Candle[]): IctSignal[] {
   for (let k = 16; k < h1.length; k++) {
     const b = bars[k]!;
     const i15 = h1[k]!.i;
-    const bias = htfBias(bars, k);
+    const bias = dailyBias(bars, k);
     if (bias === 0) continue;
     if (!inKill(b.t)) continue;
     const a = atr(bars, k);
@@ -817,7 +858,7 @@ export function scanSwingNative(cs: Candle[]): IctSignal[] {
   const out: IctSignal[] = [];
   for (let k = 16; k < cs.length; k++) {
     const b = cs[k]!;
-    const bias = htfBias(cs, k);
+    const bias = dailyBias(cs, k);
     if (bias === 0) continue;
     if (!inKill(b.t)) continue;
     const a = atr(cs, k);
@@ -862,7 +903,7 @@ export function scanWeekly(cs: Candle[]): IctSignal[] {
   const out: IctSignal[] = [];
   for (let k = 48; k < cs.length; k++) {
     const b = cs[k]!;
-    const bias = htfBias(cs, k);
+    const bias = dailyBias(cs, k);
     if (bias === 0) continue;
     if (!inKill(b.t)) continue;
     const from = Math.max(0, k - 120);
@@ -948,7 +989,7 @@ function pickDay(raw: IctSignal[]): IctSignal[] {
       .sort((a, b) => SETUP_RANK[a.setup] - SETUP_RANK[b.setup] || a.i - b.i);
     let extra = 0;
     for (const s of rest) {
-      if (extra >= 2) break;
+      if (extra >= 1) break;
       if (kept.some((k) => Math.abs(k.i - s.i) < 6)) continue;
       kept.push(s);
       extra += 1;
@@ -1156,7 +1197,7 @@ export function simulateIct(
     let filled = s.setup === "div";
     const dt = cs.length > 1 ? Math.max(60_000, cs[1]!.t - cs[0]!.t) : 15 * 60_000;
     const trail =
-      s.setup === "asia" || s.setup === "scalp" || s.setup === "silver" || s.setup === "judas";
+      s.setup === "asia" || s.setup === "scalp" || s.setup === "silver" || s.setup === "judas" || s.setup === "amd";
     const hold = trail
       ? Math.max(16, Math.round((3 * 3600_000) / dt))
       : s.setup === "swing" || s.setup === "weekly" || s.setup === "breaker"
@@ -1165,6 +1206,7 @@ export function simulateIct(
     let curStop = s.stop;
     let curTgt = trail ? twoR(s.side, s.entry, s.stop, s.target, 3) : s.target;
     const risk = Math.abs(s.entry - s.stop) || 1;
+    let hit1 = false;
     for (let i = s.i + 1; i < cs.length; i++) {
       const c = cs[i]!;
       if (!filled) {
@@ -1175,6 +1217,7 @@ export function simulateIct(
       if (trail) {
         const mfe = s.side === "long" ? c.h - s.entry : s.entry - c.l;
         if (mfe >= risk) {
+          hit1 = true;
           curStop = s.side === "long" ? Math.max(curStop, s.entry) : Math.min(curStop, s.entry);
         }
         if (mfe >= risk * 1.2 && i >= 2) {
@@ -1223,7 +1266,9 @@ export function simulateIct(
     }
     if (!filled) continue;
     const dir = s.side === "long" ? 1 : -1;
-    const r = ((exit - s.entry) * dir) / Math.abs(s.entry - s.stop);
+    const rawR = ((exit - s.entry) * dir) / Math.abs(s.entry - s.stop);
+    // TTrades partial: bank 0.5R at 1R, runner is the rest. BE after 1R is +0.5R not 0.
+    const r = hit1 ? 0.5 + 0.5 * rawR : rawR;
     const pnlUsd = r * riskUsd;
     trades.push({
       id: `ict-${symbol}-${s.setup}-${s.i}`,
@@ -1253,9 +1298,9 @@ export function simulateIct(
 export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
   const kinds: SetupKind[] = ["silver", "amd", "judas", "asia", "scalp", "sweep", "breaker", "ifvg", "fvg", "ob", "div", "swing", "weekly"];
   const labels: Record<SetupKind, string> = {
-    silver: "Silver Bullet 10–11 NY (scalp)",
+    silver: "Silver Bullet 10–11 + 2–3 NY (scalp)",
     amd: "Power of 3 (AMD)",
-    judas: "Judas 7–9 NY open fake",
+    judas: "Judas 7–10 NY open fake",
     asia: "Asia KZ / NDOG (HTF only)",
     scalp: "NY PM scalp 1:30–4",
     sweep: "Sweep + CISD (eq H/L)",
@@ -1270,8 +1315,8 @@ export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
     published: "Published outlier",
   };
   const notes: Record<SetupKind, string> = {
-    silver: "TTrades AM Silver Bullet. Sweep the 9am hour OR CISD off a 9am Asia raid. Scalp 1.5–2R.",
-    amd: "Asia range, London wick, NY distribution.",
+    silver: "TTrades Silver Bullet 10–11 NY and 2–3 NY. Sweep the 9am hour (AM) or AM session (PM), or CISD off a 9am Asia raid. Partial 0.5R at 1R, runner 2–3R.",
+    amd: "Asia range, London wick, NY distribution. 3R, partial at 1R.",
     judas: "NY 7–10 raid of overnight high/low (9am true open included), then CISD reverse. The fake open, not the true NY move.",
     asia: "20:00–02:00 NY continuation in HTF. Trail BE at 1R, runner 3R. Never fade the Asia range.",
     scalp: "PM session high/low raid + CISD. 1.5R, 4h time stop.",
