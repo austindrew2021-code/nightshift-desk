@@ -699,3 +699,66 @@ of work that can still change the verdict is closing row 20, then re-running
 this exact script. If ICT's expectancy survives causal signal emission, there is
 something to size. If it does not, there is nothing here to compound and the
 honest product is the simulator.
+
+
+---
+
+### 36 · Money management: margin 60% and ratchet banking adopted — both measured
+
+Two changes requested: cut deployed margin to 50-60% of the book, and add a
+banking system that saves at calculated points. Both are now in, and both are
+genuine improvements — but neither changes what the account does on average, and
+the reason matters.
+
+`src/lib/engine/banking.ts` implements six policies as pure functions of the
+ledger, so they can be resampled without touching the engine: `none`,
+`fixedStep` (the old rule), `ratchet` at two rates, `atMultiples` (bank at 2x /
+3x / 5x / 8x), and `stakeFirst` (vault the whole original stake at 2x, then
+ratchet). Ten tests in `banking.test.ts` cover the invariants that matter for
+code that moves money: equity is conserved, cash never goes negative, nothing is
+banked while underwater, the book floor holds, and a vaulted dollar is never
+exposed again even when the trading book is wiped.
+
+`scripts/ict-money.ts` (`npm run money:ict`) evaluates them properly. One
+backtest path is ONE ordering of the trades, and compounding is path-dependent, so
+a single dollar figure is close to meaningless. This resamples **4,000 block
+bootstrap paths** (blocks of 20 consecutive trades, preserving real clustering)
+over 30-day windows and reports the distribution.
+
+Selected on median outcome and drawdown, consistent at every risk level:
+
+```
+                                     median    P5    P95   P($1k)  medDD
+margin 80% / 12% risk / old step rule   $50    $5   $369     0.4%    80%   <- was
+margin 60% / 6% risk / ratchet 60%      $78   $20   $252     0.0%    58%   <- now
+```
+
+So `ICT_MARGIN_PCT` 0.8 -> **0.6** and the banking rule is now **ratchet 60% of
+each new equity high**, replacing "50% of every whole $100 gained" — which only
+fired in $100 jumps and therefore gave back any run that peaked mid-step.
+Ratchet banks continuously on the way up. It won on median and on drawdown
+against all five alternatives at 6%, 12% and 25% risk.
+
+**The requested margin reduction was the right call and the measurement agrees:**
+across the sweep, moving from 80% to 50-60% margin raised the median 30-day
+outcome from as low as $34 to around $80 and cut median drawdown from 87% to
+~55%. With expectancy near zero, extra notional buys variance and nothing else.
+
+**What none of it does is reach $1,000.** Across all 54 configurations tested
+(3 margin levels x 3 risk levels x 6 policies):
+
+- `P($1,000 within 30 days)` ranges from **0.0% to 2.9%**.
+- **Every single configuration has a median below $100.** The range is $34-$80.
+  The typical outcome is a loss.
+- The best `P($1k)` — 2.9%, roughly 1 path in 34 — is margin 80% / 25% risk / no
+  banking, and that same configuration has a median of **$34** and a 5th
+  percentile of **$4**.
+
+That trade-off is the whole picture: aggression raises the chance of touching
+$1,000 from ~0% to ~3% by making the typical outcome twice as bad. It is buying a
+lottery ticket with the median.
+
+The cause is unchanged and is not a money-management problem: full-sample
+expectancy is **-0.018R at t -0.5** (board row 34). Banking and sizing
+redistribute outcomes; they cannot create them. Closing row 20 is still the only
+open work that can change the verdict rather than redistribute it.

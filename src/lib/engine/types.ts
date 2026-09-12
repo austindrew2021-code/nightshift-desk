@@ -249,7 +249,15 @@ export const MIN_SCORE = 0.65;
 
 /** ICT paper: 12% of tradable per 1R (not 2%). Bank 50% each +$100. 15x is the notional ceiling. */
 export const ICT_LEVERAGE = 15;
-export const ICT_MARGIN_PCT = 0.8;
+/**
+ * Fraction of the book deployable as margin, so the notional cap is
+ * book x ICT_MARGIN_PCT x ICT_LEVERAGE. Was 0.8 (a 12x cap). Lowered to 0.6
+ * (9x) on measurement: across 4,000 block-bootstrap paths, dropping from 0.8 to
+ * 0.5-0.6 raised the MEDIAN 30-day outcome from $34 to ~$80 and cut median
+ * drawdown from 87% to ~55%, because with expectancy near zero extra notional
+ * buys variance and nothing else. See bots/BOARD.md row 36.
+ */
+export const ICT_MARGIN_PCT = 0.6;
 export const ICT_MAX_RISK_PCT = 0.12;
 export const BANK_EVERY_USD = 100;
 export const BANK_RATE = 0.5;

@@ -5,8 +5,6 @@ import {
   ICT_LEVERAGE,
   ICT_MARGIN_PCT,
   ICT_MAX_RISK_PCT,
-  BANK_EVERY_USD,
-  BANK_RATE,
   MAX_DAILY_TRADES,
   MAX_HOLD_MS,
   MAX_OPEN,
@@ -31,6 +29,10 @@ import {
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
 import { inKill, nyHour, nyParts, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
+import { applyBanking, ratchet, type BankState } from "./banking";
+
+/** Measured best of six policies over 4,000 bootstrap paths — board row 36. */
+const ICT_BANK_POLICY = ratchet(0.6);
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -70,6 +72,8 @@ export interface EngineState {
   equityUsd: number;
   peakUsd: number;
   bankedUsd: number;
+  /** Highest equity seen this run — drives the ratchet banking policy. */
+  peakEquityUsd: number;
   agents: AgentState[];
   open: Position[];
   closed: ClosedTrade[];
@@ -133,22 +137,41 @@ export function ictRiskUsd(s: EngineState, stopPct = 0.01): { risk: number; noti
   return { risk: notional * Math.max(1e-6, stopPct), notional };
 }
 
+/**
+ * Bank a slice of every new equity high.
+ *
+ * Replaces "vault 50% of every whole $100 gained", which only fired in $100
+ * jumps and so gave back any run that peaked mid-step. Measured over 4,000
+ * block-bootstrap 30-day paths, ratchet-60 produced the best median outcome and
+ * the lowest median drawdown of six policies at every risk level tested — it
+ * banks continuously on the way up. Policies live in ./banking.ts so they can be
+ * resampled without the engine. Board row 36.
+ *
+ * Banking cannot raise expected return; every vaulted dollar stops compounding.
+ * It raises the median and cuts drawdown, which is what matters when expectancy
+ * is near zero.
+ */
 function maybeBank(s: EngineState) {
   if (s.mode !== "ict") return;
-  const lifetime = finite(s.equityUsd) - s.startUsd;
-  const targetVault = Math.floor(lifetime / BANK_EVERY_USD) * (BANK_EVERY_USD * BANK_RATE);
-  const take = targetVault - finite(s.bankedUsd);
-  if (take < 1) return;
-  const room = Math.max(0, finite(s.cashUsd) - s.startUsd * 0.25);
-  const moved = Math.min(take, room);
+  const equity = finite(s.equityUsd, s.startUsd);
+  const state: BankState = {
+    cash: finite(s.cashUsd),
+    banked: finite(s.bankedUsd),
+    peak: finite(s.peakEquityUsd, s.startUsd),
+    start: s.startUsd,
+  };
+  const before = state.banked;
+  applyBanking(state, ICT_BANK_POLICY);
+  s.peakEquityUsd = Math.max(finite(s.peakEquityUsd, s.startUsd), equity);
+  const moved = state.banked - before;
   if (moved < 1) return;
-  s.bankedUsd = finite(s.bankedUsd) + moved;
-  s.cashUsd = finite(s.cashUsd) - moved;
+  s.bankedUsd = state.banked;
+  s.cashUsd = state.cash;
   pushTape(s, {
     t: s.simT || Date.now(),
     kind: "note",
     symbol: "BANK",
-    text: `banked ${moved.toFixed(0)} · 50% of +$${BANK_EVERY_USD} · vault $${s.bankedUsd.toFixed(0)} · trade $${(finite(s.equityUsd) - s.bankedUsd).toFixed(0)}`,
+    text: `banked $${moved.toFixed(0)} · ${ICT_BANK_POLICY.label} · vault $${s.bankedUsd.toFixed(0)} · trading $${(equity - s.bankedUsd).toFixed(0)}`,
     tone: "up",
   });
 }
@@ -167,6 +190,7 @@ export function createEngine(solUsd = 100, startUsd = DEFAULT_START_USD): Engine
     equityUsd: start,
     peakUsd: start,
     bankedUsd: 0,
+    peakEquityUsd: start,
     agents: blankAgents(),
     open: [],
     closed: [],
