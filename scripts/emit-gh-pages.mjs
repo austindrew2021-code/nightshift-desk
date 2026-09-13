@@ -27,8 +27,10 @@ cpSync(CLIENT, OUT, { recursive: true });
 writeFileSync(join(OUT, "index.html"), html);
 writeFileSync(join(OUT, "404.html"), html);
 writeFileSync(join(OUT, ".nojekyll"), "");
+const grokDir = join(OUT, "__grok");
+mkdirSync(grokDir, { recursive: true });
 writeFileSync(
-  join(OUT, "__grok/manifest.webmanifest"),
+  join(grokDir, "manifest.webmanifest"),
   JSON.stringify(
     {
       name: "NIGHTSHIFT",
