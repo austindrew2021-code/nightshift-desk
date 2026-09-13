@@ -10,6 +10,7 @@ import {
 import { fmtClock, fmtInt, fmtPct, fmtSol, fmtUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { KeepAliveChip } from "@/components/desk/keep-alive-chip";
 import { useDesk } from "@/lib/store";
 
 const NAV = [
@@ -219,6 +220,7 @@ export function TopBar({
           <RotateCcw className="size-3.5" />
           Reset
         </Button>
+        {mode === "ict" ? <KeepAliveChip /> : null}
         <div className="flex rounded-md shadow-[0_0_0_1px_rgba(61,255,138,0.12)]">
           {[1, 4, 8, 16].map((n) => (
             <button

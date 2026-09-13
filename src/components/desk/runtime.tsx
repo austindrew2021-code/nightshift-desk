@@ -24,6 +24,7 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
     queryKey: ["desk-snapshot"],
     queryFn: () => fetchDeskSnapshot(),
     refetchInterval: mode === "live" ? 8_000 : mode === "ict" ? 12_000 : 45_000,
+    refetchIntervalInBackground: true,
   });
 
   const quotes = useQuery({
@@ -37,7 +38,7 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
     queryKey: ["ict-books"],
     queryFn: () => fetchIctBooks(),
     refetchInterval: 8_000,
-    staleTime: 2_000,
+    refetchIntervalInBackground: true,
   });
 
   useLayoutEffect(() => {

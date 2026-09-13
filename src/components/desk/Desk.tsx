@@ -310,6 +310,9 @@ export function Desk() {
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               {engine.ictUse5m === false ? "15m" : "15m+5m"} · {engine.ictLev || 40}x iso liq {((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 50% margin · 1R {((engine.ictRiskPct || 0.18) * 100).toFixed(0)}% · take 1R full · bank 25% / +$200 · lock 50% when expand dies
             </p>
+            <p className="mt-1 font-mono text-[11px] text-subtle tabular">
+              KEEP ALIVE · tap once, leave the green mini player on, then open YouTube — lock screen still pauses
+            </p>
             <p className={cn("mt-1 font-mono text-[11px] tabular", engine.ictRegime === "expand" ? "text-phosphor" : "text-subtle")}>
               {engine.ictRegime ?? "chop"} · {engine.ictRegimeNote || "A+ CISD still live"}{engine.ictRegime === "expand" ? " · full raid book" : " · A+ CISD only (like the SOL scalp)"}
             </p>
