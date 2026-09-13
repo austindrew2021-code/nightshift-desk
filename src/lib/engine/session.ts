@@ -924,17 +924,6 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       const rangeFade = t.setup === "daily" || t.setup === "weekly" || t.setup === "sweep";
       if (rangeFade && sameSideOpen.length >= 1) continue;
       if (!rangeFade && sameSideOpen.length >= 2) continue;
-      const isAlt = t.symbol !== "BTC" && t.symbol !== "ETH";
-      if (
-        isAlt &&
-        s.open.some(
-          (p) =>
-            p.origin === "ict" &&
-            (p.symbol === "BTC" || p.symbol === "ETH") &&
-            p.side === t.side,
-        )
-      )
-        continue;
       if (stillOpen) {
         if (
           s.open.some((p) => p.id === t.id || (p.origin === "ict" && p.symbol === t.symbol)) ||
@@ -976,8 +965,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             peakUsd: mark,
             agent: "timing",
             note: trail
-              ? `${t.note} · ½@1R ratchet → 5R · ${s.ictLev || 20}x`
-              : `${t.note} · ${s.ictLev || 20}x`,
+              ? `${t.note} · ½@1R ratchet → 5R · ${s.ictLev || 40}x`
+              : `${t.note} · ${s.ictLev || 40}x`,
             origin: "ict",
             stopUsd: t.stop,
             targetUsd,

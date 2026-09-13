@@ -654,7 +654,7 @@ export interface IctSignal {
  *  DOL ≥ 1.7R. Sweep alone is not a trade. RSI-div is not a trade.
  *  HTF filter: longs only in daily+weekly discount, shorts only in premium.
  */
-export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing?: boolean }): IctSignal[] {
+export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing?: boolean; extra?: number; noPick?: boolean }): IctSignal[] {
   if (cs.length < 48) return [];
   const asia = buildAsia(cs);
   const fvgs = detectFvgs(cs);
@@ -676,7 +676,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
     const dealing = today && today.h > today.l ? today : pd;
     const fade = sig.setup === "daily" || sig.setup === "weekly" || sig.setup === "sweep";
     if (!fade && !inRangePd(sig.side, sig.entry, dealing, 0.58, 0.42)) return;
-    if (!inRangePd(sig.side, sig.entry, wk, 0.62, 0.38)) return;
+    if (sig.setup !== "sweep" && !inRangePd(sig.side, sig.entry, wk, 0.62, 0.38)) return;
     signals.push(sig);
   };
 
@@ -896,9 +896,8 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
       );
     }
 
-    if (isHuntWindow(c.t)) {
-      const dt = i > 0 ? cs[i]!.t - cs[i - 1]!.t : 15 * 60_000;
-      if (dt <= 6 * 60_000) {
+    const dt = i > 0 ? cs[i]!.t - cs[i - 1]!.t : 15 * 60_000;
+    if (isHuntWindow(c.t) && dt <= 6 * 60_000) {
       const a = atr(cs, i);
       const levels: { px: number; side: "long" | "short"; src: string }[] = [];
       if (pd && pd.h > pd.l) {
@@ -935,12 +934,36 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
         );
         if (sig) add(sig, days, day);
       }
+    }
+
+    if (dt >= 10 * 60_000) {
+      const a = atr(cs, i);
+      const rng = c.h - c.l;
+      if (rng >= a * 2.2) {
+        const upW = c.h - Math.max(c.o, c.c);
+        const dnW = Math.min(c.o, c.c) - c.l;
+        if (dnW >= rng * 0.45 && c.c > c.o) {
+          const stop = c.l - a * 0.1;
+          add(
+            pack(i, c.t, "long", "sweep", c.c, stop, twoR("long", c.c, stop, undefined, 2), "Panic fade · long the crash", 0.06),
+            days,
+            day,
+          );
+        } else if (upW >= rng * 0.45 && c.c < c.o) {
+          const stop = c.h + a * 0.1;
+          add(
+            pack(i, c.t, "short", "sweep", c.c, stop, twoR("short", c.c, stop, undefined, 2), "Panic fade · short the grab", 0.06),
+            days,
+            day,
+          );
+        }
       }
     }
   }
 
   if (opts?.includeSwing) for (const s of scanSwing(cs)) add(s, buildDayMap(cs, cs.length - 1), nyParts(s.t).day);
-  return pickDay(signals);
+  if (opts?.noPick) return signals;
+  return pickDay(signals, opts?.extra ?? 1);
 }
 
 function lastFractal(sw: Swing[], i: number, kind: "high" | "low"): Swing | null {
@@ -1194,7 +1217,7 @@ const SETUP_RANK: Record<SetupKind, number> = {
 };
 
 /** Keep the session models; don't let early OBs spend the day's budget. */
-function pickDay(raw: IctSignal[]): IctSignal[] {
+function pickDay(raw: IctSignal[], extraN = 1): IctSignal[] {
   const byDay = new Map<string, IctSignal[]>();
   for (const s of raw) {
     const d = nyParts(s.t).day;
@@ -1209,7 +1232,7 @@ function pickDay(raw: IctSignal[]): IctSignal[] {
       if (uniq.some((x) => Math.abs(x.i - s.i) < 4 && x.side === s.side)) continue;
       uniq.push(s);
     }
-    const pinned = ["silver", "amd", "judas", "scalp"] as const;
+    const pinned = ["silver", "sweep", "amd", "judas", "scalp"] as const;
     const kept: IctSignal[] = [];
     for (const kind of pinned) {
       const hit = uniq.find((s) => s.setup === kind);
@@ -1220,7 +1243,7 @@ function pickDay(raw: IctSignal[]): IctSignal[] {
       .sort((a, b) => SETUP_RANK[a.setup] - SETUP_RANK[b.setup] || a.i - b.i);
     let extra = 0;
     for (const s of rest) {
-      if (extra >= 1) break;
+      if (extra >= extraN) break;
       if (kept.some((k) => Math.abs(k.i - s.i) < 6)) continue;
       kept.push(s);
       extra += 1;
@@ -1524,9 +1547,11 @@ export function simulateIct(
   riskUsd = 10,
   symbol = "SOL",
   name = "Solana",
-  opts?: { mode?: TrailMode },
+  opts?: { mode?: TrailMode; keep?: number; targetR?: number },
 ): IctSimTrade[] {
   const mode = opts?.mode ?? "ratchet";
+  const keep = opts?.keep ?? 0.5;
+  const tgtMult = opts?.targetR ?? (mode === "be3" ? 3 : 5);
   const trades: IctSimTrade[] = [];
   for (const s of signals) {
     let exit = s.entry;
@@ -1542,7 +1567,7 @@ export function simulateIct(
         ? 80
         : 32;
     let curStop = s.stop;
-    const tgtR = mode === "be3" ? 3 : 5;
+    const tgtR = tgtMult;
     let curTgt = trail ? twoR(s.side, s.entry, s.stop, s.target, tgtR) : s.target;
     const risk = Math.abs(s.entry - s.stop) || 1;
     let hit1 = false;
@@ -1606,7 +1631,7 @@ export function simulateIct(
     const dir = s.side === "long" ? 1 : -1;
     const rawR = ((exit - s.entry) * dir) / Math.abs(s.entry - s.stop);
     const partial = mode !== "full";
-    const r = partial && hit1 ? 0.5 + 0.5 * rawR : rawR;
+    const r = partial && hit1 ? (1 - keep) * 1 + keep * rawR : rawR;
     const pnlUsd = r * riskUsd;
     trades.push({
       id: `ict-${symbol}-${s.setup}-${s.i}`,
@@ -1643,7 +1668,7 @@ export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
     weekly: "Weekly range · PWH/PWL reversal",
     asia: "Asia KZ / NDOG (HTF only)",
     scalp: "NY PM scalp 1:30–4",
-    sweep: "Flash crash / liquidity grab",
+    sweep: "Panic fade: 2.2×ATR wick that closes back. Long the crash, short the grab. 15m, no FVG required.",
     breaker: "Breaker (failed OB flip)",
     ifvg: "Inversion FVG",
     fvg: "FVG CE + OTE 62–79",
@@ -1661,7 +1686,7 @@ export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
     weekly: "Prior 5-day high/low raid + CISD. Long only in weekly discount, short only in premium. 3R swing.",
     asia: "20:00–02:00 NY continuation in HTF. Trail BE at 1R, runner 3R. Never fade the Asia range.",
     scalp: "PM session high/low raid + CISD. 1.5R, 4h time stop.",
-    sweep: "ATR-spike wick through PDH/PDL, Asia, SSL/BSL or equal H/L that closes back inside. Long the low grab, short the high. Same pattern desks use to run stops, then fade.",
+    sweep: "2.2×ATR climactic bar, wick ≥45%, close back inside. Fade it. Same idea as a stop-hunt: they eat liquidity, we take the snap-back. 15m. Stop beyond the wick, ½ at 1R, runner 2R.",
     breaker: "Order block closed through, then retested as the other side.",
     ifvg: "FVG filled the wrong way, then used as continuation.",
     fvg: "Displacement FVG or OTE 62–79 retrace of the impulse. Entry at 70.5 when the FVG overlaps.",

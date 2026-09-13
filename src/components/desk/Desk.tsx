@@ -53,7 +53,7 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · $${startUsd.toFixed(0)} · ${engine.ictLev || 20}x / 50% · 1R ${(engine.ictRiskPct * 100 || 18).toFixed(0)}% · ½@1R ratchet → 5R · bank 25%/+200.`;
+        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · $${startUsd.toFixed(0)} · ${engine.ictLev || 40}x / 50% · 1R ${(((engine.ictRiskPct || 0.18) * 100)).toFixed(0)}% · ½@1R ratchet → 5R · bank 25%/+200.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
@@ -170,8 +170,8 @@ export function Desk() {
       )}
       {engine.mode === "ict" && (
         <ChipRow className="border-b border-line">
-          {([10, 15, 20] as const).map((n) => {
-            const on = (engine.ictLev || 20) === n;
+          {([20, 40, 50] as const).map((n) => {
+            const on = (engine.ictLev || 40) === n;
             return (
               <button
                 key={`lev-${n}`}
@@ -285,7 +285,7 @@ export function Desk() {
               book {fmtUsd(engine.equityUsd)} · cash {fmtUsd(engine.cashUsd)} · vault {fmtUsd(engine.bankedUsd ?? 0)} · start {fmtUsd(startUsd)}
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
-            {engine.ictLev || 20}x · 50% margin · 1R {((engine.ictRiskPct || 0.18) * 100).toFixed(0)}% · ½@1R then ratchet to 5R · bank 25% / +$200
+            {engine.ictLev || 40}x cap · 50% margin · 1R {((engine.ictRiskPct || 0.18) * 100).toFixed(0)}% · ½@1R ratchet → 5R · bank 25% / +$200
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               fees {fmtUsd(engine.stats.feesUsd)} · jito {fmtUsd(engine.stats.jitoUsd)} · drag{" "}

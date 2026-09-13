@@ -249,8 +249,8 @@ export const TRAIL_PCT = 0.35;
 export const MAX_HOLD_MS = 3_600_000;
 export const MIN_SCORE = 0.65;
 
-/** ICT paper: 20× leverage, 50% of the book as default margin (10× notional). 1R aims at 18% of equity (hard cap = 1R). Bank 25% of each +$200 after the first $200. 12% and 30% are user chips. */
-export const ICT_LEVERAGE = 20;
+/** ICT paper: 40× cap so a tight A+ stop can still size toward 18% 1R (20× cannot: a 0.14% stop at 20× is a 2.8% 1R). Default 50% margin. 1R = 18%. 20× / 50× are chips. Bank 25% of each +$200. */
+export const ICT_LEVERAGE = 40;
 export const ICT_MARGIN_PCT = 0.5;
 export const ICT_MAX_RISK_PCT = 0.18;
 export const ICT_HARD_RISK_PCT = 0.18;
