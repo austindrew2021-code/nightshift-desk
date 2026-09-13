@@ -919,7 +919,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const ref = liveBooks.find((b) => b.id === "BTC") ?? liveBooks[0];
   if (ref) {
     const prev = s.ictRegime;
-    const rg = readRegime(ref.candles15, prev);
+    const rg = readRegime(ref.candles15, prev, ref.candles1h);
     if (prev === "expand" && rg.regime !== "expand") lockVaultOnChop(s);
     s.ictRegime = rg.regime;
     s.ictRegimeNote = rg.note;
