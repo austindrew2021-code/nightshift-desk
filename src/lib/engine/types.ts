@@ -118,6 +118,8 @@ export interface Position {
   origin: FillOrigin;
   stopUsd?: number;
   targetUsd?: number;
+  liqUsd?: number;
+  liqCapped?: boolean;
   quotedEntryUsd?: number;
   grossUsd?: number;
   feeUsd?: number;
@@ -148,6 +150,8 @@ export interface ClosedTrade {
   origin: FillOrigin;
   stopUsd?: number;
   targetUsd?: number;
+  liqUsd?: number;
+  liquidated?: boolean;
   quotedEntryUsd?: number;
   quotedExitUsd?: number;
   feeUsd?: number;
@@ -183,6 +187,8 @@ export interface DeskStats {
   grokCalls: number;
   feesUsd: number;
   jitoUsd: number;
+  liqHits: number;
+  slInsideLiq: number;
 }
 
 export interface EquityPoint {
@@ -254,6 +260,34 @@ export const ICT_LEVERAGE = 40;
 export const ICT_MARGIN_PCT = 0.5;
 export const ICT_MAX_RISK_PCT = 0.18;
 export const ICT_HARD_RISK_PCT = 0.18;
+export const ICT_MMR = 0.005;
+
+/** Isolated liq distance: 1/lev − maintenance. 40× ≈ 2.0%. */
+export function ictLiqPct(lev = ICT_LEVERAGE): number {
+  return Math.max(0.004, 1 / Math.max(2, lev) - ICT_MMR);
+}
+
+export function ictLiqPx(side: Side, entry: number, lev = ICT_LEVERAGE): number {
+  const p = ictLiqPct(lev);
+  return side === "long" ? entry * (1 - p) : entry * (1 + p);
+}
+
+/** Working stop cannot sit past isolated liq. */
+export function clampStopToLiq(
+  side: Side,
+  entry: number,
+  stop: number,
+  lev = ICT_LEVERAGE,
+): { stop: number; liq: number; capped: boolean; pct: number } {
+  const liq = ictLiqPx(side, entry, lev);
+  const pct = ictLiqPct(lev);
+  if (side === "long") {
+    const capped = stop < liq;
+    return { stop: Math.max(stop, liq), liq, capped, pct };
+  }
+  const capped = stop > liq;
+  return { stop: Math.min(stop, liq), liq, capped, pct };
+}
 export const BANK_EVERY_USD = 200;
 export const BANK_RATE = 0.25;
 export const ICT_DAILY_LOSS_PCT = 0.22;

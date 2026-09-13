@@ -54,7 +54,7 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · ${engine.ictUse5m === false ? "15m" : "15m+5m"} · $${startUsd.toFixed(0)} · ${engine.ictLev || 40}x / 50% · 1R ${(((engine.ictRiskPct || 0.18) * 100)).toFixed(0)}% · ½@1R ratchet → 5R · bank 25%/+200.`;
+        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · ${engine.ictUse5m === false ? "15m" : "15m+5m"} · $${startUsd.toFixed(0)} · ${engine.ictLev || 40}x iso liq ~${((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 1R ${(((engine.ictRiskPct || 0.18) * 100)).toFixed(0)}% · ½@1R ratchet → 5R.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
@@ -308,7 +308,10 @@ export function Desk() {
               book {fmtUsd(engine.equityUsd)} · cash {fmtUsd(engine.cashUsd)} · vault {fmtUsd(engine.bankedUsd ?? 0)} · start {fmtUsd(startUsd)}
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
-            {engine.ictUse5m === false ? "15m" : "15m+5m"} · {engine.ictLev || 40}x cap · 50% margin · 1R {((engine.ictRiskPct || 0.18) * 100).toFixed(0)}% · ½@1R ratchet → 5R · bank 25% / +$200
+              {engine.ictUse5m === false ? "15m" : "15m+5m"} · {engine.ictLev || 40}x iso liq {((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 50% margin · 1R {((engine.ictRiskPct || 0.18) * 100).toFixed(0)}% · ½@1R ratchet → 5R · bank 25% / +$200
+            </p>
+            <p className="mt-1 font-mono text-[11px] text-subtle tabular">
+              liq hits {engine.stats.liqHits ?? 0} · SL inside liq {engine.stats.slInsideLiq ?? 0}
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               fees {fmtUsd(engine.stats.feesUsd)} · jito {fmtUsd(engine.stats.jitoUsd)} · drag{" "}
@@ -319,7 +322,7 @@ export function Desk() {
             <Stat k="open" v={String(engine.open.length)} />
             <Stat k="wins" v={String(engine.stats.wins)} />
             <Stat k="loss" v={String(engine.stats.losses)} />
-            <Stat k="veto" v={String(engine.stats.vetoed)} />
+            <Stat k="liq" v={String(engine.stats.liqHits ?? 0)} />
           </div>
         </section>
       </div>
@@ -349,6 +352,13 @@ export function Desk() {
                   </p>
                 </div>
                 <p className="mt-1 font-mono text-[11px] text-muted">{p.note}</p>
+                {p.origin === "ict" && p.liqUsd != null && (
+                  <p className="mt-1 font-mono text-[10px] text-subtle tabular">
+                    LIQ {p.liqUsd < 2 ? p.liqUsd.toFixed(5) : p.liqUsd.toFixed(2)} ·{" "}
+                    {((Math.abs(p.entryUsd - p.liqUsd) / p.entryUsd) * 100).toFixed(1)}% ·{" "}
+                    {p.liqCapped ? "SL=liq" : "SL inside"}
+                  </p>
+                )}
               </div>
             ))}
           </div>

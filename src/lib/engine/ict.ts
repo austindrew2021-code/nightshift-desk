@@ -1,4 +1,4 @@
-import type { Candle, ClosedTrade, SetupKind, SetupOdds } from "./types";
+import { clampStopToLiq, ICT_LEVERAGE, type Candle, type ClosedTrade, type SetupKind, type SetupOdds } from "./types.ts";
 
 const NY_OFFSET_MS = 4 * 3600_000; // EDT in September
 
@@ -1597,13 +1597,16 @@ export function simulateIct(
   riskUsd = 10,
   symbol = "SOL",
   name = "Solana",
-  opts?: { mode?: TrailMode; keep?: number; targetR?: number },
+  opts?: { mode?: TrailMode; keep?: number; targetR?: number; lev?: number },
 ): IctSimTrade[] {
   const mode = opts?.mode ?? "ratchet";
   const keep = opts?.keep ?? 0.5;
   const tgtMult = opts?.targetR ?? (mode === "be3" ? 3 : 5);
+  const lev = opts?.lev ?? ICT_LEVERAGE;
   const trades: IctSimTrade[] = [];
   for (const s of signals) {
+    const clamped = clampStopToLiq(s.side, s.entry, s.stop, lev);
+    const workStop = clamped.stop;
     let exit = s.entry;
     let reason: ClosedTrade["reason"] = "time";
     let closedAt = cs[cs.length - 1]?.t ?? s.t;
@@ -1616,10 +1619,10 @@ export function simulateIct(
       : s.setup === "swing" || s.setup === "weekly" || s.setup === "breaker"
         ? 80
         : 32;
-    let curStop = s.stop;
+    let curStop = workStop;
     const tgtR = tgtMult;
-    let curTgt = trail ? twoR(s.side, s.entry, s.stop, s.target, tgtR) : s.target;
-    const risk = Math.abs(s.entry - s.stop) || 1;
+    let curTgt = trail ? twoR(s.side, s.entry, workStop, s.target, tgtR) : s.target;
+    const risk = Math.abs(s.entry - workStop) || 1;
     let hit1 = false;
     for (let i = s.i + 1; i < cs.length; i++) {
       const c = cs[i]!;
@@ -1679,7 +1682,7 @@ export function simulateIct(
     }
     if (!filled) continue;
     const dir = s.side === "long" ? 1 : -1;
-    const rawR = ((exit - s.entry) * dir) / Math.abs(s.entry - s.stop);
+    const rawR = ((exit - s.entry) * dir) / Math.abs(s.entry - workStop);
     const partial = mode !== "full";
     const r = partial && hit1 ? (1 - keep) * 1 + keep * rawR : rawR;
     const pnlUsd = r * riskUsd;
@@ -1693,7 +1696,7 @@ export function simulateIct(
       closedAt,
       entryUsd: s.entry,
       exitUsd: exit,
-      sizeSol: riskUsd / Math.abs(s.entry - s.stop),
+      sizeSol: riskUsd / Math.abs(s.entry - workStop),
       pnlSol: 0,
       pnlUsd,
       rMultiple: r,
@@ -1701,7 +1704,7 @@ export function simulateIct(
       score: 0.7,
       note: s.note,
       origin: "ict",
-      stop: s.stop,
+      stop: workStop,
       target: s.target,
     });
   }
@@ -1770,13 +1773,16 @@ export function oddsFromTrades(trades: ClosedTrade[]): SetupOdds[] {
   });
 }
 
-export function parseKlines(rows: number[][]): Candle[] {
-  return rows.map(([t, o, h, l, c, v]) => ({
-    t,
-    o,
-    h,
-    l,
-    c,
-    v,
-  }));
+export function parseKlines(rows: (number | string)[][]): Candle[] {
+  return rows
+    .map((row) => ({
+      t: Number(row[0]),
+      o: Number(row[1]),
+      h: Number(row[2]),
+      l: Number(row[3]),
+      c: Number(row[4]),
+      v: Number(row[5]),
+    }))
+    .filter((c) => Number.isFinite(c.t) && c.t > 0 && Number.isFinite(c.c) && c.h >= c.l)
+    .sort((a, b) => a.t - b.t);
 }

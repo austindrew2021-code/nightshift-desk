@@ -88,6 +88,7 @@ export interface ChartOrder {
   pending?: boolean;
   pnlUsd?: number;
   reason?: string;
+  liq?: number;
 }
 
 function posLevels(p: Position): { stop: number; target: number } {
@@ -114,6 +115,7 @@ export function deskOrders(open: Position[], closed: ClosedTrade[]): ChartOrder[
       openedAt: p.openedAt,
       live: true,
       pnlUsd: p.pnlUsd,
+      liq: p.liqUsd,
     };
   });
   const done: ChartOrder[] = closed.slice(0, 12).map((t) => ({
@@ -130,6 +132,7 @@ export function deskOrders(open: Position[], closed: ClosedTrade[]): ChartOrder[
     live: false,
     pnlUsd: t.pnlUsd,
     reason: t.reason,
+    liq: t.liqUsd,
   }));
   return [...live, ...done];
 }
@@ -536,6 +539,16 @@ export function LiveChart({
             ctx.stroke();
             tag(yS, `SL ${px(o.stop)}`, DN, "rgba(255,107,107,0.18)");
           }
+          if (o.liq && Math.abs(o.liq - (o.stop ?? o.liq)) / Math.max(1e-9, o.entry) > 0.0008) {
+            const yL = yAt(o.liq);
+            ctx.setLineDash([2, 4]);
+            ctx.strokeStyle = "rgba(232,196,104,0.9)";
+            ctx.beginPath();
+            ctx.moveTo(x0, yL);
+            ctx.lineTo(x1, yL);
+            ctx.stroke();
+            tag(yL, `LIQ ${px(o.liq)}`, "rgba(232,196,104,0.95)", "rgba(232,196,104,0.14)");
+          }
           if (o.target) {
             const yT = yAt(o.target);
             ctx.setLineDash([5, 4]);
@@ -820,7 +833,7 @@ export function LiveChart({
           ? working
               .map((o) => {
                 const kind = o.pending ? `${o.side === "long" ? "BUY LMT" : "SELL LMT"}` : `${o.side.toUpperCase()} ${o.setup}`;
-                return `${kind}  EN ${px(o.entry)}  SL ${o.stop ? px(o.stop) : "—"}  TP ${o.target ? px(o.target) : "—"}`;
+                return `${kind}  EN ${px(o.entry)}  SL ${o.stop ? px(o.stop) : "—"}  LIQ ${o.liq ? px(o.liq) : "—"}  TP ${o.target ? px(o.target) : "—"}`;
               })
               .join(" · ")
           : `no paper fill · boxes are levels · ${nextIctHint()}`}

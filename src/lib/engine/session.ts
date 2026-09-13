@@ -8,6 +8,8 @@ import {
   ICT_HARD_RISK_PCT,
   BANK_EVERY_USD,
   BANK_RATE,
+  clampStopToLiq,
+  ictLiqPct,
   MAX_DAILY_TRADES,
   MAX_HOLD_MS,
   MAX_OPEN,
@@ -111,6 +113,8 @@ function blankStats(): DeskStats {
     grokCalls: 0,
     feesUsd: 0,
     jitoUsd: 0,
+    liqHits: 0,
+    slInsideLiq: 0,
   };
 }
 
@@ -330,6 +334,14 @@ function closePos(
   }
   const pnlSol = finite(pnlUsd) / Math.max(1e-6, s.solUsd);
   const rMultiple = finite(pnlUsd) / Math.max(1e-6, finite(p.sizeUsd) * p.stopPct);
+  const liquidated = Boolean(
+    p.origin === "ict" &&
+      p.liqCapped &&
+      reason === "stop" &&
+      p.liqUsd &&
+      (p.side === "long" ? fillExit <= p.liqUsd * 1.0002 : fillExit >= p.liqUsd * 0.9998),
+  );
+  if (liquidated) s.stats.liqHits = finite(s.stats.liqHits) + 1;
   s.closed = [
     {
       id: p.id,
@@ -347,10 +359,12 @@ function closePos(
       rMultiple,
       reason,
       score: 0.7,
-      note: p.note,
+      note: liquidated ? `${p.note} · LIQ` : p.note,
       origin: p.origin,
       stopUsd: p.stopUsd,
       targetUsd: p.targetUsd,
+      liqUsd: p.liqUsd,
+      liquidated,
       quotedEntryUsd: p.quotedEntryUsd,
       quotedExitUsd: exitUsd,
       feeUsd,
@@ -372,7 +386,7 @@ function closePos(
     kind,
     agent: p.agent,
     symbol: p.symbol,
-    text: `${reason} ${p.symbol} ${pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)} usd${cost}`,
+    text: `${liquidated ? "liq 40x" : reason} ${p.symbol} ${pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)} usd${cost}`,
     tone: pnlUsd >= 0 ? "up" : "down",
   });
 }
@@ -942,10 +956,12 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         )
           continue;
         const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas" || t.setup === "amd" || t.setup === "daily" || t.setup === "sweep";
-        const stopDist = Math.abs(t.entryUsd - t.stop);
+        const lev = s.ictLev || ICT_LEVERAGE;
+        const clamped = clampStopToLiq(t.side, t.entryUsd, t.stop, lev);
+        const stopPx = clamped.stop;
+        const stopDist = Math.abs(t.entryUsd - stopPx);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
         const sized = ictRiskUsd(s, stopPct);
-        const risk = sized.risk;
         const sizeUsd = sized.notional;
         const mark = b.last || t.entryUsd;
         const dir = t.side === "short" ? -1 : 1;
@@ -955,6 +971,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             ? t.entryUsd + stopDist * 5
             : t.entryUsd - stopDist * 5
           : t.target;
+        const liqPct = (clamped.pct * 100).toFixed(1);
+        const liqNote = clamped.capped ? ` · LIQ cap ${liqPct}%` : ` · LIQ ${liqPct}% SL inside`;
+        if (!clamped.capped) s.stats.slInsideLiq = finite(s.stats.slInsideLiq) + 1;
         s.open = [
           ...s.open,
           {
@@ -976,11 +995,13 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             peakUsd: mark,
             agent: "timing",
             note: trail
-              ? `${t.note} · ½@1R ratchet → 5R · ${s.ictLev || 40}x`
-              : `${t.note} · ${s.ictLev || 40}x`,
+              ? `${t.note} · ½@1R ratchet → 5R · ${lev}x${liqNote}`
+              : `${t.note} · ${lev}x${liqNote}`,
             origin: "ict",
-            stopUsd: t.stop,
+            stopUsd: stopPx,
             targetUsd,
+            liqUsd: clamped.liq,
+            liqCapped: clamped.capped,
           },
         ];
         s.stats.taken += 1;
@@ -990,7 +1011,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           kind: "open",
           agent: "timing",
           symbol: t.symbol,
-          text: `live ${t.side} ${t.symbol} @ ${t.entryUsd.toFixed(t.entryUsd < 2 ? 5 : 2)} · ${t.note}`,
+          text: `live ${t.side} ${t.symbol} @ ${t.entryUsd.toFixed(t.entryUsd < 2 ? 5 : 2)} · LIQ ${clamped.liq.toFixed(t.entryUsd < 2 ? 5 : 2)} (${liqPct}%)${clamped.capped ? " · SL capped" : " · SL inside"} · ${t.note}`,
           tone: "up",
         });
         added += 1;
@@ -1228,7 +1249,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle} ${s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x / ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ½@1R ratchet → 5R`,
+      text: `ICT ${ictFilter} ${s.ictStyle} ${s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ½@1R ratchet → 5R`,
       tone: "mute",
     });
   }
