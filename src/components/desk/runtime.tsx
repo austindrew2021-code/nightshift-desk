@@ -46,6 +46,12 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
   }, [restoreSession]);
 
   useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    const sw = `${import.meta.env.BASE_URL}sw.js`.replace(/\/{2,}/g, "/");
+    void navigator.serviceWorker.register(sw).catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const save = () => persistNow();
     const id = window.setInterval(save, 2500);
     const onHide = () => {

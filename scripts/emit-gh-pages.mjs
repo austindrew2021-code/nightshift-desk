@@ -4,7 +4,7 @@
  * Vite writes `dist/client/_shell.html` + hashed assets; Pages wants
  * `index.html` / `404.html` at the artifact root.
  */
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +29,10 @@ writeFileSync(join(OUT, "404.html"), html);
 writeFileSync(join(OUT, ".nojekyll"), "");
 const grokDir = join(OUT, "__grok");
 mkdirSync(grokDir, { recursive: true });
+for (const name of ["icon-180.png", "icon-192.png", "icon-512.png", "icon-512-maskable.png"]) {
+  const src = join(OUT, "pwa", name);
+  if (existsSync(src)) copyFileSync(src, join(grokDir, name));
+}
 writeFileSync(
   join(grokDir, "manifest.webmanifest"),
   JSON.stringify(
@@ -39,9 +43,29 @@ writeFileSync(
       start_url: BASE,
       scope: BASE,
       display: "standalone",
+      display_override: ["standalone", "minimal-ui"],
       background_color: "#070b09",
       theme_color: "#070b09",
+      prefer_related_applications: false,
       icons: [
+        {
+          src: `${BASE}__grok/icon-192.png`,
+          sizes: "192x192",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: `${BASE}__grok/icon-512.png`,
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: `${BASE}__grok/icon-512-maskable.png`,
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "maskable",
+        },
         {
           src: `${BASE}__grok/icon-180.png`,
           sizes: "180x180",
