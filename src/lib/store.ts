@@ -28,6 +28,7 @@ interface DeskStore {
   hydrateBooks: (books: IctBook[]) => void;
   setIctFilter: (id: string) => void;
   setIctStyle: (id: IctStyle) => void;
+  setIctUse5m: (on: boolean) => void;
   setIctRiskPct: (n: number) => void;
   setIctLev: (n: number) => void;
   setMarketError: (e: string | null) => void;
@@ -104,6 +105,13 @@ export const useDesk = create<DeskStore>((set, get) => ({
     set({ engine });
     saveEngine(engine);
   },
+  setIctUse5m: (on) => {
+    const engine = { ...get().engine, ictUse5m: on };
+    const market = get().market;
+    if (market && engine.mode === "ict") ingestIct(engine, market);
+    set({ engine });
+    saveEngine(engine);
+  },
   setIctRiskPct: (n) => {
     const engine = { ...get().engine, ictRiskPct: n };
     set({ engine });
@@ -140,6 +148,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const prev = get().engine;
     const engine = resetEngine(m, sol, start, launches, prev.ictFilter);
     engine.ictStyle = prev.ictStyle;
+    engine.ictUse5m = prev.ictUse5m !== false;
     engine.ictRiskPct = prev.ictRiskPct;
     engine.ictLev = prev.ictLev;
     if (market) applyMarket(engine, market);
@@ -157,6 +166,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const launches = market?.launches ?? [];
     const engine = resetEngine(mode, sol, start, launches, prev.ictFilter);
     engine.ictStyle = prev.ictStyle;
+    engine.ictUse5m = prev.ictUse5m !== false;
     engine.ictRiskPct = prev.ictRiskPct;
     engine.ictLev = prev.ictLev;
     if (market) applyMarket(engine, market);
@@ -175,6 +185,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const prev = get().engine;
     const engine = resetEngine(m, sol, start, launches, prev.ictFilter);
     engine.ictStyle = prev.ictStyle;
+    engine.ictUse5m = prev.ictUse5m !== false;
     engine.ictRiskPct = prev.ictRiskPct;
     engine.ictLev = prev.ictLev;
     if (market) applyMarket(engine, market);

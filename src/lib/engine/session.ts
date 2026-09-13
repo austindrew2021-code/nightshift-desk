@@ -31,7 +31,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { inKill, lockRFromMfe, nyHour, nyParts, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
+import { inKill, lockRFromMfe, nyHour, nyParts, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -88,6 +88,7 @@ export interface EngineState {
   ictFilter: string;
   ictSeen: string[];
   ictStyle: import("./types").IctStyle;
+  ictUse5m: boolean;
   ictRiskPct: number;
   ictLev: number;
   tickN: number;
@@ -205,6 +206,7 @@ export function createEngine(solUsd = 100, startUsd = DEFAULT_START_USD): Engine
     ictFilter: "ALL",
     ictSeen: [],
     ictStyle: "all",
+    ictUse5m: true,
     ictRiskPct: ICT_MAX_RISK_PCT,
     ictLev: ICT_LEVERAGE,
     tickN: 0,
@@ -878,12 +880,21 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     const s15 = [...scanIct(b.candles15), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
     const s5: typeof s15 = [];
     const s1h: typeof s15 = [];
-    if ((s.ictStyle === "all" || s.ictStyle === "scalp" || s.ictStyle === "sweep") && b.candles5 && b.candles5.length >= 48) {
+    if (
+      s.ictUse5m !== false &&
+      (s.ictStyle === "all" || s.ictStyle === "scalp" || s.ictStyle === "sweep") &&
+      b.candles5 &&
+      b.candles5.length >= 48
+    ) {
       for (const sig of scanIct(b.candles5, { skipSwing: true })) {
         if (!styleAllows(s.ictStyle, sig.setup)) continue;
         if (sig.setup === "silver" || sig.setup === "scalp" || sig.setup === "judas" || sig.setup === "amd" || sig.setup === "sweep") {
           s5.push({ ...sig, note: `${sig.note} · 5m` });
         }
+      }
+      for (const sig of scan5mCisd(b.candles5)) {
+        if (!styleAllows(s.ictStyle, sig.setup)) continue;
+        s5.push({ ...sig, note: sig.note.includes("5m") ? sig.note : `${sig.note} · 5m` });
       }
     }
     if (s.ictStyle === "swing" && b.candles1h && b.candles1h.length >= 24) {
@@ -1217,7 +1228,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x / ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ½@1R ratchet → 5R`,
+      text: `ICT ${ictFilter} ${s.ictStyle} ${s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x / ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ½@1R ratchet → 5R`,
       tone: "mute",
     });
   }

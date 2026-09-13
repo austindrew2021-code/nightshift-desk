@@ -32,6 +32,7 @@ export function Desk() {
   const setStartUsd = useDesk((s) => s.setStartUsd);
   const setIctFilter = useDesk((s) => s.setIctFilter);
   const setIctStyle = useDesk((s) => s.setIctStyle);
+  const setIctUse5m = useDesk((s) => s.setIctUse5m);
   const setIctRiskPct = useDesk((s) => s.setIctRiskPct);
   const setIctLev = useDesk((s) => s.setIctLev);
   const setGrok = useDesk((s) => s.setGrok);
@@ -53,13 +54,13 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · $${startUsd.toFixed(0)} · ${engine.ictLev || 40}x / 50% · 1R ${(((engine.ictRiskPct || 0.18) * 100)).toFixed(0)}% · ½@1R ratchet → 5R · bank 25%/+200.`;
+        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · ${engine.ictUse5m === false ? "15m" : "15m+5m"} · $${startUsd.toFixed(0)} · ${engine.ictLev || 40}x / 50% · 1R ${(((engine.ictRiskPct || 0.18) * 100)).toFixed(0)}% · ½@1R ratchet → 5R · bank 25%/+200.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
         return `Watch · same Zostaff method as live paper, faster hunter on the live queue · fees still apply.`;
     }
-  }, [engine.mode, engine.ictFilter, engine.ictStyle, engine.ictLev, engine.ictRiskPct, startUsd, z.startSol, z.targetEndUsd]);
+  }, [engine.mode, engine.ictFilter, engine.ictStyle, engine.ictUse5m, engine.ictLev, engine.ictRiskPct, startUsd, z.startSol, z.targetEndUsd]);
 
   async function askGrok() {
     if (grokBusy) return;
@@ -166,6 +167,28 @@ export function Desk() {
               </button>
             );
           })}
+        </ChipRow>
+      )}
+      {engine.mode === "ict" && (
+        <ChipRow className="border-b border-line">
+          {(
+            [
+              { on: engine.ictUse5m !== false, label: "15m+5m", use5: true },
+              { on: engine.ictUse5m === false, label: "15m", use5: false },
+            ] as const
+          ).map((st) => (
+            <button
+              key={st.label}
+              type="button"
+              onClick={() => setIctUse5m(st.use5)}
+              className={cn(
+                "h-9 shrink-0 rounded-md px-2.5 font-mono text-[11px] tracking-[0.12em] uppercase",
+                st.on ? "bg-phosphor text-phosphor-ink" : "text-muted hover:bg-surface-2 hover:text-fg",
+              )}
+            >
+              {st.label}
+            </button>
+          ))}
         </ChipRow>
       )}
       {engine.mode === "ict" && (
@@ -285,7 +308,7 @@ export function Desk() {
               book {fmtUsd(engine.equityUsd)} · cash {fmtUsd(engine.cashUsd)} · vault {fmtUsd(engine.bankedUsd ?? 0)} · start {fmtUsd(startUsd)}
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
-            {engine.ictLev || 40}x cap · 50% margin · 1R {((engine.ictRiskPct || 0.18) * 100).toFixed(0)}% · ½@1R ratchet → 5R · bank 25% / +$200
+            {engine.ictUse5m === false ? "15m" : "15m+5m"} · {engine.ictLev || 40}x cap · 50% margin · 1R {((engine.ictRiskPct || 0.18) * 100).toFixed(0)}% · ½@1R ratchet → 5R · bank 25% / +$200
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               fees {fmtUsd(engine.stats.feesUsd)} · jito {fmtUsd(engine.stats.jitoUsd)} · drag{" "}

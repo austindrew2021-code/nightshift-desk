@@ -966,6 +966,56 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
   return pickDay(signals, opts?.extra ?? 1);
 }
 
+/**
+ * ICT 2022 on 5m: SSL/BSL or PDH/PDL/Asia raid → CISD + FVG in a killzone.
+ * HTF session models stay on 15m; this is the LTF entry the checklist actually uses.
+ */
+export function scan5mCisd(cs: Candle[]): IctSignal[] {
+  if (cs.length < 80) return [];
+  const fvgs = detectFvgs(cs);
+  const obs = detectObs(cs);
+  const sw = swings(cs, 3, 2);
+  const asia = buildAsia(cs);
+  const out: IctSignal[] = [];
+  const raidByDay = new Map<string, RaidMem>();
+
+  for (let i = 32; i < cs.length; i++) {
+    const c = cs[i]!;
+    if (!inKill(c.t)) continue;
+    const day = nyParts(c.t).day;
+    const days = buildDayMap(cs, i);
+    const pd = prevDayOf(days, day);
+    const range = asia.get(day);
+    const fxH = lastFractal(sw, i, "high");
+    const fxL = lastFractal(sw, i, "low");
+    if (fxH && c.h > fxH.price && c.c < fxH.price) {
+      rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m BSL" });
+    }
+    if (fxL && c.l < fxL.price && c.c > fxL.price) {
+      rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m SSL" });
+    }
+    if (pd && pd.h > pd.l) {
+      if (c.h > pd.h && c.c < pd.h) rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m PDH" });
+      if (c.l < pd.l && c.c > pd.l) rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m PDL" });
+    }
+    if (range?.asiaReady) {
+      if (c.h > range.asiaH && c.c < range.asiaH) {
+        rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m Asia high" });
+      }
+      if (c.l < range.asiaL && c.c > range.asiaL) {
+        rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m Asia low" });
+      }
+    }
+    const raid = raidByDay.get(day);
+    if (!raid || i - raid.sweepI > 8) continue;
+    const sig = aPlus(cs, fvgs, obs, sw, raid, "scalp", "5m CISD · FVG", 2, 0.06, true);
+    if (!sig) continue;
+    if (out.some((x) => Math.abs(x.i - sig.i) < 6 && x.side === sig.side)) continue;
+    out.push(sig);
+  }
+  return pickDay(out, 1);
+}
+
 function lastFractal(sw: Swing[], i: number, kind: "high" | "low"): Swing | null {
   const rows = sw.filter((x) => x.kind === kind && x.i < i - 1 && x.i >= i - 48);
   return rows.at(-1) ?? null;
