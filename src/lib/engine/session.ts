@@ -33,7 +33,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { inKill, lockRFromMfe, nyHour, nyParts, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
+import { inKill, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -93,6 +93,8 @@ export interface EngineState {
   ictUse5m: boolean;
   ictRiskPct: number;
   ictLev: number;
+  ictRegime: import("./ict").TapeRegime;
+  ictRegimeNote: string;
   tickN: number;
   dayLoss: number;
   zPlan: ZostaffStep[];
@@ -179,6 +181,32 @@ function maybeBank(s: EngineState) {
   });
 }
 
+/** When expansion dies, lock half the free cash above a 50% working floor so chop cannot give August back. */
+function lockVaultOnChop(s: EngineState) {
+  if (s.mode !== "ict") return;
+  const floor = s.startUsd * 0.5;
+  const free = finite(s.cashUsd) - floor;
+  const moved = Math.floor(Math.max(0, free) * 0.5);
+  if (moved < 5) return;
+  s.bankedUsd = finite(s.bankedUsd) + moved;
+  s.cashUsd = finite(s.cashUsd) - moved;
+  for (const p of s.open) {
+    if (p.origin !== "ict") continue;
+    if (finite(p.pnlUsd) <= 0) continue;
+    p.stopUsd = p.entryUsd;
+    p.partialed = true;
+  }
+  pushTape(s, {
+    t: s.simT || Date.now(),
+    kind: "note",
+    symbol: "BANK",
+    text: `expand ended · locked $${moved.toFixed(0)} · vault $${s.bankedUsd.toFixed(0)} · open stops → BE`,
+    tone: "up",
+  });
+}
+
+const APLUS_LIVE = new Set(["judas", "silver", "amd", "sweep", "asia", "daily", "scalp"]);
+
 export function createEngine(solUsd = 100, startUsd = DEFAULT_START_USD): EngineState {
   const start = clampStart(startUsd);
   return {
@@ -213,6 +241,8 @@ export function createEngine(solUsd = 100, startUsd = DEFAULT_START_USD): Engine
     ictUse5m: true,
     ictRiskPct: ICT_MAX_RISK_PCT,
     ictLev: ICT_LEVERAGE,
+    ictRegime: "chop",
+    ictRegimeNote: "warmup",
     tickN: 0,
     dayLoss: 0,
     zPlan: [],
@@ -886,6 +916,14 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const fresh: ClosedTrade[] = [];
   const liveBooks = filtered.filter((b) => b.candles15.length >= 40);
   s.stats.scanned = Math.max(s.stats.scanned, liveBooks.length);
+  const ref = liveBooks.find((b) => b.id === "BTC") ?? liveBooks[0];
+  if (ref) {
+    const prev = s.ictRegime;
+    const rg = readRegime(ref.candles15, prev);
+    if (prev === "expand" && rg.regime !== "expand") lockVaultOnChop(s);
+    s.ictRegime = rg.regime;
+    s.ictRegimeNote = rg.note;
+  }
   for (const b of liveBooks) {
     const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
     const corr = b.id === "BTC" ? eth : btc;
@@ -950,6 +988,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       if (rangeFade && sameSideOpen.length >= 1) continue;
       if (!rangeFade && sameSideOpen.length >= 2) continue;
       if (stillOpen) {
+        if (!APLUS_LIVE.has(t.setup)) continue;
         if (
           s.open.some((p) => p.id === t.id || (p.origin === "ict" && p.symbol === t.symbol)) ||
           s.open.length >= MAX_OPEN

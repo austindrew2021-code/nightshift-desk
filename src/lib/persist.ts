@@ -95,6 +95,8 @@ export function loadEngine(): EngineState | null {
       ictUse5m: e.ictUse5m !== false,
       ictRiskPct: e.ictRiskPct === 0.12 || e.ictRiskPct === 0.3 ? e.ictRiskPct : 0.18,
       ictLev: e.ictLev === 20 || e.ictLev === 50 ? e.ictLev : 40,
+      ictRegime: e.ictRegime === "expand" || e.ictRegime === "trend" ? e.ictRegime : "chop",
+      ictRegimeNote: typeof e.ictRegimeNote === "string" ? e.ictRegimeNote : "",
       zPlan: Array.isArray(e.zPlan) ? e.zPlan : [],
       zCursor: finite(e.zCursor),
       zDone: Boolean(e.zDone),

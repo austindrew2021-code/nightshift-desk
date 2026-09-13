@@ -342,7 +342,7 @@ function pack(
 ): IctSignal | null {
   const risk = Math.abs(entry - stop);
   if (!Number.isFinite(entry) || !Number.isFinite(stop) || risk <= 0) return null;
-  if (risk / entry < 0.002) return null;
+  if (risk / entry < 0.008) return null;
   if (risk / entry > maxRisk) return null;
   if (side === "long" && target <= entry) return null;
   if (side === "short" && target >= entry) return null;
@@ -1245,6 +1245,37 @@ export function styleAllows(style: string, setup: SetupKind): boolean {
   if (style === "scalp") return setup === "scalp" || setup === "silver" || setup === "judas" || setup === "asia" || setup === "daily" || setup === "sweep";
   if (style === "swing") return setup === "swing" || setup === "weekly" || setup === "breaker" || setup === "ifvg";
   return true;
+}
+
+export type TapeRegime = "chop" | "trend" | "expand";
+
+/** Causal 1H regime: expansion (ATR spike) vs 20/50 trend vs chop. Live 40× ICT only in expand. */
+export function readRegime(
+  cs15: Candle[],
+  prev?: TapeRegime,
+): { regime: TapeRegime; ratio: number; note: string } {
+  const h = foldHour(cs15).map((x) => x.bar);
+  const i = h.length - 1;
+  if (i < 55) return { regime: "chop", ratio: 1, note: "warmup · sit" };
+  const a14 = atr(h, i, 14);
+  const a50 = atr(h, i, 50);
+  const ratio = a50 > 0 ? a14 / a50 : 1;
+  let a20 = 0;
+  for (let k = i - 19; k <= i; k++) a20 += h[k]!.c;
+  a20 /= 20;
+  let a50m = 0;
+  for (let k = i - 49; k <= i; k++) a50m += h[k]!.c;
+  a50m /= 50;
+  const px = h[i]!.c;
+  if (ratio >= 1.35 || (prev === "expand" && ratio >= 1.18)) {
+    return { regime: "expand", ratio, note: `expand ATR ${ratio.toFixed(2)}× · raid book on` };
+  }
+  const aligned = (a20 > a50m && px > a20) || (a20 < a50m && px < a20);
+  const gap = Math.abs(a20 - a50m);
+  if (aligned && gap > 0.3 * a14) {
+    return { regime: "trend", ratio, note: `trend ${a20 > a50m ? "up" : "dn"} · sit 40×` };
+  }
+  return { regime: "chop", ratio, note: `chop ATR ${ratio.toFixed(2)}× · sit` };
 }
 
 const SETUP_RANK: Record<SetupKind, number> = {

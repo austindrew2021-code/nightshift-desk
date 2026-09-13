@@ -54,13 +54,13 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · ${engine.ictUse5m === false ? "15m" : "15m+5m"} · $${startUsd.toFixed(0)} · ${engine.ictLev || 40}x iso liq ~${((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 1R ${(((engine.ictRiskPct || 0.18) * 100)).toFixed(0)}% · ½@1R ratchet → 5R.`;
+        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · ${engine.ictUse5m === false ? "15m" : "15m+5m"} · $${startUsd.toFixed(0)} · ${engine.ictLev || 40}x iso liq ~${((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 1R ${(((engine.ictRiskPct || 0.18) * 100)).toFixed(0)}% · ½@1R ratchet → 5R · ${engine.ictRegime ?? "chop"} · ${engine.ictRegimeNote || "A+ CISD still live"}.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
         return `Watch · same Zostaff method as live paper, faster hunter on the live queue · fees still apply.`;
     }
-  }, [engine.mode, engine.ictFilter, engine.ictStyle, engine.ictUse5m, engine.ictLev, engine.ictRiskPct, startUsd, z.startSol, z.targetEndUsd]);
+  }, [engine.mode, engine.ictFilter, engine.ictStyle, engine.ictUse5m, engine.ictLev, engine.ictRiskPct, engine.ictRegime, engine.ictRegimeNote, startUsd, z.startSol, z.targetEndUsd]);
 
   async function askGrok() {
     if (grokBusy) return;
@@ -308,7 +308,10 @@ export function Desk() {
               book {fmtUsd(engine.equityUsd)} · cash {fmtUsd(engine.cashUsd)} · vault {fmtUsd(engine.bankedUsd ?? 0)} · start {fmtUsd(startUsd)}
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
-              {engine.ictUse5m === false ? "15m" : "15m+5m"} · {engine.ictLev || 40}x iso liq {((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 50% margin · 1R {((engine.ictRiskPct || 0.18) * 100).toFixed(0)}% · ½@1R ratchet → 5R · bank 25% / +$200
+              {engine.ictUse5m === false ? "15m" : "15m+5m"} · {engine.ictLev || 40}x iso liq {((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 50% margin · 1R {((engine.ictRiskPct || 0.18) * 100).toFixed(0)}% · ½@1R ratchet → 5R · bank 25% / +$200 · lock 50% when expand dies
+            </p>
+            <p className={cn("mt-1 font-mono text-[11px] tabular", engine.ictRegime === "expand" ? "text-phosphor" : "text-subtle")}>
+              {engine.ictRegime ?? "chop"} · {engine.ictRegimeNote || "A+ CISD still live"}{engine.ictRegime === "expand" ? " · full raid book" : " · A+ CISD only (like the SOL scalp)"}
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               liq hits {engine.stats.liqHits ?? 0} · SL inside liq {engine.stats.slInsideLiq ?? 0}
