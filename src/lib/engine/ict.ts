@@ -1635,7 +1635,7 @@ export function simulateIct(
   opts?: { mode?: TrailMode; keep?: number; targetR?: number; lev?: number },
 ): IctSimTrade[] {
   const mode = opts?.mode ?? "ratchet";
-  const keep = opts?.keep ?? 0.5;
+  const keep = opts?.keep ?? 0.25;
   const tgtMult = opts?.targetR ?? (mode === "be3" ? 3 : 5);
   const lev = opts?.lev ?? ICT_LEVERAGE;
   const trades: IctSimTrade[] = [];

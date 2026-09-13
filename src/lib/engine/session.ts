@@ -797,11 +797,11 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
       }
       if (mfe >= risk) {
         if (!p.partialed) {
-          const half = finite(p.sizeUsd) * 0.5;
-          const pnl = half * p.stopPct;
+          const take = finite(p.sizeUsd) * 0.75;
+          const pnl = take * p.stopPct;
           p.partialed = true;
-          p.sizeUsd = half;
-          p.sizeSol = half / Math.max(1e-6, s.solUsd);
+          p.sizeUsd = finite(p.sizeUsd) - take;
+          p.sizeSol = p.sizeUsd / Math.max(1e-6, s.solUsd);
           s.cashUsd = finite(s.cashUsd) + pnl;
           s.closed = [
             {
@@ -814,13 +814,13 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
               closedAt: s.simT,
               entryUsd: p.entryUsd,
               exitUsd: p.side === "long" ? p.entryUsd + risk : p.entryUsd - risk,
-              sizeSol: p.sizeSol,
+              sizeSol: take / Math.max(1e-6, s.solUsd),
               pnlSol: pnl / Math.max(1e-6, s.solUsd),
               pnlUsd: pnl,
-              rMultiple: 0.5,
+              rMultiple: 0.75,
               reason: "target" as const,
               score: 0.75,
-              note: `${p.note} · ½ @ 1R`,
+              note: `${p.note} · ¾ @ 1R`,
               origin: "ict" as const,
               stopUsd: p.stopUsd,
               targetUsd: p.targetUsd,
@@ -828,13 +828,13 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
             ...s.closed,
           ].slice(0, 80);
           s.stats.wins += 1;
-          p.note = `${p.note} · runner ½`;
+          p.note = `${p.note} · runner ¼`;
           pushTape(s, {
             t: s.simT,
             kind: "close",
             agent: "timing",
             symbol: p.symbol,
-            text: `½ @ 1R ${p.symbol} +${pnl.toFixed(2)} · runner on`,
+            text: `¾ @ 1R ${p.symbol} +${pnl.toFixed(2)} · runner ¼`,
             tone: "up",
           });
         }
@@ -1034,7 +1034,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             peakUsd: mark,
             agent: "timing",
             note: trail
-              ? `${t.note} · ½@1R ratchet → 5R · ${lev}x${liqNote}`
+              ? `${t.note} · ¾@1R ratchet → 5R · ${lev}x${liqNote}`
               : `${t.note} · ${lev}x${liqNote}`,
             origin: "ict",
             stopUsd: stopPx,
@@ -1288,7 +1288,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle} ${s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ½@1R ratchet → 5R`,
+      text: `ICT ${ictFilter} ${s.ictStyle} ${s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ¾@1R ratchet → 5R`,
       tone: "mute",
     });
   }
