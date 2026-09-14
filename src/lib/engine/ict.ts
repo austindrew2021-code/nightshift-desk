@@ -981,7 +981,7 @@ export function scan5mCisd(cs: Candle[]): IctSignal[] {
 
   for (let i = 32; i < cs.length; i++) {
     const c = cs[i]!;
-    if (!inKill(c.t)) continue;
+    if (!inKill(c.t) && !(isAsia(c.t) && nyHour(c.t) >= 20)) continue;
     const day = nyParts(c.t).day;
     const days = buildDayMap(cs, i);
     const pd = prevDayOf(days, day);
