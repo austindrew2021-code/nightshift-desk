@@ -1904,3 +1904,99 @@ recovering is a liquidation, not a 10% win.
 bar range, first touch only, enter at that bar's close, **exit on time at 24 hours
 with no stop**, maker limit entry, 2.5x gross across up to 5 concurrent pairs.
 ~15 signals a month, ~+3.4%/month, ~29% drawdown.
+
+---
+
+## 57 — Expanding to catch multiple plays: both expansions hurt, but the failure diagnosis found a real gate
+
+`scripts/plays.ts` (`npm run plays:ict`). 26 pairs with >= 20,000 1H bars each,
+1,125 days, 8 plays, hold 24h on time with no stop, 14bp.
+
+**Neither expansion works.**
+
+*Wider universe.* Same rule on 26 pairs instead of 9: per-trade edge falls from
+**+1.00% to +0.61%** — the edge is concentrated in the majors and dilutes when the
+tail is added. Signal clustering (share of signals with >= 3 others inside 6h)
+rises **49% -> 73%**, and the book goes from $189 (+1.71%/mo, 15% DD) to **$62
+(-1.25%/mo, 53% DD)** at the same 1.25x exposure.
+
+*More plays.* Most of the candidates are the base play wearing another name:
+`moLow wick60` is **90% duplicate**, `qtLow wick60` **85% duplicate**. The
+genuinely distinct one, `wkLow RSI<25`, is 0% duplicate but weaker (+0.55%) and
+fires 47/month, so it floods the slots. Combining the four that pass on 9 pairs
+takes +1.71%/mo to **-0.53%/mo** and 15% DD to 49%. Mirror shorts fail outright:
+`wkHigh wick60` -0.40% (t -2.9), `moHigh wick60` -0.72% (t -2.7), consistent with
+row 53 — high sweeps continue up.
+
+**Why the book lost while the play won.** +0.61% per trade at t 5.5 should
+compound to roughly $450 at 1.25x, not $62, so the taken set is not the measured
+set. Instrumenting the slot queue: it takes the signals averaging **-0.11%** and
+refuses the ones averaging **+1.48%**. A market-wide flush sweeps every pair's
+weekly low but not simultaneously; the pairs that go first sweep on the way down,
+take all five slots, and hold them 24h, so the pairs that sweep at the actual low
+arrive to a full book. **First-come allocation buys the top of the flush and turns
+away the bottom.** A cooldown does not fix this — it halves the drawdown
+(1.25x: 53% -> 20%) but the taken mean stays negative at every setting, because a
+cooldown still admits the earliest signal in each window.
+
+**The fix is ordering, not spacing.** Two candidate priorities, both strictly
+backward-looking so both knowable at entry, and both monotone:
+
+| breadth (other pairs swept in prior 6h) | n | mean | | depth (ATR past the level) | n | mean |
+|---|---|---|---|---|---|---|
+| 0 | 467 | -0.24% | | 0-0.25 | 497 | +0.26% |
+| 1-3 | 486 | +0.10% | | 0.25-0.5 | 418 | +0.21% |
+| 3-6 | 376 | +0.54% | | 0.5-1 | 465 | +0.65% |
+| 6-10 | 253 | +0.85% | | 1-2 | 301 | +1.27% |
+| >= 10 | 235 | +3.25% | | >= 2 | 136 | +1.56% |
+
+**breadth >= 10 is a trap.** Naive t 9.1, but n = 235 trades is only **34
+episodes** (clusters > 24h apart), three of which are 62% of the total return and
+9 of which lose. Episode-clustered t is **2.8**, not 9.1. This is the same
+correlation artefact as row 30. **breadth >= 3** is the gate that survives: 94
+episodes, clustered t **3.7**, positive and rising across all three splits.
+
+**Settled configuration — breadth wide, positions narrow.** Reading breadth on
+9 pairs ("3 of 8") is not the same test as on 26 ("3 of 25"), so breadth is
+measured across all 26 pairs while positions are taken only in the 9 majors:
+
+| gate | n | episodes | mean | clustered t | TRAIN | VAL | HOLD |
+|---|---|---|---|---|---|---|---|
+| none (row 56) | 574 | 161 | +1.00% | 4.0 | +0.75% | +1.33% | +1.14% |
+| breadth >= 2 | 403 | 114 | +1.29% | 3.6 | +0.97% | +1.67% | +1.51% |
+| **breadth >= 3** | **330** | **94** | **+1.43%** | **3.7** | **+1.13%** | **+1.63%** | **+1.89%** |
+| breadth >= 5 | 236 | 70 | +1.62% | 2.9 | +1.00% | +1.91% | +2.75% |
+
+| gross | $100 -> | %/mo | DD | vs row 56 at same gross |
+|---|---|---|---|---|
+| 1.25x | $194 | +1.78% | **12%** | +1.71%, 15% DD |
+| 2.50x | $346 | +3.37% | **23%** | +3.15%, 29% DD |
+| 5.00x | $870 | +5.94% | **43%** | +5.15%, 56% DD |
+| 10.0x | $1,941 | +8.23% | 79% | ruin territory |
+| 15.0x+ | RUIN | — | 100% | — |
+
+The gate earns slightly more on a third fewer trades and cuts drawdown by about a
+quarter at every exposure. It is the best risk-adjusted configuration in this
+project.
+
+**Caveat, stated plainly.** This gate was found by looking for why row 56's book
+underperformed its own per-trade statistics, on the same data that produced row
+55. The holdout has now been read more than once, so its +1.89% is no longer a
+clean out-of-sample number. What defends the gate is not that cell: it is the
+monotone dose-response across five breadth buckets, that it holds after
+episode-clustering, and that it has a mechanism — you are being paid to be the
+late buyer in a broad flush rather than the early one.
+
+**It still does not reach the goal.** +3.37%/mo at 2.5x turns $100 into about
+$134 after a year. Earning $1,000 in a month at that rate needs roughly $30,000
+of capital; from $100 it is about 8 years of compounding. 10x reads +8.23%/mo but
+at 79% drawdown, which is not survivable in practice and is one bad flush from
+the RUIN rows below it. The honest summary of rows 55-57 is a real, small,
+measurable edge — not a path from $100 to $1,000 a month.
+
+**Recommended live configuration:** 1H bars, prior-week low swept, lower wick
+>= 60% of bar range, first touch only, **and at least 3 other pairs (of the full
+26 tracked) having swept their own weekly low in the preceding 6 hours**. Enter at
+that bar's close with a maker limit, exit on time at 24 hours with no stop,
+positions in the 9 majors only, 2.5x gross across up to 5 slots. About 9 signals
+a month, ~+3.4%/month, ~23% drawdown.
