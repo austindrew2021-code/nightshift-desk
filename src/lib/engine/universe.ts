@@ -22,6 +22,9 @@ export const ICT_ASSETS: IctAssetDef[] = [
   { id: "AVAX", symbol: "AVAX", name: "Avalanche", venue: "okx", instId: "AVAX-USDT" },
   { id: "LINK", symbol: "LINK", name: "Chainlink", venue: "okx", instId: "LINK-USDT" },
   { id: "HYPE", symbol: "HYPE", name: "Hyperliquid", venue: "okx", instId: "HYPE-USDT" },
+  { id: "SUI", symbol: "SUI", name: "Sui", venue: "okx", instId: "SUI-USDT" },
+  { id: "ADA", symbol: "ADA", name: "Cardano", venue: "okx", instId: "ADA-USDT" },
+  { id: "LTC", symbol: "LTC", name: "Litecoin", venue: "okx", instId: "LTC-USDT" },
 ];
 
 export interface ChartBar {
