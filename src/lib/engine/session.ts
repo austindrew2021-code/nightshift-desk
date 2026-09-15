@@ -95,6 +95,7 @@ export interface EngineState {
   ictLev: number;
   ictRegime: import("./ict").TapeRegime;
   ictRegimeNote: string;
+  ictChopLocked: boolean;
   tickN: number;
   dayLoss: number;
   zPlan: ZostaffStep[];
@@ -181,13 +182,19 @@ function maybeBank(s: EngineState) {
   });
 }
 
-/** When expansion dies, lock half the free cash above a 50% working floor so chop cannot give August back. */
+/** When expansion dies, bank a slice of *excess* working capital. Never take the desk below start. Repeat locks on restore were vacuuming cash. */
 function lockVaultOnChop(s: EngineState) {
   if (s.mode !== "ict") return;
-  const floor = s.startUsd * 0.5;
-  const free = finite(s.cashUsd) - floor;
-  const moved = Math.floor(Math.max(0, free) * 0.5);
-  if (moved < 5) return;
+  if (s.ictChopLocked) return;
+  const equity = finite(s.equityUsd, s.startUsd);
+  const floor = Math.max(s.startUsd, equity * 0.5);
+  const room = tradableUsd(s) - floor;
+  const moved = Math.floor(Math.max(0, room) * 0.25);
+  if (moved < 5) {
+    s.ictChopLocked = true;
+    return;
+  }
+  s.ictChopLocked = true;
   s.bankedUsd = finite(s.bankedUsd) + moved;
   s.cashUsd = finite(s.cashUsd) - moved;
   for (const p of s.open) {
@@ -200,8 +207,27 @@ function lockVaultOnChop(s: EngineState) {
     t: s.simT || Date.now(),
     kind: "note",
     symbol: "BANK",
-    text: `expand ended · locked $${moved.toFixed(0)} · vault $${s.bankedUsd.toFixed(0)} · open stops → BE`,
+    text: `expand ended · locked $${moved.toFixed(0)} · vault $${s.bankedUsd.toFixed(0)} · working $${tradableUsd(s).toFixed(0)}`,
     tone: "up",
+  });
+}
+
+/** If restore/chop-lock left cash under start, drip vault back so London can still size 18% 1R. */
+function restoreWorkingFloor(s: EngineState) {
+  if (s.mode !== "ict") return;
+  const floor = s.startUsd;
+  const tradable = tradableUsd(s);
+  if (tradable >= floor - 0.5) return;
+  const give = Math.min(floor - tradable, finite(s.bankedUsd));
+  if (give < 1) return;
+  s.bankedUsd = finite(s.bankedUsd) - give;
+  s.cashUsd = finite(s.cashUsd) + give;
+  pushTape(s, {
+    t: s.simT || Date.now(),
+    kind: "note",
+    symbol: "BANK",
+    text: `working floor · +$${give.toFixed(0)} from vault · trade $${tradableUsd(s).toFixed(0)} · vault $${s.bankedUsd.toFixed(0)}`,
+    tone: "warn",
   });
 }
 
@@ -243,6 +269,7 @@ export function createEngine(solUsd = 100, startUsd = DEFAULT_START_USD): Engine
     ictLev: ICT_LEVERAGE,
     ictRegime: "chop",
     ictRegimeNote: "warmup",
+    ictChopLocked: false,
     tickN: 0,
     dayLoss: 0,
     zPlan: [],
@@ -877,8 +904,10 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     const prev = s.ictRegime;
     const rg = readRegime(ref.candles15, prev, ref.candles1h);
     if (prev === "expand" && rg.regime !== "expand") lockVaultOnChop(s);
+    if (rg.regime === "expand") s.ictChopLocked = false;
     s.ictRegime = rg.regime;
     s.ictRegimeNote = rg.note;
+    restoreWorkingFloor(s);
   }
   for (const b of liveBooks) {
     const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
