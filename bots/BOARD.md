@@ -1319,3 +1319,81 @@ negative one it is just a faster route down, which is why the 8% median is $82.
 That closes the aggressive class: martingale is ruin, grid cannot reach the target
 and hides its tail in the median, and optimal sizing on the best available edge is
 to not bet it.
+
+
+---
+
+### 50 · 623 configs, a permutation null, and why searching more cannot help
+
+`npm run zoo:ict`, expanded. Surveyed TradingView and the wider community first to
+check for a missed *category* rather than another parameter set. The categories
+there are the same primitives already covered — mean reversion, breakout,
+momentum, VWAP, ORB, deviation bands, EMA filters. TradingView is thousands of
+parameterisations of a dozen ideas.
+
+One genuinely new IDEA did come out of it: **Hurst-exponent regime switching** —
+not a new indicator, but measuring whether the market is mean-reverting (H < 0.5)
+or trending (H > 0.5) and switching which family runs. Implemented with rescaled
+range over three windows, three threshold pairs, three reversion engines and three
+trend engines: **81 configs, best validation t 0.2.** It adds nothing.
+
+**623 configs total.** Best validation t by family:
+
+```
+RSI revert         1.8  (76)     Vol breakout      -0.0  (12)
+Bollinger revert   0.8  (36)     Donchian          -0.1  (30)
+MA cross           0.3 (152)     Supertrend        -0.3  (48)
+Hurst regime       0.2  (81)     Stochastic        -0.7  (44)
+VWAP revert        0.1  (60)     TS momentum       -0.7  (42)
+Bollinger breakout 0.1  (36)     MACD              -2.8   (6)
+```
+
+**0 of 623 clear the bar.**
+
+**The permutation null.** Circularly shifting a position series destroys any
+relationship to price while preserving turnover and autocorrelation exactly, so
+the spread of t-stats across shifted configs is what this many tests produce when
+there is provably no edge. 300 shifts:
+
+```
+null |t|:   median 0.85   p95 2.51   max 3.79
+REAL best positive t: 1.84          REAL worst: -15.72
+```
+
+**The best profitable config in 623 sits at t 1.84, inside the null's p95 of
+2.51.** It is indistinguishable from chance — direct evidence of no edge, not
+merely absence of evidence.
+
+Two honest notes on this test. The null is centred *below* zero, because a shifted
+config still pays its turnover cost with no signal to earn it back; that truncates
+its positive subset, so comparing against the null's positive max (1.21) flatters
+the real result and the fair bar is the magnitude spread. And the huge negative
+t-stats **are** real signal: fast configs reliably lose to fees. `TSmom 2 LS` at
+t -15.7 is a genuine, highly significant discovery that 30-minute momentum
+destroys capital.
+
+**Why searching further cannot work — the arithmetic of the search itself.**
+
+```
+at 623 tests the Bonferroni bar is |t| > 4.07
+on 4,374 validation bars that requires Sharpe-per-bar 0.0615
+                             = ANNUALISED SHARPE 11.5
+```
+
+Renaissance Medallion runs near 2.5 net. So at this many tests on this much data,
+the correction demands a Sharpe roughly four times the best track record in
+finance. **No real strategy could pass this test.** And dropping the bar to find
+something guarantees the opposite: the null's p95 is 2.51, so ~31 of 623 configs
+would clear |t| > 2.5 on noise alone.
+
+That is the catch-22, quantified: **more strategies makes a credible positive
+mathematically unreachable and a false positive near-certain.** The binding
+constraint is 182 days of data, not the number of ideas. Going to 600, 6,000 or
+60,000 configs moves the search in the wrong direction.
+
+And magnitude closes it independently of significance: the most flattering
+validation figures across all 623 are **+0.5% to +4.2% per month**, against a
+~+900% target. Even accepting the best noise at face value leaves a ~200x gap.
+
+Sources surveyed: tradingview.com community scripts, kalena.ai, coinquant.ai,
+tv-hub.org, darkbot.io, 3commas.io (September 2026).

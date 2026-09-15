@@ -184,6 +184,38 @@ function volBreakout(k: number, allowShort: boolean): Gen {
   };
 }
 
+/**
+ * Hurst exponent over a window, by rescaled range. H < 0.5 means anti-persistent
+ * (mean-reverting), H > 0.5 trending. This is the one genuinely different IDEA in
+ * the TradingView survey: not a new indicator, but switching WHICH family runs
+ * based on a measured regime.
+ */
+function hurst(cs: Candle[], i: number, n: number): number {
+  if (i < n) return 0.5;
+  const r: number[] = [];
+  for (let k = i - n + 1; k <= i; k++) r.push(Math.log(cs[k]!.c / cs[k - 1]!.c));
+  const m = r.reduce((a, b) => a + b, 0) / r.length;
+  let cum = 0, mn = 0, mx = 0;
+  for (const x of r) { cum += x - m; mn = Math.min(mn, cum); mx = Math.max(mx, cum); }
+  const range = mx - mn;
+  const sd = Math.sqrt(r.reduce((a, b) => a + (b - m) ** 2, 0) / r.length) || 1e-12;
+  if (range <= 0) return 0.5;
+  return Math.log(range / sd) / Math.log(n);
+}
+
+/** Run `revert` while the regime is mean-reverting, `trend` while it is trending. */
+function regimeSwitch(n: number, loH: number, hiH: number, revert: Gen, trend: Gen): Gen {
+  return (cs) => {
+    const a = revert(cs), b = trend(cs);
+    return cs.map((_, i) => {
+      const h = hurst(cs, i, n);
+      if (h < loH) return a[i] ?? 0;
+      if (h > hiH) return b[i] ?? 0;
+      return 0;
+    });
+  };
+}
+
 const CONFIGS: { label: string; family: string; gen: Gen }[] = [];
 for (const kind of ["sma", "ema"] as const)
   for (const [f, s] of [[9, 21], [10, 50], [20, 50], [50, 200], [12, 26], [5, 20]])
@@ -254,6 +286,44 @@ for (const n of [24, 192])
 for (const n of [2, 8, 24, 32, 64, 144, 288, 384])
   for (const short of [true, false])
     CONFIGS.push({ label: `TSmom ${n}${short ? " LS" : " L"}`, family: "TS momentum", gen: tsMom(n, short) });
+
+for (const hn of [96, 192, 384])
+  for (const [lo, hi] of [[0.45, 0.55], [0.4, 0.6], [0.48, 0.52]])
+    for (const rev of [rsiRevert(14, 30, 70, true), bollinger(20, 2, "revert", true), vwapRevert(96, 1.5, true)])
+      for (const tr of [donchian(55, true), maCross(20, 50, "ema", true), supertrend(10, 3, true)])
+        CONFIGS.push({ label: `Regime H${hn} ${lo}/${hi}`, family: "Hurst regime", gen: regimeSwitch(hn, lo!, hi!, rev, tr) });
+// Fill out the parameter space so the count reaches the ~600 asked for.
+for (const kind of ["sma", "ema"] as const)
+  for (const f of [3, 5, 8, 13, 21, 34])
+    for (const s of [30, 60, 120, 240])
+      for (const short of [true, false])
+        CONFIGS.push({ label: `MAcross ${kind} ${f}/${s}${short ? " LS" : " L"}`, family: "MA cross", gen: maCross(f, s, kind, short) });
+for (const n of [6, 10, 18, 24, 40])
+  for (const [lo, hi] of [[35, 65], [28, 72], [22, 78], [18, 82]])
+    for (const short of [true, false])
+      CONFIGS.push({ label: `RSI ${n} ${lo}/${hi}${short ? " LS" : " L"}`, family: "RSI revert", gen: rsiRevert(n, lo!, hi!, short) });
+for (const n of [15, 30, 60, 120])
+  for (const k of [1.25, 1.75, 2.25, 2.75])
+    for (const mode of ["revert", "breakout"] as const)
+      CONFIGS.push({ label: `BB ${n}/${k} ${mode} LS`, family: `Bollinger ${mode}`, gen: bollinger(n, k, mode, true) });
+for (const n of [15, 25, 40, 70, 120, 300])
+  for (const short of [true, false])
+    CONFIGS.push({ label: `Donchian ${n}${short ? " LS" : " L"}`, family: "Donchian", gen: donchian(n, short) });
+for (const n of [8, 12, 18, 26])
+  for (const m of [1.75, 2.25, 3.5])
+    for (const short of [true, false])
+      CONFIGS.push({ label: `Supertrend ${n}x${m}${short ? " LS" : " L"}`, family: "Supertrend", gen: supertrend(n, m, short) });
+for (const n of [36, 72, 144, 288])
+  for (const k of [0.75, 1.25, 1.75, 2.5])
+    for (const short of [true, false])
+      CONFIGS.push({ label: `VWAPrev ${n}/${k}${short ? " LS" : " L"}`, family: "VWAP revert", gen: vwapRevert(n, k, short) });
+for (const n of [6, 12, 20, 40, 72, 120, 200, 320])
+  for (const short of [true, false])
+    CONFIGS.push({ label: `TSmom ${n}${short ? " LS" : " L"}`, family: "TS momentum", gen: tsMom(n, short) });
+for (const n of [7, 11, 18, 30])
+  for (const [lo, hi] of [[30, 70], [20, 80], [12, 88]])
+    for (const short of [true, false])
+      CONFIGS.push({ label: `Stoch ${n} ${lo}/${hi}${short ? " LS" : " L"}`, family: "Stochastic", gen: stochastic(n, lo!, hi!, short) });
 
 // ───────────────────────── evaluate ─────────────────────────
 /**
@@ -341,6 +411,58 @@ for (const r of rows) byFam.set(r.c.family, [...(byFam.get(r.c.family) ?? []), r
 console.log("\nby family — best validation t of each:");
 for (const [f, ts] of [...byFam].sort((a, b) => Math.max(...b[1]) - Math.max(...a[1])))
   console.log(`  ${f.padEnd(20)} best t ${Math.max(...ts).toFixed(1).padStart(5)}  (${ts.length} configs)`);
+
+// ── permutation null ──────────────────────────────────────────────────────
+// Circularly shifting a position series destroys any relationship to price while
+// preserving its turnover and autocorrelation exactly. So the max |t| across N
+// shifted configs is what N tests produce when there is provably no edge. If the
+// real max is not clearly above that, the search has found nothing — which is
+// direct evidence, not merely absence of evidence.
+function shifted(gen: Gen, off: number): Gen {
+  return (cs) => { const p = gen(cs); const n = p.length; return p.map((_, i) => p[(i + off) % n] ?? 0); };
+}
+const NULL_N = Math.min(rows.length, 300);
+const nullTs: number[] = [];
+for (let i = 0; i < NULL_N; i++) {
+  const base = rows[i % rows.length]!.c.gen;
+  const off = 500 + Math.floor((i * 3371) % 12000);
+  const s = stat(portfolio(shifted(base, off)).filter((x) => x.t >= cutV && x.t < cutH));
+  if (s) nullTs.push(s.t);
+}
+nullTs.sort((a, b) => a - b);
+const absNull = nullTs.map(Math.abs).sort((a, b) => a - b);
+// Compare the POSITIVE tail specifically. Comparing |t| is misleading here: the
+// real set contains huge NEGATIVE t-stats (high-turnover configs reliably losing
+// to fees), which is genuine signal but useless, and it swamps the comparison.
+// The question is whether any config is profitable beyond chance.
+const realPosMax = Math.max(...rows.map((r) => r.v!.t));
+const realNegMin = Math.min(...rows.map((r) => r.v!.t));
+const nullPos = nullTs.filter((x) => x > 0).sort((a, b) => a - b);
+const nullPosMax = nullPos.length ? nullPos[nullPos.length - 1]! : 0;
+const nullPos95 = nullPos.length ? nullPos[Math.floor(nullPos.length * 0.95)]! : 0;
+console.log(`\nPERMUTATION NULL — ${nullTs.length} time-shifted configs (signal destroyed, turnover kept)`);
+console.log(`  null |t|:      median ${absNull[Math.floor(absNull.length*0.5)]!.toFixed(2)}` +
+  `  p95 ${absNull[Math.floor(absNull.length*0.95)]!.toFixed(2)}  max ${absNull[absNull.length-1]!.toFixed(2)}`);
+console.log(`  null positive: p95 ${nullPos95.toFixed(2)}  max ${nullPosMax.toFixed(2)}`);
+console.log(`  REAL best positive t: ${realPosMax.toFixed(2)}   (real worst: ${realNegMin.toFixed(2)})`);
+// The null is centred BELOW zero, not at zero: a shifted config still pays its
+// turnover cost but has no signal to earn it back. That truncates the null's
+// positive subset, so comparing against `nullPosMax` flatters the real result.
+// The fair bar is the null's magnitude spread.
+const fairBar = absNull[Math.floor(absNull.length * 0.95)]!;
+console.log(`  fair comparison: null |t| p95 = ${fairBar.toFixed(2)} (the null is centred below 0,`);
+console.log(`     since a shifted config pays turnover with no signal — so its positive`);
+console.log(`     subset is truncated and nullPosMax understates chance)`);
+console.log(`  -> best profitable config (${realPosMax.toFixed(2)}) is ${realPosMax > fairBar ? "ABOVE" : "INSIDE"} the null spread`);
+console.log(`     (the large negative t-stats ARE real signal: fast configs reliably lose to fees)`);
+
+// What edge would even be detectable here?
+const sampleSd = rows[0]!.v!.n;
+console.log(`\nDETECTABILITY at ${rows.length} tests on this sample`);
+console.log(`  Bonferroni bar |t| > ${BONF.toFixed(2)};  validation n = ${sampleSd} bars`);
+const needSharpePerBar = BONF / Math.sqrt(sampleSd);
+console.log(`  clearing it needs Sharpe-per-bar ${needSharpePerBar.toFixed(4)}` +
+  ` = annualised Sharpe ${(needSharpePerBar * Math.sqrt(96 * 365)).toFixed(1)}`);
 
 const passBonf = rows.filter((r) => r.v!.t > BONF && r.tr!.t > 0);
 console.log(`\n${passBonf.length} of ${rows.length} configs clear |t| > ${BONF} on validation AND are positive on train`);
