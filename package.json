@@ -35,7 +35,8 @@
     "carry:ict": "node --experimental-strip-types scripts/xs-carry.ts",
     "zoo:ict": "node --experimental-strip-types scripts/zoo.ts",
     "aggro:ict": "node --experimental-strip-types scripts/aggressive.ts",
-    "wf:ict": "node --experimental-strip-types scripts/walkforward.ts"
+    "wf:ict": "node --experimental-strip-types scripts/walkforward.ts",
+    "struct:ict": "node --experimental-strip-types scripts/structure.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

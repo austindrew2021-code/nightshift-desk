@@ -1489,3 +1489,89 @@ consistency scores in the table.
 If anything in this project is worth trading, it is **RSI 21 20/80 long-only on
 1H** — 7 of 8 forward windows positive, Sharpe 1.24, consistency 2.00. Sized at
 2-5% of book, not 18%, and expected to return low single-digit percent per month.
+
+
+---
+
+### 52 · Structural regularities — what repeats, when, and why
+
+`npm run struct:ict`. Descriptive rather than P&L: a timing regularity can be
+measured with far more power than an edge, because observing it does not pay fees.
+1,125 days x 9 pairs, chi-square against uniform.
+
+**A methodological catch first.** The raw hour-of-daily-extreme distribution
+showed hours 0 and 23 dominating (11.7% / 8.1%). That is arithmetic, not timing:
+if a day trends, its extreme is necessarily near an edge. Controlling by using
+only RANGE days (|close-open| < 1%, n=3,190) collapses the boundary spike and
+leaves the real signal. The same artifact inflates the weekday table (Sunday is
+the first day of my week grouping, Saturday the last), so read that one with the
+same caution.
+
+**1. The daily low forms at 9-10am NY about twice as often as chance.**
+
+```
+range days only, uniform would be 4.17%/hour
+  09:00 NY   high 6.4%   LOW 8.2%
+  10:00 NY   high 6.9%   LOW 8.2%
+  11:00 NY   high 6.1%   low 6.5%
+  ...
+  06:00 NY   high 2.9%   low 2.7%   (quietest)
+  chi-square: high x2=281, low x2=466, both p<0.001
+```
+
+09:00-11:00 NY holds ~23% of daily lows in three hours of twenty-four. The
+mechanism is not mysterious: 09:30 NY is the US equity cash open, the single
+largest scheduled liquidity event in the overlap between European and US hours.
+Volume arrives, resting orders get filled, and the day's extreme prints. This is
+the strongest structural regularity found anywhere in this project.
+
+**2. A day takes ONE prior extreme, not both.**
+
+```
+both extremes swept : 9.8%
+only PDH            : 36.7%
+only PDL            : 35.1%
+neither (inside day): 18.4%
+
+Given the PDH is swept, the PDL also goes that day: 21.1%
+Given the PDL is swept, the PDH also goes that day:  21.8%
+```
+
+**72% of days take exactly one side and hold it.** This is the direct answer to
+the XRP question from board row 40. Fading a PDH raid all the way down to the PDL
+is a **1-in-5** trade, not a coin flip — the day overwhelmingly commits to the
+side it took.
+
+**3. Raiding an extreme is associated with CHOP, not with trending.** This one
+contradicts the usual narrative and is worth reading twice.
+
+```
+UP days   (close > +2%):  17.9% had raided the prior LOW first
+DOWN days (close < -2%):  20.2% had raided the prior HIGH first
+FLAT days              :  74.7% raided one extreme or the other
+```
+
+The "sweep the low, then trend up" model predicts the opposite. Measured over
+10,000 pair-days, **trend days mostly do not raid the other side first — they just
+go**, while three-quarters of the days that do raid an extreme end up going
+nowhere. The raid is a chop signature, not a trend trigger. That is a direct
+measurement against the premise the ICT stack is built on, and it is consistent
+with row 37 finding the causal ICT edge to be negative.
+
+**4. Weekly and monthly.** Weekly extremes cluster early: Sun+Mon hold 41% of
+weekly highs and 40% of lows, Thursday only 7.3% of highs. Both non-uniform, but
+Sunday and Saturday are my week's boundary days so part of that is artifact 1
+again. Monthly lows are the cleaner result: **59.9% of monthly lows form in the
+first 10 days** against 33% expected, on 324 pair-months.
+
+**5. Month of year is not established.** November shows +43.6% mean, which looks
+spectacular and means nothing: 3 years of data across 9 highly correlated pairs is
+effectively ~3 independent observations per month. Reported as descriptive only.
+
+**What this is and is not.** These are genuine, high-confidence structural facts —
+far more solid than anything in the strategy tables, because n is large and no
+fee is paid to observe them. None of them is automatically a trading edge: a 2x
+concentration of daily lows into 09:00-11:00 NY tells you *when* to look, not that
+buying then is profitable after 14bp. Findings 2 and 3 are the useful ones for the
+desk, because they constrain what to expect after a raid rather than predicting
+direction.
