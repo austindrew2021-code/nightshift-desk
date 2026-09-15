@@ -8,7 +8,7 @@ export interface IctAssetDef {
   instId: string;
 }
 
-/** Liquid names with public candles. NPC is KuCoin; majors are OKX. */
+/** Liquid KuCoin USDT-M names (max lev ≥50 except NPC). Candles from OKX; NPC from KuCoin spot. */
 export const ICT_ASSETS: IctAssetDef[] = [
   { id: "BTC", symbol: "BTC", name: "Bitcoin", venue: "okx", instId: "BTC-USDT" },
   { id: "ETH", symbol: "ETH", name: "Ethereum", venue: "okx", instId: "ETH-USDT" },
@@ -27,8 +27,15 @@ export const ICT_ASSETS: IctAssetDef[] = [
   { id: "LTC", symbol: "LTC", name: "Litecoin", venue: "okx", instId: "LTC-USDT" },
   { id: "HBAR", symbol: "HBAR", name: "Hedera", venue: "okx", instId: "HBAR-USDT" },
   { id: "UNI", symbol: "UNI", name: "Uniswap", venue: "okx", instId: "UNI-USDT" },
-  { id: "TON", symbol: "TON", name: "Toncoin", venue: "okx", instId: "TON-USDT" },
   { id: "NEAR", symbol: "NEAR", name: "NEAR", venue: "okx", instId: "NEAR-USDT" },
+  { id: "FIL", symbol: "FIL", name: "Filecoin", venue: "okx", instId: "FIL-USDT" },
+  { id: "ARB", symbol: "ARB", name: "Arbitrum", venue: "okx", instId: "ARB-USDT" },
+  { id: "INJ", symbol: "INJ", name: "Injective", venue: "okx", instId: "INJ-USDT" },
+  { id: "DOT", symbol: "DOT", name: "Polkadot", venue: "okx", instId: "DOT-USDT" },
+  { id: "AAVE", symbol: "AAVE", name: "Aave", venue: "okx", instId: "AAVE-USDT" },
+  { id: "APT", symbol: "APT", name: "Aptos", venue: "okx", instId: "APT-USDT" },
+  { id: "TRX", symbol: "TRX", name: "TRON", venue: "okx", instId: "TRX-USDT" },
+  { id: "SEI", symbol: "SEI", name: "Sei", venue: "okx", instId: "SEI-USDT" },
 ];
 
 export interface ChartBar {
