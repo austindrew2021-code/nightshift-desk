@@ -874,3 +874,110 @@ Nothing here compounds $100 to $1,000. The honest constraint is not effort or
 aggression — it is that a ~10bp signal cannot pay a 14bp toll, and the ICT stack's
 apparent edge was information it could not have had. Further searching of these
 182 days will produce false positives, not edge; that is now the main risk.
+
+
+---
+
+### 39 · Isolated-margin sizing: leverage is per-ticket, not a global setting
+
+`src/lib/engine/sizing.ts` + 10 tests. The rule being missed: **on isolated
+margin, risk sets position size, not leverage.** Notional is `risk$ / stopDist`.
+Leverage only decides how much margin that notional locks up and where
+liquidation sits. So "the stop is 2.8% and 40x liquidates at 2%" is not a reason
+to skip a setup — it is a reason to set *that ticket* to 21x.
+
+```
+liq distance      40x -> 2.00%   25x -> 3.50%   20x -> 4.50%   10x -> 9.50%
+max safe leverage (liq 1.5x beyond stop, mmr 0.5%)
+  stop 0.5% -> 80x   1.0% -> 50x   2.0% -> 28.6x   2.8% -> 21.3x   4.0% -> 15.4x
+```
+
+The XRP short that "would not size":
+
+```
+stop 2.8%, $100 working, 18% per 1R
+  -> 21x isolated, notional $643, margin $30.61, liq 4.26% = 1.52x beyond the stop
+```
+
+It was always takeable. Fixing leverage at 40x and then rejecting anything whose
+stop will not fit inside 2% lets a margin setting dictate trade structure, and it
+throws away exactly the trades with the widest, most structural stops.
+
+**One real nuance**, caught by a failing test: notional = risk / stop, so 18% risk
+on a 1% stop is $1,800 of notional on a $100 book. At 10x that needs $180 of
+margin. Leverage does not set size, but the margin you can afford caps it — the
+ticket is refused rather than silently shrunk.
+
+### 40 · Raid-short study: which discriminators actually separate
+
+`npm run raid:ict`. Causal (a swing high at j is only used from j+2), 11 books,
+182 days, **13,847 raid events**, 14bp round-trip costs, train/holdout split.
+
+Framing arithmetic: flattening 100% at 1R makes the payoff 1:1, so **breakeven
+win rate is ~52% after costs**. A 45% win rate at 1:1 is not "slightly losing",
+it is about -0.46R once cost drag on a 0.6% median stop is charged.
+
+Holdout, stop above the highest close (body stop):
+
+```
+filter                        n     win    avgR      medStop
+ALL raids (baseline)        5499    42%   -0.840      0.48%
+wick-only rejection         2126    41%   -0.815      0.45%
+volume up on 2nd high       2236    43%   -0.894      0.51%
+2nd high in 9-10 NY          163    35%   -0.764      0.65%
+level tapped 3+ times       4376    43%   -0.880      0.47%
+closed below neckline       2276    46%   -0.292      0.79%
+displacement >= 1 ATR        725    48%   -0.290      0.79%
+HTF bias down               2004    45%   -0.429      0.72%
+neckBreak + displaced        533    48%   -0.214      0.92%
+wickOnly+neck+displaced      200    50%   -0.198      0.87%
+A+ wick+neck+disp+KZ+HTF      89    57%   -0.018      1.02%
+```
+
+**What separates:** structural failure confirmation. `closed below the neckline`
+and `displacement >= 1 ATR` are the two that move the number, and they compound.
+Full A+ reaches 57% win and roughly flat expectancy.
+
+**What does not separate, despite being the intuitive answer:**
+
+- **wick-only rejection is WORSE than baseline** (-0.815 vs -0.840 body / -0.503
+  vs -0.462 wick-stop). The *shape* of the top carries almost no information.
+- **volume tells you nothing.** Up on the second high -0.894R, down -0.803R. Both
+  bad, neither discriminating.
+- **touch count is a no-op** (-0.880 vs -0.840 baseline).
+- **"in premium" is literally a no-op** — it selects 7,765 of 7,766 events, so
+  every one of these raids is already in premium. It cannot discriminate.
+- **the 9am high is the WORST filter in the table**: 35% holdout win, -0.764R on
+  163 events. Shorting the 9am double top specifically is the losing version of
+  this trade.
+
+A large part of what looks like edge is just **stop width buying down cost drag**:
+every filter that helps also raises the median stop from ~0.48% to ~0.8-1.0%, and
+14bp of cost on a 0.48% stop is 0.29R per trade versus 0.14R on a 1.0% stop.
+
+**Stop placement.** Body stop (above the highest close) beats the wick stop at A+
+(57% / -0.018R vs 52% / -0.103R) but is much worse unfiltered (-0.840 vs -0.462),
+because a tight stop gets noise-hit and pays proportionally more cost. Body stop
+is right only once the setup is already A+.
+
+Note the A+ median stop is **1.02%** — comfortably inside 40x liquidation. The
+2.8% XRP stop came from entering far above the level, not from the structure
+needing a wide stop.
+
+### 41 · 18% of working cash per 1R has a 79% probability of ruin
+
+Block bootstrap, 4,000 paths, on the A+ filter's own 231-trade distribution
+(54% win), banking 60% of every new high above the start:
+
+```
+ 18% per 1R -> median $32  P5 $ 0  P95 $188  P(ruin) 78.9%  P($1k) 0.0%
+ 10% per 1R -> median $35  P5 $ 2  P95 $158  P(ruin)  6.2%  P($1k) 0.0%
+  5% per 1R -> median $50  P5 $14  P95 $134  P(ruin)  0.0%  P($1k) 0.0%
+  2% per 1R -> median $75  P5 $45  P95 $118  P(ruin)  0.0%  P($1k) 0.0%
+```
+
+**18% per 1R wipes the account in 4 of 5 paths** on the best filter found, and
+never reaches $1,000 in any of the 4,000. Separately, `simultaneousRisk` puts
+5 opens x 18% at **90% of the book on one correlated flush** (~83% effective at
+0.85 correlation) — crypto majors do not diversify in a real dump, which is the
+same effect already observed as "11 coins at once ruins the book".
