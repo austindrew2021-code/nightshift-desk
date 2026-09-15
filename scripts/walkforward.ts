@@ -34,7 +34,14 @@ import { ICT_ASSETS } from "../src/lib/engine/universe.ts";
 import type { Candle } from "../src/lib/engine/types.ts";
 
 const CACHE = "/tmp/nightshift-1h-3y";
-const COST = (5 + 2) / 10_000;
+/**
+ * Per-side cost. COST_BP env overrides it, so the same walk-forward can be run at
+ * taker (7bp = 5 fee + 2 spread) and at maker (2bp, no spread crossed).
+ * scripts/maker.ts verified the maker reduction is mechanical — cost per trade
+ * fell 0.126R -> 0.042R with an 88% fill rate and no adverse-selection penalty —
+ * so re-testing at the lower cost is justified rather than wishful.
+ */
+const COST = Number(process.env.COST_BP ?? 7) / 10_000;
 const BARS_DAY = 24;
 const TRAIN_D = 360, TEST_D = 90, STEP_D = 90;
 const MIN_BOOKS = 5;

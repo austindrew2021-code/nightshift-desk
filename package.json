@@ -37,7 +37,8 @@
     "aggro:ict": "node --experimental-strip-types scripts/aggressive.ts",
     "wf:ict": "node --experimental-strip-types scripts/walkforward.ts",
     "struct:ict": "node --experimental-strip-types scripts/structure.ts",
-    "fade:ict": "node --experimental-strip-types scripts/raid-fade.ts"
+    "fade:ict": "node --experimental-strip-types scripts/raid-fade.ts",
+    "maker:ict": "node --experimental-strip-types scripts/maker.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
