@@ -1053,6 +1053,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas" || t.setup === "amd" || t.setup === "daily" || t.setup === "sweep";
         const lev = s.ictLev || ICT_LEVERAGE;
         const clamped = clampStopToLiq(t.side, t.entryUsd, t.stop, lev);
+        // Panic fade stop belongs beyond the wick. If that wick is past 40× liq, skip — LINK 15 Sep sat SL=liq.
+        if (clamped.capped && t.setup === "sweep") continue;
         const stopPx = clamped.stop;
         const stopDist = Math.abs(t.entryUsd - stopPx);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
