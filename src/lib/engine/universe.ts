@@ -36,6 +36,16 @@ export const ICT_ASSETS: IctAssetDef[] = [
   { id: "APT", symbol: "APT", name: "Aptos", venue: "okx", instId: "APT-USDT" },
   { id: "TRX", symbol: "TRX", name: "TRON", venue: "okx", instId: "TRX-USDT" },
   { id: "SEI", symbol: "SEI", name: "Sei", venue: "okx", instId: "SEI-USDT" },
+  { id: "ZEC", symbol: "ZEC", name: "Zcash", venue: "kucoin", instId: "ZEC-USDT" },
+  { id: "ENA", symbol: "ENA", name: "Ethena", venue: "kucoin", instId: "ENA-USDT" },
+  { id: "XMR", symbol: "XMR", name: "Monero", venue: "kucoin", instId: "XMR-USDT" },
+  { id: "WIF", symbol: "WIF", name: "dogwifhat", venue: "kucoin", instId: "WIF-USDT" },
+  { id: "ICP", symbol: "ICP", name: "Internet Computer", venue: "kucoin", instId: "ICP-USDT" },
+  { id: "FET", symbol: "FET", name: "Fetch.ai", venue: "kucoin", instId: "FET-USDT" },
+  { id: "TIA", symbol: "TIA", name: "Celestia", venue: "kucoin", instId: "TIA-USDT" },
+  { id: "OP", symbol: "OP", name: "Optimism", venue: "kucoin", instId: "OP-USDT" },
+  { id: "ATOM", symbol: "ATOM", name: "Cosmos", venue: "kucoin", instId: "ATOM-USDT" },
+  { id: "ONDO", symbol: "ONDO", name: "Ondo", venue: "kucoin", instId: "ONDO-USDT" },
 ];
 
 export interface ChartBar {
