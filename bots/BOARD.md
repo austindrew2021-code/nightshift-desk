@@ -1655,3 +1655,78 @@ depend on any of this being profitable: if the desk trades raids, it should fade
 them rather than follow them, and it should concentrate on 09:00-11:00 NY. That is
 strictly better than the current A+ continuation rule even though neither clears
 costs.
+
+
+---
+
+### 54 · Maker-only entries: a real 3x cost cut that does NOT help the search
+
+`npm run maker:ict`, then the walk-forward re-run at `COST_BP=2`.
+
+**Part 1 — maker execution, modelled properly, is a large real saving.** The naive
+test (same trades, cheaper fee) is fantasy. A limit order only fills if price comes
+back to it, and conditional on filling you can be adversely selected. So the limit
+is placed at an offset better than the signal close, a later bar must trade through
+it, and the realised fill rate is measured. On row 53's best strategy, holdout:
+
+```
+                   fill%   cost     net      t
+TAKER baseline      100%  0.126R  -0.029R  -0.9
+maker +0.10 ATR      95%  0.038R  +0.108R   3.1
+maker +0.25 ATR      88%  0.042R  +0.129R   3.3
+maker +0.50 ATR      73%  0.047R  +0.122R   2.6
+```
+
+Cost per trade falls **0.126R -> 0.042R**. And the adverse-selection check came out
+the *opposite* way from expectation: the filled subset's gross is **+0.171R**
+against the taker's +0.097R on all triggers, so the better entry price more than
+compensates for the 12% of triggers that never fill. No adverse-selection penalty
+at this offset on hourly bars.
+
+The unconditional part is the saving: **~0.084R per trade**, arithmetic, not a
+period effect. That drops the break-even gross edge from +0.126R to +0.042R — a 3x
+easier bar, which genuinely moves row 44's cost-frequency boundary.
+
+The conditional part is everything else: gross still flips sign (train -0.031, val
+-0.094, holdout +0.171), so the net +0.129R at t 3.3 is a real cost saving applied
+to a period effect. Net is negative on train and validation.
+
+**Part 2 — and this is the surprise. At maker cost the walk-forward got WORSE.**
+
+```
+                    chained OOS        Sharpe   $100 ->
+taker 7bp/side      +1.42%/mo t 1.13    0.80    $134.01
+maker 2bp/side      +1.23%/mo t 0.89    0.64    $127.14
+```
+
+Cheaper execution produced a *worse* forward record. The reason is visible in the
+fold picks: at maker cost the fit starts choosing higher-turnover configs that lost
+forward. Fold 2025-08 switched from `RSI 28 20/80 L` (+1.9%) to
+`BB 50/1.5 breakout L` (+2.8% in fit), and fold 2026-05 switched from
+`RSI 28 20/80 L` (-0.3%) to `VolBrk 1.5 LS` (-2.6%). At maker pricing **39 of 174**
+configs beat hold on arithmetic mean, against 6 at taker.
+
+**Fees were acting as a regulariser.** They penalised turnover, and turnover
+correlates with overfitting, so removing the penalty let the selection pick worse
+strategies. Lower costs help a *fixed* strategy and hurt a *search* — an effect
+that only shows up if you actually test it rather than assuming cheaper is better.
+
+Ranking at maker cost, for completeness — `RSI 21 20/80 L` remains the most
+consistent at 7/8 folds positive:
+
+```
+ 1  BB 20/2.5 breakout L   +2.50%/mo  t 1.94  Sharpe 1.38  5/8
+ 2  RSI 28 25/75 L         +1.40%/mo  t 1.82  Sharpe 1.29  6/8
+ 3  RSI 21 20/80 L         +1.15%/mo  t 1.79  Sharpe 1.28  7/8  consistency 2.04
+ 5  BB 50/2.5 breakout L   +2.51%/mo  t 1.74  Sharpe 1.24  4/8
+ 6  BB 50/1.5 breakout L   +3.08%/mo  t 1.70  Sharpe 1.21  4/8
+```
+
+**0 of 174 clear the bar at either cost level.** Best honest outcome is still
+~1-1.2% per month compounded, which is **19.2 years** to take $100 to $1,000
+unlevered. Nothing surpassed expectations.
+
+**Practical takeaways that survive all of this.** Use maker limit entries — the
+0.084R per trade is free and verified. Do not lower fees and then re-optimise on
+the same data, because the fit gets worse. And if the desk trades one thing, the
+7/8-fold `RSI 21 20/80 L` is still the most consistent config found.
