@@ -1239,3 +1239,83 @@ with the explicit observation that "a 0.3% profit target against 0.2% round-trip
 fees leaves almost nothing" — which is row 44 in someone else's words.
 
 Sources: kalena.ai, coinquant.ai, tv-hub.org, darkbot.io, 3commas.io (Sept 2026).
+
+
+---
+
+### 49 · Aggressive families: grid, martingale, over-Kelly
+
+`npm run aggro:ict`. These share a signature that makes a single backtest path
+useless: a high MEDIAN with a catastrophic TAIL. One path of a martingale usually
+looks excellent, because the ruin lives in the paths you did not draw. So: 600
+draws of 30-day windows from the real 182-day series across 11 pairs, 7bp per side
+on every fill, isolated liquidation modelled, reporting the distribution.
+
+**Martingale — 93% to 100% ruin at every single setting.**
+
+```
+base 1% max 3 doublings   median $0  ruin  93%
+base 1% max 5            median $0  ruin  98%
+base 2% any              median $0  ruin 100%
+base 5% any              median $0  ruin 100%
+```
+
+Not marginal, not tunable. `P($1,000)` is 0.0% in all nine configs. The doubling
+rule converts a near-zero edge into a guarantee of ruin, because the losing streak
+that clears the account is not rare over 30 days at these fill rates.
+
+**Grid — the median lies, which is exactly why it sells.**
+
+```
+                            median   mean    P5    ruin   P($1k)   fills
+grid 8 rungs  1x no stop      $100    $97   $79      0%     0.0%     239
+grid 8 rungs  3x no stop      $100    $88   $34      1%     0.0%     233
+grid 8 rungs  5x no stop      $ 99    $80   $ 0     14%     0.0%     225
+grid 8 rungs 10x no stop      $ 89    $59   $ 0     43%     0.0%     260
+grid 8 rungs  3x stop-break   $ 32    $41   $ 0     37%     0.0%    1099
+grid 8 rungs  5x stop-break   $  0    $33   $ 0     53%     0.0%     750
+grid 8 rungs 10x stop-break   $  0    $26   $ 0     66%     0.0%     420
+```
+
+At 10x the median is $89 — it looks survivable — while **43% of paths are ruined**.
+That gap between median and mean is the whole product. And `P($1,000)` is **0.0% in
+every grid config tested**: grid cannot reach this target even before the tail
+risk, because its per-rung profit is capped by design.
+
+Counterintuitively, **stop-on-break is far worse than no stop** (37-66% ruin vs
+0-43%). It realises the loss each time the range breaks and then re-establishes,
+and the fill count explodes from ~230 to 750-1,290 — so it pays the toll three to
+five times as often. This is worth knowing because "add a stop to the grid" is the
+standard advice.
+
+Published claims line up with this once the qualifier is read: grid bots are
+advertised at "11% average 30-day returns **before fees**", which against 239 fills
+at 7bp a side is the entire return.
+
+**Over-Kelly on the best edge measured anywhere in this project** (row 40's A+
+raid: 54% win at 1:1, ~1.2 trades/day):
+
+```
+                       median   mean    P5    P95   ruin   P($1k)   maxDD
+ 4%/trade (half Kelly)   $86    $91   $58   $129     0%    0.0%      27%
+ 8%/trade (full Kelly)   $82    $86   $36   $157     0%    0.0%      47%
+18%/trade (over)         $31    $64   $ 5   $201     0%    0.2%      78%
+25%/trade (over)         $13    $63   $ 1   $191     2%    1.5%      89%
+40%/trade (over)         $ 1    $59   $ 0   $200    43%    4.2%      97%
+```
+
+This is the cleanest statement of the trade-off in the whole project. Going from
+4% to 40% per trade moves `P($1,000)` from 0.0% to **4.2%** — and moves the median
+from **$86 to $1**, with 43% ruin. Aggression does not improve the outcome; it
+converts the typical outcome into a lottery ticket. The mean barely moves (~$60-90
+throughout) because no amount of sizing changes the sign of the edge.
+
+**And note that even FULL KELLY loses money here.** Kelly for a 54% 1:1 bet is
+8% of book — but that is the pre-cost win rate. After 14bp of cost on a 1% stop
+(0.14R), the effective edge is `0.54 - 0.46 - 0.14 = -0.06R`. Negative. So the true
+Kelly-optimal size on this edge is **zero**. Kelly amplifies a positive edge; on a
+negative one it is just a faster route down, which is why the 8% median is $82.
+
+That closes the aggressive class: martingale is ruin, grid cannot reach the target
+and hides its tail in the median, and optimal sizing on the best available edge is
+to not bet it.
