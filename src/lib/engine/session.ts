@@ -168,6 +168,14 @@ function ictHaltPct(s: EngineState) {
   return 0.28;
 }
 
+/** Net ICT PnL for the current NY day. Winners count — two stops on a green day is not a halt. */
+function ictDayNet(s: EngineState, now = Date.now()): number {
+  const day = nyParts(now).day;
+  return s.closed
+    .filter((c) => c.origin === "ict" && nyParts(c.closedAt).day === day)
+    .reduce((a, c) => a + finite(c.pnlUsd), 0);
+}
+
 function maybeBank(s: EngineState) {
   if (s.mode !== "ict") return;
   const lifetime = finite(s.equityUsd) - s.startUsd;
@@ -954,13 +962,15 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const now = Date.now();
   const liveFromOpen = now - 4 * 3600_000;
   const liveFromClosed = now - 45 * 60_000;
-  if (finite(s.dayLoss) >= s.startUsd * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT)) {
-    if (s.tickN % 30 === 1) {
+  const cap = s.startUsd * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT);
+  const dayNet = s.mode === "ict" ? ictDayNet(s, now) : -finite(s.dayLoss);
+  if (dayNet <= -cap) {
+    if (s.tickN % 120 === 1) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `daily loss halt · $${s.dayLoss.toFixed(0)} / ${((s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT) * 100).toFixed(0)}% · Reset to trade again`,
+        text: `daily halt · net $${dayNet.toFixed(0)} · cap -$${cap.toFixed(0)} · NY day, not Reset`,
         tone: "warn",
       });
     }
