@@ -135,12 +135,19 @@ export function tradableUsd(s: EngineState): number {
   return Math.max(0, finite(s.equityUsd, s.startUsd) - finite(s.bankedUsd));
 }
 
-/** 20× on 50% is the default 10× notional. 1R follows ictRiskPct (12/18/30). Hard cap = that 1R. */
+/** 18% chip stays 18% in chop; expand (the DOGE/ADA tape) sizes 22%. 12/30 chips unchanged. */
+export function liveRiskPct(s: EngineState): number {
+  const base = s.ictRiskPct || ICT_MAX_RISK_PCT;
+  if (s.ictRegime === "expand" && Math.abs(base - 0.18) < 1e-9) return 0.22;
+  return base;
+}
+
+/** 20× on 50% is the default 10× notional. 1R follows liveRiskPct. Hard cap = that 1R. */
 export function ictRiskUsd(s: EngineState, stopPct = 0.01): { risk: number; notional: number } {
   const book = Math.max(s.startUsd * 0.25, tradableUsd(s) || s.startUsd);
   const sp = Math.max(1e-6, stopPct);
   const lev = s.ictLev || ICT_LEVERAGE;
-  const riskPct = s.ictRiskPct || ICT_MAX_RISK_PCT;
+  const riskPct = liveRiskPct(s);
   const floor = book * ICT_MARGIN_PCT * lev;
   const cap = book * lev;
   const fromRisk = (book * riskPct) / sp;
@@ -155,7 +162,7 @@ export function ictRiskUsd(s: EngineState, stopPct = 0.01): { risk: number; noti
 }
 
 function ictHaltPct(s: EngineState) {
-  const r = s.ictRiskPct || ICT_MAX_RISK_PCT;
+  const r = liveRiskPct(s);
   if (r >= 0.28) return 0.32;
   if (r >= 0.16) return 0.22;
   return 0.28;
