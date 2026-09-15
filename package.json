@@ -29,7 +29,8 @@
     "money:ict": "node --experimental-strip-types scripts/ict-money.ts",
     "causal:ict": "node --experimental-strip-types scripts/ict-causal-test.ts",
     "season:ict": "node --experimental-strip-types scripts/ict-seasonality.ts",
-    "raid:ict": "node --experimental-strip-types scripts/ict-raid.ts"
+    "raid:ict": "node --experimental-strip-types scripts/ict-raid.ts",
+    "rr:ict": "node --experimental-strip-types scripts/ict-rr.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

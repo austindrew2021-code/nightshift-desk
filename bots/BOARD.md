@@ -981,3 +981,76 @@ never reaches $1,000 in any of the 4,000. Separately, `simultaneousRisk` puts
 5 opens x 18% at **90% of the book on one correlated flush** (~83% effective at
 0.85 correlation) — crypto majors do not diversify in a real dump, which is the
 same effect already observed as "11 coins at once ruins the book".
+
+
+---
+
+### 42 · Both remaining structural levers tested — both fail
+
+`npm run rr:ict`. The two untested changes with real mathematical upside, on the
+A+ raid filter, causal, 14bp costs, train/holdout.
+
+**Lever 1 — R:R.** Flatten-at-1R makes the payoff 1:1, so 52% is breakeven. A
+lower win rate at a higher target can beat it: 40% at 2R is +0.20R. Measured on
+15m, holdout:
+
+```
+target           n    win     avgR      t
+1R (current)    91    56%   -0.042   -0.4     <- best of the five
+1.5R            91    43%   -0.116   -0.9
+2R              91    38%   -0.090   -0.6
+3R              91    35%   -0.074   -0.4
+measured move   91    70%   -0.044   -0.6
+```
+
+**Flatten-at-1R is the best of the five.** The decision taken after the TAO wick
+was correct and is now measured rather than anecdotal. Note the measured move hits
+70% of the time yet still loses — the neckline projection is often nearer than the
+stop, so it is a high-win, low-payoff exit.
+
+**Lever 2 — timeframe.** Cost is fixed at 14bp per round trip, so it is 0.29R
+against a 0.48% stop and 0.07R against a 2% stop. Wider stops should pay less
+toll. 1H folds gave only 48 A+ events (17 in holdout) and got worse, with a
+textbook overfit signature at 2R: train +0.111R, holdout **-0.563R**. 4H produced
+12 events, too few to test.
+
+So: no structural lever left. Best configuration found anywhere in this whole
+effort remains **A+ raid short, body stop, flatten 1R: -0.042R at t -0.4**.
+
+### 43 · What the goal arithmetically requires
+
+`(1 + f*E)^N = 10` for $100 -> $1,000 in 30 days, where f is risk per trade, E is
+expectancy in R, N is trades per month.
+
+```
+trades/day  growth needed   risk f needed at  E=+0.05R  +0.10R  +0.20R  +0.30R
+   1.2/day    6.605%/trade                     132.1%!  66.1%!   33.0%   22.0%
+     3/day    2.591%/trade                      51.8%!   25.9%   13.0%    8.6%
+     5/day    1.547%/trade                      30.9%    15.5%    7.7%    5.2%
+    10/day    0.770%/trade                      15.4%     7.7%    3.9%    2.6%
+    20/day    0.385%/trade                       7.7%     3.8%    1.9%    1.3%
+```
+
+`!` = over 50% of book per trade, where a two-trade losing streak is fatal.
+
+**The goal is arithmetically reachable** — 10 trades/day at +0.10R with 7.7% risk,
+or 20/day at +0.10R with 3.8%. Those are not exotic numbers.
+
+Two things follow, and they redirect the whole search:
+
+1. **Expectancy must be positive. Nothing else substitutes.** At E = -0.042R there
+   is no f that reaches the target; sizing cannot fix a sign. This is why bigger
+   R targets, more leverage, and every banking policy all failed.
+2. **The A+ filter is the wrong SHAPE for this goal even if it were profitable.**
+   It fires ~1.2 times a day, which needs 66% risk per trade at +0.10R. Selectivity
+   and this target pull in opposite directions: the goal needs **frequency plus a
+   small positive edge**, not rarity plus a large one.
+
+So the target to hunt is specific: **≥10 trades/day at ≥+0.10R after costs.** Any
+future idea can be judged against that in one line, which is more useful than
+another discretionary filter.
+
+Nothing in 15m OHLCV has produced it across everything tested here. Edges at that
+frequency generally live in data this app does not have — order-book imbalance,
+funding dislocations, cross-exchange basis — which is a statement about what to
+instrument next, not a promise that they work.

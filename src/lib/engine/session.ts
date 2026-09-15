@@ -30,6 +30,7 @@ import {
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
 import { inKill, nyHour, nyParts, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { applyBanking, ratchet, type BankState } from "./banking";
+import { ticket } from "./sizing";
 
 /** Measured best of six policies over 4,000 bootstrap paths — board row 36. */
 const ICT_BANK_POLICY = ratchet(0.6);
@@ -129,12 +130,42 @@ export function tradableUsd(s: EngineState): number {
 }
 
 /** 12% of tradable per 1R. 15x×80% is the notional ceiling, not a 2% clip. */
-export function ictRiskUsd(s: EngineState, stopPct = 0.01): { risk: number; notional: number } {
+/**
+ * Size one ICT ticket.
+ *
+ * Risk sets the notional (risk / stop distance); leverage is then chosen per
+ * ticket as the highest setting that still keeps liquidation clear of the stop.
+ * Previously a single global `ICT_MARGIN_PCT * ICT_LEVERAGE` cap was applied to
+ * every trade, which silently shrank any setup whose stop was wide — and on a
+ * real venue at fixed 40x it means a 2.8% structural stop gets liquidated before
+ * the stop is reached, so the trade looks untakeable when it simply needed 21x.
+ * See src/lib/engine/sizing.ts and bots/BOARD.md row 39.
+ */
+export function ictRiskUsd(
+  s: EngineState,
+  stopPct = 0.01,
+): { risk: number; notional: number; leverage: number; liqPct: number; ok: boolean } {
   const book = Math.max(s.startUsd * 0.25, tradableUsd(s) || s.startUsd);
-  const risk = Math.max(1, book * ICT_MAX_RISK_PCT);
-  const notionalCap = book * ICT_MARGIN_PCT * ICT_LEVERAGE;
-  const notional = Math.min(risk / Math.max(1e-6, stopPct), notionalCap);
-  return { risk: notional * Math.max(1e-6, stopPct), notional };
+  const t = ticket({
+    workingCashUsd: book,
+    riskPct: ICT_MAX_RISK_PCT,
+    stopPct: Math.max(1e-6, stopPct),
+    maxLeverage: ICT_LEVERAGE,
+    // ICT_MARGIN_PCT is now the share of the book one position may lock as
+    // margin, which is what it always should have meant.
+    marginCapPct: ICT_MARGIN_PCT,
+  });
+  if (!t.ok) {
+    // Keep the old shape for callers: refuse by returning no size.
+    return { risk: 0, notional: 0, leverage: 0, liqPct: 0, ok: false };
+  }
+  return {
+    risk: t.riskUsd,
+    notional: t.notionalUsd,
+    leverage: t.leverage,
+    liqPct: t.liqPct,
+    ok: true,
+  };
 }
 
 /**
@@ -905,6 +936,10 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const stopDist = Math.abs(t.entryUsd - t.stop);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
         const sized = ictRiskUsd(s, stopPct);
+        // Sizing can refuse: a stop too wide to survive even 1x, or one whose
+        // notional needs more margin than the book allows. Skip rather than
+        // open a zero-size position.
+        if (!sized.ok) continue;
         const risk = sized.risk;
         const sizeUsd = sized.notional;
         const mark = b.last || t.entryUsd;

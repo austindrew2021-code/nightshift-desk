@@ -248,14 +248,32 @@ export const MAX_HOLD_MS = 3_600_000;
 export const MIN_SCORE = 0.65;
 
 /** ICT paper: 12% of tradable per 1R (not 2%). Bank 50% each +$100. 15x is the notional ceiling. */
-export const ICT_LEVERAGE = 15;
 /**
- * Fraction of the book deployable as margin, so the notional cap is
- * book x ICT_MARGIN_PCT x ICT_LEVERAGE. Was 0.8 (a 12x cap). Lowered to 0.6
- * (9x) on measurement: across 4,000 block-bootstrap paths, dropping from 0.8 to
- * 0.5-0.6 raised the MEDIAN 30-day outcome from $34 to ~$80 and cut median
- * drawdown from 87% to ~55%, because with expectancy near zero extra notional
- * buys variance and nothing else. See bots/BOARD.md row 36.
+ * Venue ceiling for leverage, not a per-trade setting. KuCoin USDT-M majors go
+ * to 40x isolated, which is what fills are copied at; NPC caps at 20x there, so
+ * pass a lower maxLeverage for it.
+ *
+ * Raising this from 15 does NOT raise risk. Risk stays ICT_MAX_RISK_PCT of book
+ * and notional stays risk/stopDistance — the ceiling only decides whether that
+ * notional is affordable in margin, and sizing.ts then drops the leverage per
+ * ticket until liquidation sits 1.5x beyond the stop. At 15x a 1% stop needed
+ * $80 of margin on a $100 book and was refused outright; at 40x it needs $30 and
+ * self-regulates down to 28x/21x as the stop widens. Board row 39.
+ */
+export const ICT_LEVERAGE = 40;
+/**
+ * Share of the book a single position may lock up as margin.
+ *
+ * This used to be half of a global notional cap (`book x ICT_MARGIN_PCT x
+ * ICT_LEVERAGE`), which silently shrank any setup whose stop was wide. It is now
+ * what its name says: a margin cap. Risk sets notional, sizing.ts picks the
+ * per-ticket leverage, and this decides whether the resulting margin is
+ * affordable — a ticket that does not fit is refused rather than resized.
+ *
+ * 0.6 rather than 0.8 on measurement: across 4,000 block-bootstrap paths,
+ * dropping deployed margin from 80% to 50-60% raised the MEDIAN 30-day outcome
+ * from $34 to ~$80 and cut median drawdown from 87% to ~55%. With expectancy near
+ * zero, extra notional buys variance and nothing else. Board rows 36 and 39.
  */
 export const ICT_MARGIN_PCT = 0.6;
 export const ICT_MAX_RISK_PCT = 0.12;
