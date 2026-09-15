@@ -25,6 +25,10 @@ export const ICT_ASSETS: IctAssetDef[] = [
   { id: "SUI", symbol: "SUI", name: "Sui", venue: "okx", instId: "SUI-USDT" },
   { id: "ADA", symbol: "ADA", name: "Cardano", venue: "okx", instId: "ADA-USDT" },
   { id: "LTC", symbol: "LTC", name: "Litecoin", venue: "okx", instId: "LTC-USDT" },
+  { id: "HBAR", symbol: "HBAR", name: "Hedera", venue: "okx", instId: "HBAR-USDT" },
+  { id: "UNI", symbol: "UNI", name: "Uniswap", venue: "okx", instId: "UNI-USDT" },
+  { id: "TON", symbol: "TON", name: "Toncoin", venue: "okx", instId: "TON-USDT" },
+  { id: "NEAR", symbol: "NEAR", name: "NEAR", venue: "okx", instId: "NEAR-USDT" },
 ];
 
 export interface ChartBar {
