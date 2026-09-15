@@ -33,7 +33,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { inKill, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
+import { inKill, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -797,6 +797,54 @@ function tickIct(s: EngineState, market: MarketSnapshot | null) {
   }
 }
 
+function ictTakePartial(s: EngineState, p: Position, exitUsd: number, frac: number) {
+  const take = Math.max(0, finite(p.sizeUsd) * frac);
+  if (take < 1) return;
+  const dir = p.side === "short" ? -1 : 1;
+  const pnlUsd = ((exitUsd - p.entryUsd) / Math.max(1e-9, finite(p.entryUsd, 1))) * take * dir;
+  s.cashUsd = finite(s.cashUsd) + pnlUsd;
+  p.sizeUsd = Math.max(0, finite(p.sizeUsd) - take);
+  p.sizeSol = p.sizeUsd / Math.max(1e-6, s.solUsd);
+  p.partialed = true;
+  const r = finite(p.sizeUsd + take) > 0 ? pnlUsd / Math.max(1e-6, take * p.stopPct) : 1;
+  s.closed = [
+    {
+      id: `${p.id}-p1`,
+      symbol: p.symbol,
+      name: p.name,
+      setup: p.setup,
+      side: p.side,
+      openedAt: p.openedAt,
+      closedAt: s.simT,
+      entryUsd: p.entryUsd,
+      exitUsd,
+      sizeSol: take / Math.max(1e-6, s.solUsd),
+      pnlSol: pnlUsd / Math.max(1e-6, s.solUsd),
+      pnlUsd,
+      rMultiple: r,
+      reason: "target",
+      score: 0.7,
+      note: `${p.note} · ¾ @ 1R`,
+      origin: p.origin,
+      stopUsd: p.stopUsd,
+      targetUsd: p.targetUsd,
+      liqUsd: p.liqUsd,
+    },
+    ...s.closed,
+  ].slice(0, 80);
+  if (pnlUsd > 0.05) s.stats.wins += 1;
+  bumpSpark(s, p.agent, pnlUsd);
+  pushTape(s, {
+    t: s.simT,
+    kind: "close",
+    agent: p.agent,
+    symbol: p.symbol,
+    text: `¾ @ 1R ${p.symbol} ${pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)} · runner on`,
+    tone: "up",
+  });
+  maybeBank(s);
+}
+
 function markIct(s: EngineState, market: MarketSnapshot | null) {
   const books = market?.books ?? [];
   const trailSet = new Set(["asia", "scalp", "silver", "judas", "amd", "daily", "sweep"]);
@@ -822,15 +870,31 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
         closePos(s, p, last, "time");
         continue;
       }
-      if (mfe >= risk) {
+      if (mfe >= risk && !p.partialed) {
         const px = p.side === "long" ? p.entryUsd + risk : p.entryUsd - risk;
-        s.open = s.open.filter((x) => x.id !== p.id);
-        closePos(s, p, px, "target");
-        continue;
+        ictTakePartial(s, p, px, 0.75);
+        stopPx = p.entryUsd;
+        tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
+        p.stopUsd = stopPx;
+        p.targetUsd = tgtPx;
+        p.targetR = 5;
+        p.note = `${p.note} · runner`;
       }
-      tgtPx = p.side === "long" ? p.entryUsd + risk : p.entryUsd - risk;
-      p.targetUsd = tgtPx;
-      p.targetR = 1;
+      if (p.partialed) {
+        const lock = lockRFromMfe(mfe, risk);
+        if (lock >= 0) {
+          const lockPx = p.side === "long" ? p.entryUsd + lock * risk : p.entryUsd - lock * risk;
+          stopPx = p.side === "long" ? Math.max(stopPx, lockPx) : Math.min(stopPx, lockPx);
+        }
+        tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
+        p.stopUsd = stopPx;
+        p.targetUsd = tgtPx;
+        p.targetR = 5;
+      } else {
+        tgtPx = p.side === "long" ? p.entryUsd + risk : p.entryUsd - risk;
+        p.targetUsd = tgtPx;
+        p.targetR = 1;
+      }
     }
     if (p.side === "long" && lo <= stopPx) {
       s.open = s.open.filter((x) => x.id !== p.id);
@@ -941,9 +1005,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       }
     }
     const sim = [
-      ...simulateIct(b.candles15, s15, riskFlat, b.symbol, b.name),
-      ...(b.candles5 ? simulateIct(b.candles5, s5, riskFlat, b.symbol, b.name) : []),
-      ...(b.candles1h ? simulateIct(b.candles1h, s1h, riskFlat, b.symbol, b.name) : []),
+      ...simulateIct(b.candles15, s15, riskFlat, b.symbol, b.name, { keep: 0.25, targetR: 5, mode: "ratchet" }),
+      ...(b.candles5 ? simulateIct(b.candles5, s5, riskFlat, b.symbol, b.name, { keep: 0.25, targetR: 5, mode: "ratchet" }) : []),
+      ...(b.candles1h ? simulateIct(b.candles1h, s1h, riskFlat, b.symbol, b.name, { keep: 0.25, targetR: 5, mode: "ratchet" }) : []),
     ].map((t) => ({
       ...t,
       origin: "ict" as const,
@@ -1019,7 +1083,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             peakUsd: mark,
             agent: "timing",
             note: trail
-              ? `${t.note} · 1R full · ${lev}x${liqNote}`
+              ? `${t.note} · ¾@1R trail 5R · ${lev}x${liqNote}`
               : `${t.note} · ${lev}x${liqNote}`,
             origin: "ict",
             stopUsd: stopPx,
@@ -1273,7 +1337,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle} ${s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · take 1R full`,
+      text: `ICT ${ictFilter} ${s.ictStyle} ${s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ¾@1R trail 5R`,
       tone: "mute",
     });
   }
