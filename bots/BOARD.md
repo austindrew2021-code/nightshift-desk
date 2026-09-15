@@ -1819,3 +1819,88 @@ to **continuation up**, not reversal, which is itself consistent with row 52.
 touch, enter at that hourly close, hold 24 hours, maker limit entry, 2.5x gross
 exposure across up to 5 concurrent pairs. Expect ~4%/month with a ~27% drawdown
 and about 15 signals a month.
+
+
+---
+
+### 56 · Timeframes and exits for the wick reversal — and why a stop kills it
+
+`npm run wicktf:ict`. Row 55 found one point; this sweeps the space around it —
+bar size, level lookback, hold length, exit rule — same splits, Bonferroni bar 2.40.
+
+**The edge is specific to 1H bars and a WEEKLY level. It does not generalise.**
+
+```
+config                          n     /mo   TRAIN     VAL     HOLD     all      t
+1H  week  wick60 hold24h       574   15.5   +0.81%  +1.21%  +1.14%  +1.00%   5.8  ***
+1H  week  wick50 hold24h       896   24.2   +0.70%  +0.78%  +0.93%  +0.78%   5.4  ***
+1H  week  wick60 hold48h       574   15.5   +0.67%  +1.49%  +1.64%  +1.13%   4.7  ***
+1H  week  wick70 hold24h       314    8.5   +0.41%  +1.27%  +1.56%  +0.91%   4.1  ***
+1H  week  wick60 hold12h       574   15.5   +0.44%  +0.33%  +0.47%  +0.42%   3.5  ***
+1H  week  wick60 hold96h       574   15.5   +1.02%  +2.22%  -0.06%  +1.05%   3.3
+1H  day   wick60 hold24h      1956   52.9   +0.43%  -0.17%  -0.01%  +0.19%   2.0
+4H  day   wick60 hold24h      1042   28.2   +0.07%  -0.56%  +0.20%  -0.04%  -0.3
+4H  week  wick60 hold24h       328    8.9   -0.35%  -1.05%  +0.65%  -0.23%  -0.9
+```
+
+4H and coarser kill it outright. The DAILY level is worth ~nothing at any bar size.
+Only the 1H/weekly combination is stable, which is consistent with row 55's
+mechanism: it needs a level with enough resting liquidity to matter (weekly) and a
+bar fine enough to resolve the absorption wick (1H). A 4H bar smears the wick into
+a body and the signature disappears.
+
+**A STOP LOSS DESTROYS THE EDGE. This is the most counterintuitive result here.**
+
+```
+1H week wick60, hold 96h cap, different exits:
+  time exit (no stop)            +1.05%   t  3.3
+  exit on reclaim of the level   +0.04%   t  0.7
+  4 ATR target / 2 ATR stop      +0.00%   t  0.0
+  3 ATR target / 1.5 ATR stop    -0.12%   t -0.8
+  2 ATR target / 1 ATR stop      -0.13%   t -1.3
+```
+
+Going from a pure time exit to a 2:1 ATR stop takes it from **t 5.8 to t -1.3**.
+The setup is absorption after a sweep, and price frequently dips further before
+recovering — a stop is hit precisely on that dip, converting the winners into
+losses. The edge lives in holding through the adverse excursion.
+
+This has a hard consequence: **the strategy cannot be stop-protected, so per-trade
+downside is unbounded and leverage must stay modest.** That is exactly why row 55's
+5x run carries a 56% drawdown. It is not a tuning choice, it is structural.
+
+**Compounded, across variants.** The original config dominates at every exposure:
+
+```
+                    2.5x gross          5x gross
+hold24 wick60    +3.42%/mo  29% DD   +5.72%/mo  56% DD
+hold48 wick60    +2.86%/mo  35% DD   +3.33%/mo  65% DD
+hold24 wick50    +1.97%/mo  44% DD   +1.59%/mo  74% DD
+hold48 wick50    +1.72%/mo  63% DD   -0.81%/mo  94% DD
+```
+
+Loosening the wick to 50% raises frequency from 15.5 to 24.2 signals a month and
+makes compounding **worse** — the per-trade edge falls faster than frequency rises,
+and drawdown balloons. Extending the hold to 48h raises the per-trade mean but
+lowers compounded return, because positions overlap more (419 distinct trades
+versus 468) and drawdown grows.
+
+**Best risk-adjusted exposure is the LOWEST, not the highest:**
+
+```
+1.25x   +1.84%/mo  15% DD   -> return/DD 0.123
+2.5x    +3.42%/mo  29% DD   -> 0.118
+5x      +5.72%/mo  56% DD   -> 0.102
+```
+
+**On "5-20% per trade".** That is an account return at leverage, not a price move.
+At 10x a +1% move is +10% on the account, so row 55's +1.0% per trade already IS
+~5% per trade at 5x and ~10% at 10x. Those numbers are the same phenomenon
+described in different units. Leverage scales the drawdown identically, and since
+this setup cannot carry a stop, 10x on a trade that can go 8% against you before
+recovering is a liquidation, not a 10% win.
+
+**Settled configuration:** 1H bars, prior-week low swept, lower wick >= 60% of the
+bar range, first touch only, enter at that bar's close, **exit on time at 24 hours
+with no stop**, maker limit entry, 2.5x gross across up to 5 concurrent pairs.
+~15 signals a month, ~+3.4%/month, ~29% drawdown.

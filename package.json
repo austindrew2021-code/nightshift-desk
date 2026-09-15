@@ -40,7 +40,8 @@
     "fade:ict": "node --experimental-strip-types scripts/raid-fade.ts",
     "maker:ict": "node --experimental-strip-types scripts/maker.ts",
     "rev:ict": "node --experimental-strip-types scripts/reversal.ts",
-    "wick:ict": "node --experimental-strip-types scripts/wicklow.ts"
+    "wick:ict": "node --experimental-strip-types scripts/wicklow.ts",
+    "wicktf:ict": "node --experimental-strip-types scripts/wick-tf.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
