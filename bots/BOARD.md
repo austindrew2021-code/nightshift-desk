@@ -1730,3 +1730,92 @@ unlevered. Nothing surpassed expectations.
 0.084R per trade is free and verified. Do not lower fees and then re-optimise on
 the same data, because the fit gets worse. And if the desk trades one thing, the
 7/8-fold `RSI 21 20/80 L` is still the most consistent config found.
+
+
+---
+
+### 55 · THE WEEKLY-LOW WICK REVERSAL — the first real edge found
+
+`npm run rev:ict` then `npm run wick:ict`. This started from the hypothesis that
+crypto sweeps lows and pumps back, so measure the phenomenon rather than a trade:
+forward return after an event, several horizons, no stops or targets, **against
+the unconditional baseline**. That baseline is the whole discipline — crypto rose
+over these three years, so "buy the sweep and it goes up" is trivially true and
+means nothing. Only excess over a random entry counts.
+
+**The event, alone.** Sweeping the prior DAY's low is worth nothing (best t -2.8).
+Sweeping the prior WEEK's low is worth **+0.65% excess at 72h, t 4.7**. Timeframe
+matters enormously, which is the first clue about mechanism.
+
+**The conditioner that matters is the LOWER WICK.**
+
+```
+weekLow + lower wick >= 60%   +0.99% excess @24h   t 5.5   (Bonferroni bar 3.82)
+weekLow + lower wick >= 40%   +0.68% excess @24h   t 5.4
+weekLow + wick>40% & vol>1.5  +0.72% excess @24h   t 4.8
+monthLow + wick>40% & RSI<30  +1.97% excess @24h   t 4.3
+```
+
+And a clean negative that sharpens the mechanism: **RSI<30 AND volume>1.5x is the
+WORST conditioner on all three timeframes** (-0.23%, -0.31%, -0.77%). Oversold on
+heavy volume with no wick is capitulation that keeps going. Oversold with a long
+wick is absorption. The wick is doing the work, not the oversold reading.
+
+**Why it forms.** A weekly low is watched widely enough to concentrate resting
+stops beneath it. The sweep runs them. A long lower wick is the signature of that
+supply being absorbed *within the bar* rather than followed through — someone was
+waiting there. The daily version is much weaker because a daily low holds less
+resting liquidity; the monthly version is stronger still but rarer.
+
+**As an actual strategy** (`hold 24h`, `wick >= 60%`, first touch only, 15.5
+signals/month across 9 pairs):
+
+```
+split        n     gross     net     win      t
+train       283   +0.954%  +0.814%   58%    3.2
+validation  145   +1.346%  +1.206%   61%    3.7
+HOLDOUT     146   +1.281%  +1.141%   66%    3.3
+all         574   +1.137%  +0.997%   61%    5.8
+```
+
+**Positive with t > 3 in every split.** Nothing else in this project has done that.
+
+**Portfolio, compounded.** `frac` is per position, so `frac x maxOpen` is gross
+exposure — 100% x 5 open is **5x leveraged**, not unlevered:
+
+```
+exposure   14bp taker              4bp maker
+1.25x      +1.84%/mo  15% DD      +2.16%/mo  13% DD
+2.5x       +3.42%/mo  29% DD      +4.07%/mo  27% DD
+5x         +5.72%/mo  56% DD      +7.06%/mo  53% DD
+                                   ($100 -> $1,249 over 3.05y)
+
+HOLDOUT only, 5x taker: +3.57%/mo, 38% DD
+```
+
+Return and drawdown scale together as leverage rises, which is what a real edge
+looks like — unlike row 49's aggressive families, where the median collapsed while
+the mean stayed flat.
+
+**Against the goal.** This is the best result in the project by a wide margin and
+it is still not $1,000/month:
+
+```
+1.25x  +1.84%/mo -> $100 to $1,000 in 126 months (10.5y)
+2.5x   +3.42%/mo ->  68 months (5.7y)
+5x     +5.72%/mo ->  41 months (3.4y)
+5x maker +7.06%/mo -> 34 months (2.8y)
+```
+
+**Caveats, honestly.** The full-sample t of 5.8 is optimistic because events within
+24h of each other share forward bars; the split columns are the real evidence and
+they hold. 56% drawdown at 5x is severe and would be hard to sit through. n=574
+over three years is a real but not enormous sample. And a `rev:ict` sign bug
+initially made every HIGH-sweep row wrong by subtracting an unflipped baseline
+from a flipped return — fixed, and the corrected reading is that high sweeps lead
+to **continuation up**, not reversal, which is itself consistent with row 52.
+
+**What to trade.** Weekly-low sweep, lower wick >= 60% of the bar's range, first
+touch, enter at that hourly close, hold 24 hours, maker limit entry, 2.5x gross
+exposure across up to 5 concurrent pairs. Expect ~4%/month with a ~27% drawdown
+and about 15 signals a month.
