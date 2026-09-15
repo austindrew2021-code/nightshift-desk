@@ -377,7 +377,11 @@ function rememberRaid(map: Map<string, RaidMem>, day: string, raid: RaidMem) {
     return;
   }
   if (raid.side !== prev.side) {
-    // Fresh opposite raid replaces — last liquidity taken is the one we fade.
+    // PDH / BSL / 9am / Asia-high is the real hunt. A later SSL bounce is the
+    // bull trap (XRP 15 Sep: long 1.407 into the 4H double top). Keep the high
+    // raid ~12 bars so we don't flip long in the distribution.
+    const highHunt = prev.side === "short" && /PDH|BSL|9am|Asia high/i.test(prev.src);
+    if (highHunt && raid.side === "long" && raid.sweepI - prev.sweepI <= 12) return;
     map.set(day, raid);
     return;
   }
