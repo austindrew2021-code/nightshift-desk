@@ -30,7 +30,9 @@
     "causal:ict": "node --experimental-strip-types scripts/ict-causal-test.ts",
     "season:ict": "node --experimental-strip-types scripts/ict-seasonality.ts",
     "raid:ict": "node --experimental-strip-types scripts/ict-raid.ts",
-    "rr:ict": "node --experimental-strip-types scripts/ict-rr.ts"
+    "rr:ict": "node --experimental-strip-types scripts/ict-rr.ts",
+    "xs:ict": "node --experimental-strip-types scripts/xs-research.ts",
+    "carry:ict": "node --experimental-strip-types scripts/xs-carry.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

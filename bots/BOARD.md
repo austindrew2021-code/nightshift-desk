@@ -1054,3 +1054,122 @@ Nothing in 15m OHLCV has produced it across everything tested here. Edges at tha
 frequency generally live in data this app does not have — order-book imbalance,
 funding dislocations, cross-exchange basis — which is a statement about what to
 instrument next, not a promise that they work.
+
+
+---
+
+### 44 · The cost-frequency trap — why nothing has worked
+
+Row 43 established the goal needs **>=10 trades/day at >=+0.10R net**. Cost is a
+fixed 14bp per round trip (5bp fee + 2bp slip, both sides), so it scales with
+frequency:
+
+```
+trades/day   cost/day   cost/month   gross needed just to break even
+  1.2/day      17bp        4.9%       +5.0% per month
+    3/day      42bp       11.9%      +12.6% per month
+    5/day      70bp       19.0%      +21.0% per month
+   10/day     140bp       34.5%      +42.0% per month
+   20/day     280bp       57.3%      +84.0% per month
+```
+
+Per trade, cost in R depends on stop width:
+
+```
+stop 0.40% -> 0.35R of cost -> need +0.45R gross for +0.10R net
+stop 1.00% -> 0.14R         -> need +0.24R gross
+stop 3.00% -> 0.05R         -> need +0.15R gross
+```
+
+**The two requirements are in direct conflict.** The goal needs frequency;
+frequency multiplies the toll. At 10/day on a 1% stop you need +0.24R gross,
+~1,300 times a year. The best gross edge measured anywhere in this project is
+about +0.10R. That single table explains every negative result on this board.
+
+Fee sensitivity is the only lever that moves the boundary:
+
+```
+retail taker 5bp/side -> 14bp round trip -> need +0.24R gross (1% stop)
+maker 2bp/side        ->  8bp            -> need +0.18R
+maker rebate ~0.5bp   ->  3bp            -> need +0.13R
+zero fees             ->  0bp            -> need +0.10R
+```
+
+### 45 · Cross-sectional momentum and reversal — 0 of 48 configs qualify
+
+`npm run xs:ict`. Structurally different from everything prior: rank the 11 pairs
+against each other, long one extreme and short the other, dollar-neutral so a
+market flush is not automatically a loss, and frequency is a choice rather than a
+property of a rare setup. Cross-sectional momentum is also the best-documented
+anomaly in the crypto literature, so it is a prior rather than an invention.
+
+48 configs (lookback x hold x k x momentum/reversal), 74 days of aligned bars,
+three-way split. **Zero were positive on both train and validation**, so nothing
+was eligible for the holdout. The best validation t was 1.2, on a config whose
+train figure was -0.091%.
+
+Cost is the mechanism again: at a 4h rebalance that is 6 turns a day, 25% of book
+per month in fees before any edge.
+
+### 46 · Funding carry — the mechanism is real, and cost is 10x it
+
+`npm run carry:ict`. The only strategy tested here with an economic mechanism
+rather than a pattern: perpetual funding pays whoever holds the unpopular side.
+Rank the universe by funding rate, short the top, long the bottom, and collect the
+spread. No price forecast required, dollar-neutral. 277 funding periods, 92 days,
+11 pairs, three-way split.
+
+Validation looked like the find of the project — `hold 24h k4` at +0.489% per
+period, t 2.1, and 3 of 6 configs positive on both train and validation. So it
+earned a holdout score.
+
+```
+HOLDOUT (scored once)  n=19 over 23 days
+  mean -0.1317% per period   t -0.6   win 53%
+
+  decomposition:  carry +0.0140%   price -0.0057%   cost -0.1400%
+```
+
+**The carry is real.** It is positive in every single config tested (+0.009% to
++0.022% per period) — the mechanism works exactly as theory predicts, roughly
+**+1.4bp per day**. And the 14bp round trip is **ten times** it.
+
+The validation result that looked so good was +0.611% of *price* return, not
+carry — the basket happened to drift favourably in that window, and it reversed
+out of sample. Textbook.
+
+What the real edge is worth: 1.4bp/day held continuously is ~0.42% per month at
+1x, ~2.1% at 5x. The delta-neutral institutional version of this trade (short
+perp, long spot) is a genuine strategy yielding single-digit annual percentages.
+It is not a 10x-per-month strategy and cannot be made into one by sizing.
+
+### 47 · Final accounting against the goal
+
+Everything tested, all causal, all costed, all with held-out validation:
+
+```
+ICT engine (causal)                    -0.27R to -0.47R      ruin at any size
+6 new pattern families                 -0.17R to -0.85R      t -5 to -40
+13 exit/entry variants                 best -0.042R          t -0.4
+raid discriminators (13,847 events)    best -0.018R          t -0.2
+R:R levers (1R..3R, measured move)     1R best, all negative
+timeframe levers (1H, 4H)              worse; 1H overfit signature
+weekday seasonality (77 tests)         nothing clears Bonferroni
+hour seasonality                       real gross, net negative
+cross-sectional mom/rev (48 configs)   0 qualify
+funding carry                          carry real +1.4bp/day, cost 10x it
+money management (6 policies x 3 margins) median $34 -> $80, cannot change sign
+```
+
+**The gap is not marginal.** The best honest, repeatable edge found is funding
+carry at ~0.42%/month unlevered, ~2.1% at 5x. The goal is ~900%/month. That is a
+factor of roughly 400x at 5x leverage — orders of magnitude, not a tuning
+distance.
+
+The single coherent explanation is row 44: every edge discoverable in this data is
+worth 1-10bp, and the toll to collect it is 14bp. Fee tier is the only lever that
+moves that, and even at zero fees the measured edges do not reach the target.
+
+Further searching of this data will produce false positives, not edge — the
+funding carry validation result is a worked example of exactly that, caught only
+because the holdout was reserved.
