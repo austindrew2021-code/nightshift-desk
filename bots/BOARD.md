@@ -1575,3 +1575,83 @@ concentration of daily lows into 09:00-11:00 NY tells you *when* to look, not th
 buying then is profitable after 14bp. Findings 2 and 3 are the useful ones for the
 desk, because they constrain what to expect after a raid rather than predicting
 direction.
+
+
+---
+
+### 53 · Fade the raid vs follow it — the fade wins, but no stable edge
+
+`npm run fade:ict`. Row 52 measured that a raid is a chop signature (only 17.9% of
+big up days had raided the prior low; 74.7% of FLAT days raided an extreme). The
+implied trade is therefore a fade back to the mean, not continuation. Tested
+head-to-head on identical triggers: first touch of PDH/PDL, entry at that bar's
+close, 1H bars, 1,125 days, 9 pairs, 14bp round trip.
+
+**Finding 1 — the fade beats continuation, decisively at tight stops.**
+
+```
+holdout avgR        pad 0.25   pad 0.50   pad 1.00
+  FADE (to open)     -0.347     -0.246     -0.121
+  CONTINUATION       -1.062     -0.389     -0.169
+```
+
+At a 0.25 ATR pad the fade is **3x better** than continuation. This confirms the
+inference from row 52 directly: trading a raid as a breakout is the worse of the
+two readings, which is what the desk's A+ raid rule was doing.
+
+**Finding 2 — combining both row 52 results gets closest to breakeven.** Fading,
+restricted to the 09:00-11:00 NY liquidity cluster, targeting the prior-day
+midpoint:
+
+```
+holdout n=419  win 40%   GROSS +0.142R   cost -0.198R   NET -0.056R   medStop 0.83%
+```
+
+That **+0.142R gross is the largest gross edge measured anywhere in this project**.
+The cost is 1.4x it, entirely because the stop is only 0.83% wide — cost in R is
+14bp / stop width.
+
+**Finding 3 — widening the stop cuts the toll monotonically, exactly as the
+mechanism predicts.**
+
+```
+pad  medStop   gross: train    val   holdout   cost     net      t
+1.0    1.27%         -0.130  -0.043   +0.117  -0.130  -0.013  -0.2
+1.5    1.67%         -0.108  -0.028   +0.111  -0.098  +0.014   0.3
+2.0    2.04%         -0.101  -0.036   +0.097  -0.079  +0.018   0.4
+3.0    2.79%         -0.084  -0.005   +0.046  -0.058  -0.011  -0.3
+4.0    3.39%         -0.061  -0.006   +0.035  -0.047  -0.011  -0.4
+```
+
+Cost falls 0.130R -> 0.047R as the stop widens 1.27% -> 3.39%. Real, and it makes
+pads 1.5 and 2.0 **net positive on the holdout**.
+
+**Finding 4 — and that holdout positive is a period effect, not an edge.** Printing
+gross on every split rather than only the holdout is what exposes it: **all five
+pads flip sign**, negative on train, near zero on validation, positive on holdout.
+The improvement is monotonic in time across every configuration, which is a
+property of the periods, not of the rule. The net-positive holdout at pads 1.5-2.0
+is that drift, and with t 0.3-0.4 it is indistinguishable from chance.
+
+This is the trap that would have looked most like success in the whole project: a
+plausible mechanism, a clean monotonic stop-width relationship, and two
+net-positive holdout rows. Comparing gross across periods is what kills it.
+
+**Fee sensitivity, conditional on a gross edge that is not stable.** On the
+holdout gross of +0.117R at a 1.27% stop:
+
+```
+retail taker 5bp/side  14bp -> cost 0.110R -> net +0.006R
+maker 2bp/side          8bp -> cost 0.063R -> net +0.054R
+maker rebate ~0.5bp     3bp -> cost 0.024R -> net +0.093R
+```
+
+Those numbers are only meaningful if the +0.117R gross were real. Finding 4 says it
+is a period effect, so read them as what the fee tier is worth *if* a comparable
+gross edge is ever established, not as a live opportunity.
+
+**What to change on the desk anyway.** Findings 1 and 2 are robust and do not
+depend on any of this being profitable: if the desk trades raids, it should fade
+them rather than follow them, and it should concentrate on 09:00-11:00 NY. That is
+strictly better than the current A+ continuation rule even though neither clears
+costs.
