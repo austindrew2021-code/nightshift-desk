@@ -244,7 +244,7 @@ export const MIN_START_USD = 10;
 export const MAX_START_USD = 1_000_000;
 
 /** grokbot-pumpfun / @zostaff video post */
-export const MAX_OPEN = 3;
+export const MAX_OPEN = 5;
 export const MAX_DAILY_TRADES = 10;
 export const DAILY_LOSS_PCT = 0.22;
 export const MAX_POS_PCT = 0.08;
