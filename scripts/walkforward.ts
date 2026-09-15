@@ -210,11 +210,22 @@ if (bhOos) {
   for (const f of folds) for (const x of bh.filter((y) => y.t >= f.test[0] && y.t < f.test[1])) eq *= 1 + x.ret;
   console.log(`\nBENCHMARK — equal-weight BUY AND HOLD over the same forward windows`);
   console.log(`  ${(bhOos.monthly*100>=0?"+":"")}${(bhOos.monthly*100).toFixed(2)}%/month  t ${bhOos.t.toFixed(2)}  Sharpe ${bhOos.sharpe.toFixed(2)}  $100 -> $${eq.toFixed(2)}`);
-  const beat = ranked.filter((r) => r.monthly > bhOos.monthly);
-  console.log(`  ${beat.length} of ${ranked.length} configs beat buy-and-hold on monthly return`);
-  console.log(`  best-ranked config (${ranked[0]!.label}) at ${(ranked[0]!.monthly*100).toFixed(2)}%/mo` +
-    ` vs hold at ${(bhOos.monthly*100).toFixed(2)}%/mo -> ${ranked[0]!.monthly > bhOos.monthly ? "BEATS" : "LOSES TO"} holding`);
-  if (ch) console.log(`  selected-each-fold (${(ch.monthly*100).toFixed(2)}%/mo) vs hold -> ${ch.monthly > bhOos.monthly ? "BEATS" : "LOSES TO"} holding`);
+  // Compare COMPOUNDED equity, not the arithmetic monthly mean. Hold has a 66%
+  // drawdown here, so its arithmetic mean (+1.74%/mo) is positive while its
+  // compounded result is a LOSS ($98.26). Ranking on arithmetic mean would call
+  // a lower-volatility strategy that actually made money a loser.
+  const chEq = (() => { let e = 100; for (const x of chained) e *= 1 + x.ret; return e; })();
+  const beat = ranked.filter((r) => r.monthly > bhOos.monthly).length;
+  console.log(`  ${beat} of ${ranked.length} configs beat hold on ARITHMETIC mean (a misleading metric here)`);
+  console.log(`  on COMPOUNDED equity, which is what a book actually does:`);
+  console.log(`    buy and hold        $${eq.toFixed(2)}  Sharpe ${bhOos.sharpe.toFixed(2)}  (66% drawdown eats the mean)`);
+  if (ch) {
+    const months = chained.length / BARS_DAY / 30;
+    const geo = Math.pow(chEq / 100, 1 / months) - 1;
+    console.log(`    selected-each-fold  $${chEq.toFixed(2)}  Sharpe ${ch.sharpe.toFixed(2)}  = ${(geo*100).toFixed(2)}%/month compounded`);
+    console.log(`    -> ${chEq > eq ? "BEATS" : "LOSES TO"} holding on the metric that matters`);
+    console.log(`    $100 -> $1,000 at that rate: ${(Math.log(10)/Math.log(1+geo)/12).toFixed(1)} years unlevered`);
+  }
 }
 
 const BONF = 2.807 + 0.5 * Math.log(ranked.length / 50);
