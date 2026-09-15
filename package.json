@@ -32,7 +32,8 @@
     "raid:ict": "node --experimental-strip-types scripts/ict-raid.ts",
     "rr:ict": "node --experimental-strip-types scripts/ict-rr.ts",
     "xs:ict": "node --experimental-strip-types scripts/xs-research.ts",
-    "carry:ict": "node --experimental-strip-types scripts/xs-carry.ts"
+    "carry:ict": "node --experimental-strip-types scripts/xs-carry.ts",
+    "zoo:ict": "node --experimental-strip-types scripts/zoo.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

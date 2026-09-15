@@ -1173,3 +1173,69 @@ moves that, and even at zero fees the measured edges do not reach the target.
 Further searching of this data will produce false positives, not edge — the
 funding carry validation result is a worked example of exactly that, caught only
 because the holdout was reserved.
+
+
+---
+
+### 48 · The strategy zoo: 266 published retail configs, none clears
+
+`npm run zoo:ict`. Web research first, to test what is actually published rather
+than what I would invent. The families that dominate forums, YouTube and
+r/algotrading are consistently: RSI, moving-average crossover (golden cross),
+MACD, Stochastic, Bollinger, Donchian/turtle, Supertrend, VWAP reversion,
+time-series momentum, volatility breakout. "200 strategies" in practice means
+this dozen with different numbers, so the sweep is the honest version of the ask.
+
+**266 configs**, 11 pairs, 182 days of 15m, 7bp per side charged on turnover.
+
+Method, because with this many tests method is all that separates a table from a
+fantasy:
+
+- **Position-based**: each config emits +1/0/-1 per bar; cost is charged on
+  `|position change|`, so turnover is priced automatically.
+- **Causal**: the position taken on bar i earns bar i+1's return.
+- **Time-clustered**: the unit is the equal-weight portfolio return per bar, not
+  each pair-bar. Pooling pair-bars would inflate every t by about sqrt(11).
+- **Bonferroni**: with 266 tests, |t| > 2 occurs ~13 times by chance. The bar is
+  **|t| > 3.64**.
+- Three-way split; holdout reserved for whatever validation selects.
+
+```
+best validation t by family (266 configs total)
+  RSI revert           1.8   (36)      Vol breakout        -0.0   (12)
+  Bollinger revert     0.8   (20)      Donchian            -0.1   (18)
+  MA cross             0.3   (56)      Supertrend          -0.3   (24)
+  VWAP revert          0.1   (28)      TS momentum         -0.7   (26)
+  Bollinger breakout   0.1   (20)      Stochastic          -0.9   (20)
+                                       MACD                -2.8    (6)
+```
+
+**0 of 266 clear |t| > 3.64 while also being positive on train.** Best is
+`RSI 28 20/80 L` at validation t 1.8 — inside what 266 tests produce by chance.
+Nothing earned a holdout score.
+
+Two findings worth more than the table:
+
+**1. It independently reproduced the Donchian fantasy, then killed it.** On the
+74-day window `Donchian 400 L` showed validation t 2.1 at **+50.5% per month** —
+and a *negative* train t. Extending the sample to 182 days moved it to **t -0.1**.
+Long-only trend following looks spectacular on an up-grind and evaporates on more
+data. That is exactly the conclusion already reached independently, now measured.
+
+**2. Turnover ranks the losers almost perfectly.** The worst configs are the
+fastest: `TSmom 2 LS` (30-minute momentum) at t **-15.7**, `VolBrk 0.5 LS` at
+-15.2. The least-bad are the slowest, lowest-turnover mean reversion. That is row
+44's cost-frequency trap showing up as a monotonic relationship across 266
+independent tests.
+
+**And the magnitudes never get close regardless of significance.** The most
+flattering validation figures in the entire table are +0.5% to +4.2% per month.
+The goal is ~+900% per month. Even taking the best noise at face value leaves it
+short by a factor of roughly 200.
+
+Published sources corroborate this rather than contradict it: honest reported
+returns for retail crypto automation are **single digit to low teens annually**,
+with the explicit observation that "a 0.3% profit target against 0.2% round-trip
+fees leaves almost nothing" — which is row 44 in someone else's words.
+
+Sources: kalena.ai, coinquant.ai, tv-hub.org, darkbot.io, 3commas.io (Sept 2026).
