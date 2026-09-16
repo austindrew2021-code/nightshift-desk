@@ -1060,7 +1060,7 @@ export function scan5mCisd(cs: Candle[]): IctSignal[] {
   return pickKill(out);
 }
 
-/** One 5m CISD per killzone (London / NY AM / PM / Asia), not one per NY day. */
+/** Up to two 5m CISDs per killzone per coin (London / NY AM / PM / Asia). */
 function pickKill(raw: IctSignal[]): IctSignal[] {
   const kzOf = (t: number) => {
     const h = nyHour(t);
@@ -1084,8 +1084,8 @@ function pickKill(raw: IctSignal[]): IctSignal[] {
       if (uniq.some((x) => Math.abs(x.i - s.i) < 4 && x.side === s.side)) continue;
       uniq.push(s);
     }
-    const last = uniq[uniq.length - 1];
-    if (last) out.push(last);
+    const lastTwo = uniq.slice(-2);
+    out.push(...lastTwo);
   }
   return out.sort((a, b) => a.i - b.i);
 }
