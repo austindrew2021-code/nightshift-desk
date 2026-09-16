@@ -1078,6 +1078,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         // Panic fade stop belongs beyond the wick. If that wick is past 40× liq, skip — LINK 15 Sep sat SL=liq.
         if (clamped.capped && t.setup === "sweep") continue;
         if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
+        const ch = finite(b.change24h);
+        if (t.side === "short" && ch >= 0.08) continue;
+        if (t.side === "long" && ch <= -0.08) continue;
         const stopPx = clamped.stop;
         const stopDist = Math.abs(t.entryUsd - stopPx);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
