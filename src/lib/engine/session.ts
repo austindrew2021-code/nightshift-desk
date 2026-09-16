@@ -33,7 +33,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { inKill, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
+import { inKill, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -896,15 +896,27 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
         p.note = `${p.note} · runner`;
       }
       if (p.partialed) {
-        const lock = lockRFromMfe(mfe, risk);
+        const wave = isWaveRide(p.side, mfe, risk, finite(b?.change24h));
+        const lock = lockRFromMfe(mfe, risk, wave);
         if (lock >= 0) {
           const lockPx = p.side === "long" ? p.entryUsd + lock * risk : p.entryUsd - lock * risk;
           stopPx = p.side === "long" ? Math.max(stopPx, lockPx) : Math.min(stopPx, lockPx);
         }
-        tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
+        const far = wave ? 20 : 5;
+        tgtPx = p.side === "long" ? p.entryUsd + risk * far : p.entryUsd - risk * far;
         p.stopUsd = stopPx;
         p.targetUsd = tgtPx;
-        p.targetR = 5;
+        p.targetR = far;
+        if (wave && !p.note.includes("wave")) {
+          p.note = `${p.note} · wave 24h · trail`;
+          pushTape(s, {
+            t: Date.now(),
+            kind: "note",
+            symbol: p.symbol,
+            text: `wave ${p.symbol} · 24h ${((b?.change24h ?? 0) * 100).toFixed(0)}% · 5R cap off · trail`,
+            tone: "up",
+          });
+        }
       } else {
         tgtPx = p.side === "long" ? p.entryUsd + risk : p.entryUsd - risk;
         p.targetUsd = tgtPx;

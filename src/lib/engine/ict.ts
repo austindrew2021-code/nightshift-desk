@@ -1620,7 +1620,13 @@ export interface IctSimTrade extends ClosedTrade {
 
 export type TrailMode = "be3" | "ratchet" | "full";
 
-export function lockRFromMfe(mfe: number, risk: number): number {
+export function lockRFromMfe(mfe: number, risk: number, wave = false): number {
+  if (wave) {
+    if (mfe >= 16 * risk) return 12;
+    if (mfe >= 12 * risk) return 8;
+    if (mfe >= 8 * risk) return 5;
+    if (mfe >= 6 * risk) return 4;
+  }
   if (mfe >= 4 * risk) return 3;
   if (mfe >= 3 * risk) return 2;
   if (mfe >= 2.5 * risk) return 1.5;
@@ -1628,6 +1634,13 @@ export function lockRFromMfe(mfe: number, risk: number): number {
   if (mfe >= 1.5 * risk) return 0.5;
   if (mfe >= risk) return 0;
   return -1;
+}
+
+/** News/adoption melt-up: 5R already in, 24h still ≥12% with the position. Normal days stay 5R. */
+export function isWaveRide(side: "long" | "short", mfe: number, risk: number, change24h: number): boolean {
+  if (mfe < 5 * risk) return false;
+  if (side === "long") return change24h >= 0.12;
+  return change24h <= -0.12;
 }
 
 export function simulateIct(
