@@ -972,7 +972,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const eth = books.find((b) => b.id === "ETH");
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
-  const liveFromOpen = now - 4 * 3600_000;
+  const liveFromOpen = now - 50 * 60_000;
   const liveFromClosed = now - 45 * 60_000;
   const cap = s.startUsd * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT);
   const dayNet = s.mode === "ict" ? ictDayNet(s, now) : -finite(s.dayLoss);
@@ -1052,13 +1052,12 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       }
       const key = `${t.symbol}-${t.setup}-${t.openedAt}`;
       if (s.ictSeen.includes(key)) continue;
-      s.ictSeen = [...s.ictSeen, key];
       const cooled = s.closed.some(
         (c) =>
           c.origin === "ict" &&
           c.symbol === t.symbol &&
           c.reason === "stop" &&
-          now - c.closedAt < 90 * 60_000,
+          now - c.closedAt < 40 * 60_000,
       );
       if (cooled) continue;
       const sameSideOpen = s.open.filter((p) => p.origin === "ict" && p.side === t.side);
@@ -1129,6 +1128,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         ];
         s.stats.taken += 1;
         s.stats.openCount = s.open.length;
+        s.ictSeen = [...s.ictSeen, key];
         pushTape(s, {
           t: s.simT,
           kind: "open",
@@ -1142,6 +1142,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       }
       if (t.closedAt < liveFromClosed) continue;
       if (s.open.some((p) => p.origin === "ict" && p.symbol === t.symbol)) continue;
+      s.ictSeen = [...s.ictSeen, key];
       fresh.push({
         ...t,
         stopUsd: t.stop,

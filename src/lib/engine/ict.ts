@@ -370,18 +370,15 @@ interface RaidMem {
   src: string;
 }
 
-function rememberRaid(map: Map<string, RaidMem>, day: string, raid: RaidMem) {
+function rememberRaid(map: Map<string, RaidMem>, day: string, raid: RaidMem, flipBars = 12) {
   const prev = map.get(day);
   if (!prev) {
     map.set(day, raid);
     return;
   }
   if (raid.side !== prev.side) {
-    // PDH / BSL / 9am / Asia-high is the real hunt. A later SSL bounce is the
-    // bull trap (XRP 15 Sep: long 1.407 into the 4H double top). Keep the high
-    // raid ~12 bars so we don't flip long in the distribution.
     const highHunt = prev.side === "short" && /PDH|BSL|9am|Asia high/i.test(prev.src);
-    if (highHunt && raid.side === "long" && raid.sweepI - prev.sweepI <= 12) return;
+    if (highHunt && raid.side === "long" && raid.sweepI - prev.sweepI <= flipBars) return;
     map.set(day, raid);
     return;
   }
@@ -1034,22 +1031,22 @@ export function scan5mCisd(cs: Candle[]): IctSignal[] {
     const fxH = lastFractal(sw, i, "high");
     const fxL = lastFractal(sw, i, "low");
     if (fxH && c.h > fxH.price && c.c < fxH.price) {
-      rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m BSL" });
+      rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m BSL" }, 8);
     }
     // SSL: the dump bar often CLOSES on the low (SOL 16 Sep 13:45). CISD is the next 1–8 bars.
     if (fxL && c.l < fxL.price) {
-      rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m SSL" });
+      rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m SSL" }, 8);
     }
     if (pd && pd.h > pd.l) {
-      if (c.h > pd.h && c.c < pd.h) rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m PDH" });
-      if (c.l < pd.l) rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m PDL" });
+      if (c.h > pd.h && c.c < pd.h) rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m PDH" }, 8);
+      if (c.l < pd.l) rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m PDL" }, 8);
     }
     if (range?.asiaReady) {
       if (c.h > range.asiaH && c.c < range.asiaH) {
-        rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m Asia high" });
+        rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m Asia high" }, 8);
       }
       if (c.l < range.asiaL) {
-        rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m Asia low" });
+        rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m Asia low" }, 8);
       }
     }
     invalidateBreak(raidByDay, day, c);
