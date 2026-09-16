@@ -57,7 +57,7 @@ export interface ChartBar {
   limit: number;
 }
 
-/** Native venue bars. 10M is folded from 5m — OKX/KuCoin have no 10m kline. */
+/** Native venue bars. 10M folded from 5m; 8H folded from 4H on OKX (no 8H kline). */
 export const CHART_BARS: ChartBar[] = [
   { id: "1m", label: "1M", okx: "1m", kucoin: "1min", foldMs: 0, limit: 300 },
   { id: "5m", label: "5M", okx: "5m", kucoin: "5min", foldMs: 0, limit: 300 },
@@ -65,7 +65,12 @@ export const CHART_BARS: ChartBar[] = [
   { id: "15m", label: "15M", okx: "15m", kucoin: "15min", foldMs: 0, limit: 200 },
   { id: "30m", label: "30M", okx: "30m", kucoin: "30min", foldMs: 0, limit: 200 },
   { id: "1H", label: "1H", okx: "1H", kucoin: "1hour", foldMs: 0, limit: 200 },
-  { id: "4H", label: "4H", okx: "4H", kucoin: "4hour", foldMs: 0, limit: 120 },
+  { id: "2H", label: "2H", okx: "2H", kucoin: "2hour", foldMs: 0, limit: 180 },
+  { id: "4H", label: "4H", okx: "4H", kucoin: "4hour", foldMs: 0, limit: 180 },
+  { id: "8H", label: "8H", okx: "4H", kucoin: "8hour", foldMs: 8 * 3600_000, limit: 180 },
+  { id: "1D", label: "1D", okx: "1D", kucoin: "1day", foldMs: 0, limit: 200 },
+  { id: "1W", label: "1W", okx: "1W", kucoin: "1week", foldMs: 0, limit: 120 },
+  { id: "MN", label: "MN", okx: "1M", kucoin: "1month", foldMs: 0, limit: 80 },
 ];
 
 export interface IctBook {

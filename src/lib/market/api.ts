@@ -344,7 +344,7 @@ export async function fetchChartKlines(data: { id: string; bar: string }): Promi
       ]);
       const last = num((stats as { data?: Record<string, string> })?.data?.last);
       let cs = candlesFromKucoin(candles);
-      if (tf.foldMs) cs = foldCandles(cs, tf.foldMs);
+      if (tf.foldMs && tf.id !== "8H") cs = foldCandles(cs, tf.foldMs);
       return { id: asset.id, last, candles: stampLast(cs, last), source: "kucoin", bar: tf.id };
     }
     const [ticker, candles] = await Promise.all([

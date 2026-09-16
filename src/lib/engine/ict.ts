@@ -477,6 +477,21 @@ export function weekOf(days: DayHl[], day: string): { h: number; l: number } | n
   return { h: Math.max(...prior.map((d) => d.h)), l: Math.min(...prior.map((d) => d.l)) };
 }
 
+/** Prior calendar month (NY day key is y-m-d with m 0-indexed). */
+export function monthOf(days: DayHl[], day: string): { h: number; l: number } | null {
+  const parts = day.split("-").map(Number);
+  const y = parts[0] ?? 0;
+  const m = parts[1] ?? 0;
+  const py = m === 0 ? y - 1 : y;
+  const pm = m === 0 ? 11 : m - 1;
+  const prior = days.filter((d) => {
+    const p = d.day.split("-").map(Number);
+    return p[0] === py && p[1] === pm;
+  });
+  if (prior.length < 8) return null;
+  return { h: Math.max(...prior.map((d) => d.h)), l: Math.min(...prior.map((d) => d.l)) };
+}
+
 function locIn(px: number, rng: { h: number; l: number } | null): number {
   if (!rng || rng.h <= rng.l) return 0.5;
   return (px - rng.l) / (rng.h - rng.l);
@@ -1380,7 +1395,7 @@ export function scanSmt(cs: Candle[], other: Candle[], otherSym: string): IctSig
   return out.slice(0, 2);
 }
 
-export type ZoneKind = "fvg" | "ob" | "asia" | "nine" | "kill" | "entry" | "stop" | "target" | "daily" | "weekly" | "fib" | "ote" | "grab";
+export type ZoneKind = "fvg" | "ob" | "asia" | "nine" | "kill" | "entry" | "stop" | "target" | "daily" | "weekly" | "monthly" | "fib" | "ote" | "grab";
 
 export interface ChartZone {
   kind: ZoneKind;
@@ -1513,6 +1528,18 @@ export function chartLayers(cs: Candle[], signals: IctSignal[] = []): ChartZone[
         top: wk.h,
         bot: wk.l,
         label: "PWH/PWL",
+        dir: 0,
+      });
+    }
+    const mo = monthOf(allDays, day);
+    if (mo && mo.h > mo.l) {
+      out.push({
+        kind: "monthly",
+        t0: bars[0]!.t,
+        t1: bars[bars.length - 1]!.t,
+        top: mo.h,
+        bot: mo.l,
+        label: "PMH/PML",
         dir: 0,
       });
     }

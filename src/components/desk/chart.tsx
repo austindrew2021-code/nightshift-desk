@@ -51,6 +51,7 @@ const TOGGLES: { id: ChartZone["kind"] | "orders"; label: string }[] = [
   { id: "nine", label: "9AM" },
   { id: "daily", label: "DAY" },
   { id: "weekly", label: "WK" },
+  { id: "monthly", label: "MN" },
   { id: "fib", label: "FIB" },
   { id: "ote", label: "OTE" },
   { id: "grab", label: "GRAB" },
@@ -337,6 +338,23 @@ export function LiveChart({
           ctx.font = "9px ui-monospace, monospace";
           ctx.fillText("PWH", labelX(x0 + 4), yAt(z.top) + 11);
           ctx.fillText("PWL", labelX(x0 + 4), yAt(z.bot) - 3);
+        }
+        if (z.kind === "monthly" && vis("monthly")) {
+          const x0 = xAt(z.t0);
+          const x1 = Math.max(x0 + 8, xAt(z.t1));
+          ctx.setLineDash([8, 5]);
+          ctx.strokeStyle = "rgba(200,140,255,0.7)";
+          ctx.beginPath();
+          ctx.moveTo(x0, yAt(z.top));
+          ctx.lineTo(x1, yAt(z.top));
+          ctx.moveTo(x0, yAt(z.bot));
+          ctx.lineTo(x1, yAt(z.bot));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = "rgba(200,140,255,0.9)";
+          ctx.font = "9px ui-monospace, monospace";
+          ctx.fillText("PMH", labelX(x0 + 4), yAt(z.top) + 11);
+          ctx.fillText("PML", labelX(x0 + 4), yAt(z.bot) - 3);
         }
         if (z.kind === "fib" && vis("fib")) {
           const x0 = xAt(z.t0);
