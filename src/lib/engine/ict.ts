@@ -1036,18 +1036,19 @@ export function scan5mCisd(cs: Candle[]): IctSignal[] {
     if (fxH && c.h > fxH.price && c.c < fxH.price) {
       rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m BSL" });
     }
-    if (fxL && c.l < fxL.price && c.c > fxL.price) {
+    // SSL: the dump bar often CLOSES on the low (SOL 16 Sep 13:45). CISD is the next 1–8 bars.
+    if (fxL && c.l < fxL.price) {
       rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m SSL" });
     }
     if (pd && pd.h > pd.l) {
       if (c.h > pd.h && c.c < pd.h) rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m PDH" });
-      if (c.l < pd.l && c.c > pd.l) rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m PDL" });
+      if (c.l < pd.l) rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m PDL" });
     }
     if (range?.asiaReady) {
       if (c.h > range.asiaH && c.c < range.asiaH) {
         rememberRaid(raidByDay, day, { side: "short", sweepI: i, sweepPx: c.h, src: "5m Asia high" });
       }
-      if (c.l < range.asiaL && c.c > range.asiaL) {
+      if (c.l < range.asiaL) {
         rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m Asia low" });
       }
     }
@@ -1059,7 +1060,37 @@ export function scan5mCisd(cs: Candle[]): IctSignal[] {
     if (out.some((x) => Math.abs(x.i - sig.i) < 6 && x.side === sig.side)) continue;
     out.push(sig);
   }
-  return pickDay(out, 1);
+  return pickKill(out);
+}
+
+/** One 5m CISD per killzone (London / NY AM / PM / Asia), not one per NY day. */
+function pickKill(raw: IctSignal[]): IctSignal[] {
+  const kzOf = (t: number) => {
+    const h = nyHour(t);
+    if (h >= 2 && h < 5) return "ldn";
+    if (h >= 7 && h < 11) return "am";
+    if (h >= 13.5 && h < 16) return "pm";
+    if (h >= 20 || h < 2) return "asia";
+    return "x";
+  };
+  const by = new Map<string, IctSignal[]>();
+  for (const s of raw) {
+    const k = `${nyParts(s.t).day}:${kzOf(s.t)}`;
+    const arr = by.get(k) ?? [];
+    arr.push(s);
+    by.set(k, arr);
+  }
+  const out: IctSignal[] = [];
+  for (const arr of by.values()) {
+    const uniq: IctSignal[] = [];
+    for (const s of [...arr].sort((a, b) => a.i - b.i)) {
+      if (uniq.some((x) => Math.abs(x.i - s.i) < 4 && x.side === s.side)) continue;
+      uniq.push(s);
+    }
+    const last = uniq[uniq.length - 1];
+    if (last) out.push(last);
+  }
+  return out.sort((a, b) => a.i - b.i);
 }
 
 function lastFractal(sw: Swing[], i: number, kind: "high" | "low"): Swing | null {
