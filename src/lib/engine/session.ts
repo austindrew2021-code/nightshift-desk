@@ -1057,7 +1057,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           c.origin === "ict" &&
           c.symbol === t.symbol &&
           c.reason === "stop" &&
-          now - c.closedAt < 40 * 60_000,
+          now - c.closedAt < 12 * 60_000,
       );
       if (cooled) continue;
       const sameSideOpen = s.open.filter((p) => p.origin === "ict" && p.side === t.side);
