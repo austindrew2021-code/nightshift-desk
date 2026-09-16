@@ -389,6 +389,14 @@ function rememberRaid(map: Map<string, RaidMem>, day: string, raid: RaidMem) {
   if (raid.side === "long" && raid.sweepPx <= prev.sweepPx) map.set(day, raid);
 }
 
+/** Close through the sweep = accepted break (ARB 16 Sep PDH), not a fade. */
+function invalidateBreak(map: Map<string, RaidMem>, day: string, c: Candle) {
+  const r = map.get(day);
+  if (!r) return;
+  if (r.side === "short" && c.c > r.sweepPx) map.delete(day);
+  if (r.side === "long" && c.c < r.sweepPx) map.delete(day);
+}
+
 function hourRangeAt(
   cs: Candle[],
   day: string,
@@ -502,6 +510,18 @@ function inRangePd(side: "long" | "short", px: number, rng: { h: number; l: numb
   if (!rng || rng.h <= rng.l) return true;
   const loc = locIn(px, rng);
   return side === "long" ? loc <= longMax : loc >= shortMin;
+}
+
+/** Don't fade a range that already accepted the break (ARB short through PDH / HBAR long through PDL). */
+export function fadingAcceptedBreak(cs: Candle[], side: "long" | "short", last: number): boolean {
+  if (cs.length < 12 || !last) return false;
+  const days = buildDayMap(cs, cs.length - 1);
+  const day = nyParts(cs[cs.length - 1]!.t).day;
+  const pd = prevDayOf(days, day);
+  if (!pd || pd.h <= pd.l) return false;
+  if (side === "short" && last > pd.h * 1.003) return true;
+  if (side === "long" && last < pd.l * 0.997) return true;
+  return false;
 }
 
 /**
@@ -710,28 +730,28 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
     const pd = prevDayOf(days, day);
 
     if (range?.asiaReady) {
-      if (c.h > range.asiaH) {
+      if (c.h > range.asiaH && c.c < range.asiaH) {
         rememberRaid(asiaRaid, day, { side: "short", sweepI: i, sweepPx: c.h, src: "Asia high" });
       }
-      if (c.l < range.asiaL) {
+      if (c.l < range.asiaL && c.c > range.asiaL) {
         rememberRaid(asiaRaid, day, { side: "long", sweepI: i, sweepPx: c.l, src: "Asia low" });
       }
     }
     if (Number.isFinite(ovnH) && Number.isFinite(ovnL) && ovnH > ovnL) {
-      if (c.h > ovnH) {
+      if (c.h > ovnH && c.c < ovnH) {
         rememberRaid(ovnRaid, day, { side: "short", sweepI: i, sweepPx: c.h, src: "overnight high" });
       }
-      if (c.l < ovnL) {
+      if (c.l < ovnL && c.c > ovnL) {
         rememberRaid(ovnRaid, day, { side: "long", sweepI: i, sweepPx: c.l, src: "overnight low" });
       }
     }
 
     const am = hourRangeAt(cs, day, 7, 13.5, i);
     if (am && nyHour(c.t) >= 13.5) {
-      if (c.h > am.h) {
+      if (c.h > am.h && c.c < am.h) {
         rememberRaid(amRaid, day, { side: "short", sweepI: i, sweepPx: c.h, src: "AM session high" });
       }
-      if (c.l < am.l) {
+      if (c.l < am.l && c.c > am.l) {
         rememberRaid(amRaid, day, { side: "long", sweepI: i, sweepPx: c.l, src: "AM session low" });
       }
     }
@@ -744,6 +764,12 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
         rememberRaid(dayRaid, day, { side: "long", sweepI: i, sweepPx: c.l, src: "PDL" });
       }
     }
+
+    invalidateBreak(asiaRaid, day, c);
+    invalidateBreak(ovnRaid, day, c);
+    invalidateBreak(amRaid, day, c);
+    invalidateBreak(dayRaid, day, c);
+    invalidateBreak(grabRaid, day, c);
 
     if (isLondon(c.t) && asiaRaid.has(day)) {
       add(
@@ -1025,6 +1051,7 @@ export function scan5mCisd(cs: Candle[]): IctSignal[] {
         rememberRaid(raidByDay, day, { side: "long", sweepI: i, sweepPx: c.l, src: "5m Asia low" });
       }
     }
+    invalidateBreak(raidByDay, day, c);
     const raid = raidByDay.get(day);
     if (!raid || i - raid.sweepI > 8) continue;
     const sig = aPlus(cs, fvgs, obs, sw, raid, "scalp", "5m CISD · FVG", 2, 0.06, true);

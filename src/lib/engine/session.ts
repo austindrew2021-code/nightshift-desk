@@ -33,7 +33,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { inKill, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
+import { fadingAcceptedBreak, inKill, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import type { IctBook } from "./universe";
 import {
@@ -1077,6 +1077,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const clamped = clampStopToLiq(t.side, t.entryUsd, t.stop, lev);
         // Panic fade stop belongs beyond the wick. If that wick is past 40× liq, skip — LINK 15 Sep sat SL=liq.
         if (clamped.capped && t.setup === "sweep") continue;
+        if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
         const stopPx = clamped.stop;
         const stopDist = Math.abs(t.entryUsd - stopPx);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
