@@ -2000,3 +2000,94 @@ measurable edge — not a path from $100 to $1,000 a month.
 that bar's close with a maker limit, exit on time at 24 hours with no stop,
 positions in the 9 majors only, 2.5x gross across up to 5 slots. About 9 signals
 a month, ~+3.4%/month, ~23% drawdown.
+
+---
+
+## 58 — Every candle pattern crossed with every context, four horizons: one survivor, and it is row 57's
+
+`scripts/census.ts` (`npm run census:ict`, `HOLD=4|8|24|48`) and
+`scripts/twoplays.ts` (`npm run two:ict`). 65 patterns — the classical
+candlestick set (hammer, hanging man, engulfing, harami, piercing, dark cloud,
+tweezers, marubozu, doji family, belt hold, kicker, morning/evening star,
+abandoned baby, three soldiers/crows, three inside/outside, three-line strike,
+rising/falling three, hikkake, narrow-range-7, inside/outside bars) plus the
+ICT/price-action primitives (FVG formed and filled both ways, displacement, CISD,
+order-block retest, breaker, daily/weekly/monthly sweeps, RSI extremes) — crossed
+with 13 contexts, at 4h / 8h / 24h / 48h. 26 pairs, 1,125 days, ~1.79M pattern
+fires per horizon, ~3,200 cells in all.
+
+**Two harness errors found and fixed before any of it could be believed.**
+
+1. *The null was measured on the wrong surface.* The first version shifted
+   forward returns and took the max |t| over the 65 pattern rows, but the search
+   selects from 791 pattern-by-context cells. Nulling over 65 while selecting from
+   791 sets the bar far too low. Fixed: the null now rebuilds every context, and
+   the bar rose from |t| > 3.10 to **|t| > 3.74** at 24h.
+2. *Day-equal-weighting invented an edge out of nothing.* Reporting the mean of
+   per-day means made **every single cell positive** — longs on low sweeps and
+   shorts on high sweeps alike, which cannot both be true. The days that fire most
+   are the days that lose most for whichever direction is firing, so equal-weighting
+   days discards the damage; and it is not causally reachable anyway, because
+   splitting a daily budget across a day's signals needs a signal count that
+   includes signals firing after the entry. Fixed to a cluster-robust SE on the
+   pooled mean, `SE^2 = sum_d (S_d - n_d*xbar)^2 / N^2`. After the fix the best
+   long cell at 24h is `3whiteSoldiers|flushHi>=3` at **t 2.09** — nothing clears
+   the null.
+
+**Scalping is definitively dead at these costs.** At 4h the best cell in 792 is
+t 1.95 against a null bar of **7.90**; at 8h, 1.81 against 4.98. 14bp of round
+trip against a 4h move leaves nothing, whatever the pattern. This closes the
+"pro scalp" question: it is not a matter of finding the right entry.
+
+**The common denominator is real, and it is breadth.** The context-lift table
+(average of each cell's mean minus that pattern's unconditional mean, over ~60
+patterns) puts sweep breadth on top at *every* horizon — 24h: `flushLo>=3`
++0.067% with 62% of patterns improved, then `flushHi>=3` and `flushLo>=6`. Trend,
+session, premium/discount and volatility all sit at ±0.03% or less. Market-wide
+sweep simultaneity is the only conditioner in this project that lifts unrelated
+patterns as a class, which is independent confirmation of row 57 arrived at from
+the opposite direction.
+
+**The one candidate it surfaced, and why it failed.** The reliable losers were
+bearish patterns fired during broad high-sweep activity — `hangingMan|flushHi>=3`
+t −4.17 (clears the null), `sweepMoHigh|flushHi>=3` and `wideRangeBear|volHigh`
+t −3.7 at 48h — so the flip is a long worth +0.46% to +1.35% after paying the fee
+twice. Bearish reversal candles during a broad upside sweep look like traps. It
+also fires when *highs* are being swept, so it cannot collide with row 57's play,
+which needs lows — genuinely two plays, not one renamed (measured overlap 2-5%,
+against the 85-90% duplication row 57 found).
+
+It still fails, on three independent checks:
+
+| play | hold | n | ep | excess | ep-t | TRAIN | VAL | HOLD |
+|---|---|---|---|---|---|---|---|---|
+| **A** wkLow wick + flushLo>=3 | 24h | 457 | 121 | **+1.19%** | **3.65** | +0.85% | +1.51% | +1.53% |
+| B bearWick + flushHi>=3 | 48h | 4294 | 175 | +0.51% | **−4.08** | +1.06% | −0.09% | −0.46% |
+| B hangingMan + flushHi>=3 | 48h | 1460 | 178 | +0.81% | −1.98 | +0.94% | +0.61% | +0.66% |
+| B moHigh sweep + flushHi>=3 | 48h | 1115 | 100 | +2.04% | −1.18 | +2.56% | +1.88% | +0.02% |
+
+Every B variant has a **positive mean and a negative episode-t**: most episodes
+lose and a few win enormously. That is a lottery ticket, not an edge — and it is
+exactly the profile a cluster-robust t on the pooled mean cannot see, because
+"the mean is reliably nonzero" and "the typical episode wins" are different
+claims. For a compounding book only the second one matters. The splits agree
+(B's edge is in the first half and flips sign), and so does the book: B alone at
+1.25x is +0.63%/mo at **67% drawdown**, and adding B to A takes 2.5x from
+**+2.70%/mo at 32% DD to +1.62%/mo at 91% DD** — row 57's lesson repeating.
+
+**Methodology note worth keeping:** report both t's. The cluster-robust pooled t
+tests whether the mean is real; the episode-clustered t tests whether the typical
+episode wins. A positive first with a negative second is the signature of a
+payoff profile that compounds to ruin.
+
+**Play A reproduces on an independent harness**, and more conservatively than row
+57 reported it, because this script subtracts the unconditional drift so every
+number is excess over simply holding: +1.19% per trade, 121 episodes, ep-t 3.65,
+all three splits positive, 12.2 signals a month. At 2.5x gross it gives
+**+2.70%/mo at 32% drawdown** (row 57's +3.37% did not net out drift).
+
+**Standing conclusion after ~3,200 more cells.** The catalogue is now exhausted at
+1H: classical candlesticks, ICT primitives, FVG mechanics, four horizons, thirteen
+contexts, with a null that shares the search's selection surface. Nothing new
+clears it. One play stands, it is row 57's, and at honest sizing it is worth
+roughly +2.7%/month on a $100 stake — about $2.70 in the first month, not $1,000.

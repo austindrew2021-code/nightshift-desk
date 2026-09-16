@@ -42,7 +42,9 @@
     "rev:ict": "node --experimental-strip-types scripts/reversal.ts",
     "wick:ict": "node --experimental-strip-types scripts/wicklow.ts",
     "wicktf:ict": "node --experimental-strip-types scripts/wick-tf.ts",
-    "plays:ict": "node --experimental-strip-types scripts/plays.ts"
+    "plays:ict": "node --experimental-strip-types scripts/plays.ts",
+    "census:ict": "node --experimental-strip-types scripts/census.ts",
+    "two:ict": "node --experimental-strip-types scripts/twoplays.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
