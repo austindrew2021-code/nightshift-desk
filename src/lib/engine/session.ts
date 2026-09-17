@@ -10,6 +10,7 @@ import {
   BANK_RATE,
   clampStopToLiq,
   ictLiqPct,
+  levForStop,
   MAX_DAILY_TRADES,
   MAX_HOLD_MS,
   MAX_OPEN,
@@ -1073,8 +1074,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         )
           continue;
         const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas" || t.setup === "amd" || t.setup === "daily" || t.setup === "sweep";
-        const lev = s.ictLev || ICT_LEVERAGE;
-        const clamped = clampStopToLiq(t.side, t.entryUsd, t.stop, lev);
+        const stopPctRaw = Math.abs(t.entryUsd - t.stop) / Math.max(1e-9, t.entryUsd);
+        let lev = s.ictLev || ICT_LEVERAGE;
+        let clamped = clampStopToLiq(t.side, t.entryUsd, t.stop, lev);
+        if (clamped.capped && APLUS_LIVE.has(t.setup) && !t.note.includes("Panic")) {
+          const drop = levForStop(stopPctRaw, lev);
+          if (drop >= 20 && drop < lev) {
+            lev = drop;
+            clamped = clampStopToLiq(t.side, t.entryUsd, t.stop, lev);
+          }
+        }
         if (clamped.capped) continue;
         if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
         const ch = finite(b.change24h);
@@ -1083,7 +1092,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const stopPx = clamped.stop;
         const stopDist = Math.abs(t.entryUsd - stopPx);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
-        const sized = ictRiskUsd(s, stopPct);
+        const sized = ictRiskUsd(s, stopPct, lev);
         const sizeUsd = sized.notional;
         const mark = b.last || t.entryUsd;
         const dir = t.side === "short" ? -1 : 1;

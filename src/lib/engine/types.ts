@@ -289,13 +289,13 @@ export function clampStopToLiq(
   return { stop: Math.min(stop, liq), liq, capped, pct };
 }
 
-/** Drop to 20× / 10× when the wick stop is wider than 40× ~2% liq. 0 = skip. */
+/** 20× only when 40× would sit on liq. Never 10× (that class was 0% WR). 0 = skip. */
 export function levForStop(stopPct: number, pref = ICT_LEVERAGE): number {
   const room = Math.max(0.006, stopPct) + ICT_MMR;
   const maxLev = Math.floor(1 / room);
   if (pref > 1 && pref <= maxLev) return pref;
+  if (maxLev >= 25) return 25;
   if (maxLev >= 20) return 20;
-  if (maxLev >= 10) return 10;
   return 0;
 }
 export const BANK_EVERY_USD = 200;
