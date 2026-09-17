@@ -229,6 +229,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
     set({ engine, grokNote: null });
   },
   applyCloud: (engine, t) => {
+    if (!cloudIsFresh(t)) return;
     set({ engine: { ...engine, running: true, simT: Date.now() }, cloudAt: t, grokNote: null });
   },
   persistNow: () => saveEngine(get().engine),
