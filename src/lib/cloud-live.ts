@@ -3,7 +3,7 @@ import type { EngineState } from "@/lib/engine/session";
 export const CLOUD_LIVE_URL =
   "https://raw.githubusercontent.com/austindrew2021-code/nightshift-desk/ict-live/ict-state.json";
 
-export const CLOUD_FRESH_MS = 12 * 60_000;
+export const CLOUD_FRESH_MS = 25 * 60_000;
 
 export interface CloudLive {
   t: number;
