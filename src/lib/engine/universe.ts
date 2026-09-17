@@ -46,6 +46,13 @@ export const ICT_ASSETS: IctAssetDef[] = [
   { id: "OP", symbol: "OP", name: "Optimism", venue: "kucoin", instId: "OP-USDT" },
   { id: "ATOM", symbol: "ATOM", name: "Cosmos", venue: "kucoin", instId: "ATOM-USDT" },
   { id: "ONDO", symbol: "ONDO", name: "Ondo", venue: "kucoin", instId: "ONDO-USDT" },
+  { id: "PEPE", symbol: "PEPE", name: "Pepe", venue: "kucoin", instId: "PEPE-USDT" },
+  { id: "PUMP", symbol: "PUMP", name: "Pump.fun", venue: "kucoin", instId: "PUMP-USDT" },
+  { id: "TRUMP", symbol: "TRUMP", name: "TRUMP", venue: "kucoin", instId: "TRUMP-USDT" },
+  { id: "SHIB", symbol: "SHIB", name: "Shiba", venue: "kucoin", instId: "SHIB-USDT" },
+  { id: "BCH", symbol: "BCH", name: "Bitcoin Cash", venue: "kucoin", instId: "BCH-USDT" },
+  { id: "ETC", symbol: "ETC", name: "Ethereum Classic", venue: "kucoin", instId: "ETC-USDT" },
+  { id: "EIGEN", symbol: "EIGEN", name: "EigenLayer", venue: "kucoin", instId: "EIGEN-USDT" },
 ];
 
 export interface ChartBar {

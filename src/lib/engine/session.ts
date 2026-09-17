@@ -10,6 +10,7 @@ import {
   BANK_RATE,
   clampStopToLiq,
   ictLiqPct,
+  levForStop,
   MAX_DAILY_TRADES,
   MAX_HOLD_MS,
   MAX_OPEN,
@@ -143,10 +144,10 @@ export function liveRiskPct(s: EngineState): number {
 }
 
 /** 20× on 50% is the default 10× notional. 1R follows liveRiskPct. Hard cap = that 1R. */
-export function ictRiskUsd(s: EngineState, stopPct = 0.01): { risk: number; notional: number } {
+export function ictRiskUsd(s: EngineState, stopPct = 0.01, levOverride?: number): { risk: number; notional: number } {
   const book = Math.max(s.startUsd * 0.25, tradableUsd(s) || s.startUsd);
   const sp = Math.max(1e-6, stopPct);
-  const lev = s.ictLev || ICT_LEVERAGE;
+  const lev = levOverride || s.ictLev || ICT_LEVERAGE;
   const riskPct = liveRiskPct(s);
   const floor = book * ICT_MARGIN_PCT * lev;
   const cap = book * lev;
@@ -1072,10 +1073,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         )
           continue;
         const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas" || t.setup === "amd" || t.setup === "daily" || t.setup === "sweep";
-        const lev = s.ictLev || ICT_LEVERAGE;
+        const rawPct = Math.abs(t.entryUsd - t.stop) / Math.max(1e-9, t.entryUsd);
+        const lev = levForStop(rawPct, s.ictLev || ICT_LEVERAGE);
+        if (!lev) continue;
         const clamped = clampStopToLiq(t.side, t.entryUsd, t.stop, lev);
-        // Panic fade stop belongs beyond the wick. If that wick is past 40× liq, skip — LINK 15 Sep sat SL=liq.
-        if (clamped.capped && t.setup === "sweep") continue;
+        if (clamped.capped) continue;
         if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
         const ch = finite(b.change24h);
         if (t.side === "short" && ch >= 0.08) continue;
@@ -1083,7 +1085,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const stopPx = clamped.stop;
         const stopDist = Math.abs(t.entryUsd - stopPx);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
-        const sized = ictRiskUsd(s, stopPct);
+        const sized = ictRiskUsd(s, stopPct, lev);
         const sizeUsd = sized.notional;
         const mark = b.last || t.entryUsd;
         const dir = t.side === "short" ? -1 : 1;
