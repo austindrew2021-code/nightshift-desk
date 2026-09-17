@@ -603,7 +603,7 @@ function aPlus(
   maxRisk = 0.055,
   flash = false,
 ): IctSignal | null {
-  let conf = cisd(cs, raid.sweepI, raid.side, flash ? raid.sweepI : undefined);
+  let conf = cisd(cs, raid.sweepI, raid.side, flash ? raid.sweepI : undefined, fvgs);
   if (!conf.ok && flash) {
     const want: 1 | -1 = raid.side === "long" ? 1 : -1;
     const fvg = [...fvgs].reverse().find((f) => f.dir === want && f.i >= raid.sweepI && f.i <= raid.sweepI + 5);
