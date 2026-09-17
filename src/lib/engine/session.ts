@@ -34,7 +34,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { fadingAcceptedBreak, inKill, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
+import { fadingAcceptedBreak, inKill, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import { type IctBook } from "./universe";
 import {
@@ -1009,7 +1009,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     const corr = b.id === "BTC" ? eth : btc;
     const extra =
       corr && corr.id !== b.id ? scanSmt(b.candles15, corr.candles15, corr.symbol) : [];
-    const s15 = [...scanIct(b.candles15, { extra: 0 }), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
+    const s15 = [...scanIct(b.candles15, { extra: 0 }), ...scanPlayback(b.candles15), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
     const s5: typeof s15 = [];
     const s1h: typeof s15 = [];
     if (
@@ -1025,6 +1025,10 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         }
       }
       for (const sig of scan5mCisd(b.candles5)) {
+        if (!styleAllows(s.ictStyle, sig.setup)) continue;
+        s5.push({ ...sig, note: sig.note.includes("5m") ? sig.note : `${sig.note} · 5m` });
+      }
+      for (const sig of scanPlayback(b.candles5)) {
         if (!styleAllows(s.ictStyle, sig.setup)) continue;
         s5.push({ ...sig, note: sig.note.includes("5m") ? sig.note : `${sig.note} · 5m` });
       }
@@ -1089,6 +1093,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const ch = finite(b.change24h);
         if (t.side === "long" && ch <= -0.08) continue;
         if (t.side === "long" && t.note.includes("Panic") && ch >= 0.08) continue;
+        // Fade the DT-in-Bear-OB playback on a green day. Do not 5m-CISD short a +12% tape (NEAR).
+        if (t.side === "short" && ch >= 0.12 && !t.note.includes("Playback")) continue;
         const stopPx = clamped.stop;
         const stopDist = Math.abs(t.entryUsd - stopPx);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);

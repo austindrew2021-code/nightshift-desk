@@ -1097,6 +1097,133 @@ function pickKill(raw: IctSignal[]): IctSignal[] {
   return out.sort((a, b) => a.i - b.i);
 }
 
+/**
+ * Playback scalp the tape prints all day:
+ *   equal highs inside a Bear OB → CISD down → short into the Bull OB (1R)
+ *   equal lows inside a Bull OB → CISD up → long into the Bear OB (1R)
+ * Allowed against HTF trend. Quick 1R, not a 2R swing. Sweep-tagged so ¾@1R already applies.
+ */
+export function scanPlayback(cs: Candle[]): IctSignal[] {
+  if (cs.length < 48) return [];
+  const obs = detectObs(cs);
+  // 2/1 fractals: second top can confirm 1 bar after the tap so CISD isn't late.
+  const sw = swings(cs, 2, 1);
+  const out: IctSignal[] = [];
+  const into = (px: number, z: OrderBlock, pad: number) => px >= z.bot - pad && px <= z.top + pad;
+
+  for (let i = 40; i < cs.length; i++) {
+    const c = cs[i]!;
+    if (!inKill(c.t) && !isHuntWindow(c.t)) continue;
+    const a = atr(cs, i);
+    if (!(a > 0)) continue;
+    const tol = Math.max(a * 0.22, c.c * 0.0015);
+
+    const bear = [...obs].reverse().find((o) => o.dir === -1 && o.i < i && o.i >= i - 28 && o.top > o.bot);
+    const bull = [...obs].reverse().find((o) => o.dir === 1 && o.i < i && o.i >= i - 28 && o.top > o.bot);
+
+    if (bear) {
+      const highs = sw.filter((x) => x.kind === "high" && x.i < i && x.i >= i - 24);
+      let dt: { a: Swing; b: Swing } | null = null;
+      for (let x = highs.length - 1; x >= 1; x--) {
+        const h2 = highs[x]!;
+        const h1 = highs[x - 1]!;
+        if (h2.i - h1.i < 3 || h2.i - h1.i > 16) continue;
+        if (Math.abs(h2.price - h1.price) > tol) continue;
+        if (!into(h1.price, bear, tol) || !into(h2.price, bear, tol)) continue;
+        dt = { a: h1, b: h2 };
+        break;
+      }
+      if (dt) {
+        const tap = cs[dt.b.i]!;
+        if (tap.c < bear.top && tap.c < tap.h) {
+          const conf = cisd(cs, dt.b.i, "short", dt.b.i);
+          if (conf.ok && conf.i === i) {
+            const eqh = Math.max(dt.a.price, dt.b.price);
+            const entry = c.c;
+            const stop = eqh + a * 0.12;
+            const risk = stop - entry;
+            const pct = risk / Math.max(1e-9, entry);
+            if (risk > 0 && pct >= 0.008 && pct <= 0.04) {
+              const magnet = [...obs]
+                .filter((o) => o.dir === 1 && o.i < i && (o.top + o.bot) / 2 < entry)
+                .sort((x, y) => y.top - x.top)[0];
+              let tgt = entry - risk;
+              if (magnet) {
+                const mag = (magnet.top + magnet.bot) / 2;
+                const magR = (entry - mag) / risk;
+                if (magR >= 0.75 && magR <= 1.6) tgt = mag;
+              }
+              const sig = pack(
+                i,
+                c.t,
+                "short",
+                "sweep",
+                entry,
+                stop,
+                tgt,
+                "Playback · DT Bear OB · CISD · SSL magnet · 1.0R",
+                0.04,
+              );
+              if (sig) out.push(sig);
+            }
+          }
+        }
+      }
+    }
+
+    if (bull) {
+      const lows = sw.filter((x) => x.kind === "low" && x.i < i && x.i >= i - 24);
+      let db: { a: Swing; b: Swing } | null = null;
+      for (let x = lows.length - 1; x >= 1; x--) {
+        const l2 = lows[x]!;
+        const l1 = lows[x - 1]!;
+        if (l2.i - l1.i < 3 || l2.i - l1.i > 16) continue;
+        if (Math.abs(l2.price - l1.price) > tol) continue;
+        if (!into(l1.price, bull, tol) || !into(l2.price, bull, tol)) continue;
+        db = { a: l1, b: l2 };
+        break;
+      }
+      if (db) {
+        const tap = cs[db.b.i]!;
+        if (tap.c > bull.bot && tap.c > tap.l) {
+          const conf = cisd(cs, db.b.i, "long", db.b.i);
+          if (conf.ok && conf.i === i) {
+            const eql = Math.min(db.a.price, db.b.price);
+            const entry = c.c;
+            const stop = eql - a * 0.12;
+            const risk = entry - stop;
+            const pct = risk / Math.max(1e-9, entry);
+            if (risk > 0 && pct >= 0.008 && pct <= 0.04) {
+              const magnet = [...obs]
+                .filter((o) => o.dir === -1 && o.i < i && (o.top + o.bot) / 2 > entry)
+                .sort((x, y) => x.bot - y.bot)[0];
+              let tgt = entry + risk;
+              if (magnet) {
+                const mag = (magnet.top + magnet.bot) / 2;
+                const magR = (mag - entry) / risk;
+                if (magR >= 0.75 && magR <= 1.6) tgt = mag;
+              }
+              const sig = pack(
+                i,
+                c.t,
+                "long",
+                "sweep",
+                entry,
+                stop,
+                tgt,
+                "Playback · DB Bull OB · CISD · BSL magnet · 1.0R",
+                0.04,
+              );
+              if (sig) out.push(sig);
+            }
+          }
+        }
+      }
+    }
+  }
+  return pickKill(out);
+}
+
 function lastFractal(sw: Swing[], i: number, kind: "high" | "low"): Swing | null {
   const rows = sw.filter((x) => x.kind === kind && x.i < i - 1 && x.i >= i - 48);
   return rows.at(-1) ?? null;
