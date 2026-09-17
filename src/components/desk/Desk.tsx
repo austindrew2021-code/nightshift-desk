@@ -62,7 +62,7 @@ export function Desk() {
       case "live":
         return `Live paper · Zostaff method from $${startUsd.toFixed(0)} · 0.1 SOL cap · 50% stop · 1% pump fee + Jito + curve slip · mcap from pump.fun. Not a wallet.`;
       case "ict":
-        return `ICT ${engine.ictFilter} · ${engine.ictStyle ?? "all"} · ${engine.ictUse5m === false ? "15m" : "15m+5m"} · $${startUsd.toFixed(0)} · ${engine.ictLev || 40}x iso liq ~${((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 1R ${engine.ictRegime === "expand" ? "22% expand" : `${(((engine.ictRiskPct || 0.18) * 100)).toFixed(0)}%`} · ¾@1R trail 5R · ${engine.ictRegime ?? "chop"} · ${engine.ictRegimeNote || "A+ CISD still live"}.`;
+        return `ICT ${engine.ictFilter} · ${engine.ictStyle === "cisd" ? "CISD 5m A+" : engine.ictStyle ?? "all"} · ${engine.ictStyle === "cisd" ? "5m" : engine.ictUse5m === false ? "15m" : "15m+5m"} · $${startUsd.toFixed(0)} · ${engine.ictLev || 40}x iso liq ~${((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 1R ${engine.ictRegime === "expand" ? "22% expand" : `${(((engine.ictRiskPct || 0.18) * 100)).toFixed(0)}%`} · ¾@1R trail 5R · ${engine.ictRegime ?? "chop"} · ${engine.ictStyle === "cisd" ? "no Silver · no 15m · no Playback" : engine.ictRegimeNote || "A+ CISD still live"}.`;
       case "zostaff":
         return `Zostaff from scratch $${startUsd.toFixed(0)} = ${z.startSol.toFixed(3)} SOL · published 1→80 SOL replay, not today's tape. Tickers never released.`;
       default:
@@ -153,13 +153,14 @@ export function Desk() {
         <ChipRow className="border-b border-line">
           {(
             [
+              { id: "cisd", label: "CISD 5M" },
               { id: "all", label: "ALL SETUPS" },
               { id: "sweep", label: "SWEEP" },
               { id: "scalp", label: "SCALP" },
               { id: "swing", label: "SWING" },
             ] as const
           ).map((st) => {
-            const on = (engine.ictStyle ?? "all") === st.id;
+            const on = (engine.ictStyle ?? "cisd") === st.id;
             return (
               <button
                 key={st.id}
@@ -316,7 +317,7 @@ export function Desk() {
               book {fmtUsd(engine.equityUsd)} · cash {fmtUsd(engine.cashUsd)} · vault {fmtUsd(engine.bankedUsd ?? 0)} · start {fmtUsd(startUsd)}
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
-              {engine.ictUse5m === false ? "15m" : "15m+5m"} · {engine.ictLev || 40}x iso liq {((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 50% margin · 1R {engine.ictRegime === "expand" ? "22% expand" : `${((engine.ictRiskPct || 0.18) * 100).toFixed(0)}%`} · ¾@1R trail 5R · bank 25% / +$200 · lock 50% when expand dies
+              {engine.ictStyle === "cisd" ? "5m CISD A+" : engine.ictUse5m === false ? "15m" : "15m+5m"} · {engine.ictLev || 40}x iso liq {((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 50% margin · 1R {engine.ictRegime === "expand" ? "22% expand" : `${((engine.ictRiskPct || 0.18) * 100).toFixed(0)}%`} · ¾@1R trail 5R · bank 25% / +$200 · lock 50% when expand dies
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               {cloudIsFresh(cloudAt)

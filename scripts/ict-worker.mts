@@ -123,7 +123,7 @@ function load(): EngineState {
     s.running = true;
     return s;
   }
-  Object.assign(s, e, { mode: "ict" as const, running: true, simT: Date.now() });
+  Object.assign(s, e, { mode: "ict" as const, running: true, simT: Date.now(), ictStyle: "cisd" as const, ictUse5m: true });
   return s;
 }
 

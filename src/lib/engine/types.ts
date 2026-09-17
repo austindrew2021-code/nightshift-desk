@@ -1,5 +1,5 @@
 export type DeskMode = "watch" | "live" | "ict" | "zostaff";
-export type IctStyle = "all" | "sweep" | "scalp" | "swing";
+export type IctStyle = "all" | "cisd" | "sweep" | "scalp" | "swing";
 
 export type AgentId = "hunter" | "auditor" | "narrative" | "timing" | "checker";
 

@@ -1459,6 +1459,7 @@ export function scanWeekly(cs: Candle[]): IctSignal[] {
 }
 
 export function styleAllows(style: string, setup: SetupKind): boolean {
+  if (style === "cisd") return setup === "scalp" || setup === "judas" || setup === "sweep";
   if (style === "sweep") return setup === "sweep" || setup === "amd" || setup === "judas" || setup === "daily" || setup === "weekly";
   if (style === "scalp") return setup === "scalp" || setup === "silver" || setup === "judas" || setup === "asia" || setup === "daily" || setup === "sweep";
   if (style === "swing") return setup === "swing" || setup === "weekly" || setup === "breaker" || setup === "ifvg";
