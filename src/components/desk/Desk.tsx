@@ -123,15 +123,14 @@ export function Desk() {
       {engine.mode === "ict" && (
         <ChipRow className="border-b border-line">
           {[{ id: "ALL", symbol: "ALL" }, ...ICT_ASSETS, ...(market?.books ?? []).filter((b) => !ICT_ASSETS.some((a) => a.id === b.id))].map((a) => {
-            const view = a.id === "ALL" ? "SOL" : a.id;
-            const on = a.id === "ALL" ? engine.ictFilter === "ALL" && chartPair === "SOL" : chartPair === a.id;
+            const on = a.id === "ALL" ? engine.ictFilter === "ALL" : chartPair === a.id;
             return (
               <button
                 key={a.id}
                 type="button"
                 onClick={() => {
-                  setChartPair(view);
                   if (a.id === "ALL") setIctFilter("ALL");
+                  else setChartPair(a.id);
                 }}
                 className={cn(
                   "h-9 shrink-0 rounded-md px-2.5 font-mono text-[11px] tracking-[0.12em] uppercase",
@@ -354,7 +353,12 @@ export function Desk() {
           <p className="mb-2 font-mono text-[10px] tracking-[0.18em] text-subtle uppercase">open book</p>
           <div className="grid gap-2 md:grid-cols-3">
             {engine.open.map((p) => (
-              <div key={p.id} className="rounded-lg bg-surface p-3 shadow-[0_0_0_1px_rgba(61,255,138,0.08)]">
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setChartPair(p.symbol)}
+                className="rounded-lg bg-surface p-3 text-left shadow-[0_0_0_1px_rgba(61,255,138,0.08)]"
+              >
                 <div className="flex items-baseline justify-between">
                   <p className="font-mono text-sm text-fg">{p.symbol}</p>
                   <p className={cn("font-mono text-sm tabular", p.pnlUsd >= 0 ? "text-phosphor" : "text-loss")}>
@@ -369,7 +373,7 @@ export function Desk() {
                     {p.liqCapped ? "SL=liq" : "SL inside"}
                   </p>
                 )}
-              </div>
+              </button>
             ))}
           </div>
         </div>
