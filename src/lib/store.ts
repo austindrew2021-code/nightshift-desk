@@ -195,7 +195,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const launches = market?.launches ?? [];
     const prev = get().engine;
     const engine = resetEngine(m, sol, start, launches, prev.ictFilter);
-    engine.ictStyle = prev.ictStyle;
+    engine.ictStyle = m === "ict" ? "cisd" : prev.ictStyle;
     engine.ictUse5m = prev.ictUse5m !== false;
     engine.ictRiskPct = prev.ictRiskPct;
     engine.ictLev = prev.ictLev;
@@ -203,7 +203,12 @@ export const useDesk = create<DeskStore>((set, get) => ({
     if (m === "ict" && market?.books?.length && !cloudIsFresh(get().cloudAt)) ingestIct(engine, market);
     clearEngineSave();
     saveEngine(engine);
-    set({ engine });
+    set({
+      engine,
+      grokNote: cloudIsFresh(get().cloudAt)
+        ? "Phone is a viewer. CLOUD still holds the old book until the next worker tick (~2m). Leave it — don't keep tapping Reset."
+        : null,
+    });
   },
   setGrok: (busy, note) => set({ grokBusy: busy, grokNote: note ?? null }),
   bumpGrokCalls: () =>

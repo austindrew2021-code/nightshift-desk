@@ -97,33 +97,43 @@ function slim(s: EngineState) {
 }
 
 function load(): EngineState {
-  if (!existsSync(STATE)) {
-    const s = createEngine(100, START);
+  /** Bump this to force a cloud $100 CISD book (phone Reset cannot wipe ict-live). */
+  const BOOK = "cisd-5m-100";
+  const fresh = () => {
+    const s = createEngine(100, START) as EngineState & { ictBook?: string };
     s.mode = "ict";
     s.running = true;
     s.simT = Date.now();
+    s.wallStarted = Date.now();
+    s.ictStyle = "cisd";
+    s.ictUse5m = true;
+    s.ictBook = BOOK;
     s.tape = [
       {
-        id: `t-cloud-${Date.now()}`,
+        id: `t-reset-${Date.now()}`,
         t: Date.now(),
         kind: "note",
-        symbol: "CLOUD",
-        text: "GitHub worker · every 5m · phone is a viewer · lock/off OK",
-        tone: "up",
+        symbol: "ICT",
+        text: "reset · CISD 5m A+ · $100 · Judas/sweep on · Silver/15m/Playback off · phone Reset cannot wipe CLOUD — this tick did",
+        tone: "warn",
       },
       ...s.tape,
     ];
     return s;
-  }
-  const parsed = JSON.parse(readFileSync(STATE, "utf8")) as { engine?: EngineState };
+  };
+  if (!existsSync(STATE)) return fresh();
+  const parsed = JSON.parse(readFileSync(STATE, "utf8")) as { engine?: EngineState & { ictBook?: string } };
   const e = parsed.engine;
+  if (!e || e.ictBook !== BOOK) return fresh();
   const s = createEngine(100, START);
-  if (!e) {
-    s.mode = "ict";
-    s.running = true;
-    return s;
-  }
-  Object.assign(s, e, { mode: "ict" as const, running: true, simT: Date.now(), ictStyle: "cisd" as const, ictUse5m: true });
+  Object.assign(s, e, {
+    mode: "ict" as const,
+    running: true,
+    simT: Date.now(),
+    ictStyle: "cisd" as const,
+    ictUse5m: true,
+    ictBook: BOOK,
+  });
   return s;
 }
 
