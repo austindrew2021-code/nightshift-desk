@@ -348,9 +348,10 @@ export async function fetchChartKlines(data: { id: string; bar: string }): Promi
     const tf = CHART_BARS.find((b) => b.id === data.bar) ?? CHART_BARS[3]!;
     if (asset.venue === "kucoin") {
       const [stats, candles] = await Promise.all([
-        getJson(`https://api.kucoin.com/api/v1/market/stats?symbol=${encodeURIComponent(asset.instId)}`),
+        getJson(`https://api.kucoin.com/api/v1/market/stats?symbol=${encodeURIComponent(asset.instId)}`, 12000),
         getJson(
           `https://api.kucoin.com/api/v1/market/candles?type=${encodeURIComponent(tf.kucoin)}&symbol=${encodeURIComponent(asset.instId)}`,
+          12000,
         ),
       ]);
       const last = num((stats as { data?: Record<string, string> })?.data?.last);

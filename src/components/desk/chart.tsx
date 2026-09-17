@@ -203,19 +203,26 @@ export function LiveChart({
   };
 
   const book = books.find((b) => b.id === sym || b.symbol === sym);
+  const bookBars =
+    tf === "5m" || tf === "1m" || tf === "10m"
+      ? (book?.candles5?.length ? book.candles5 : book?.candles15)
+      : tf === "1H" || tf === "2H" || tf === "4H" || tf === "8H"
+        ? (book?.candles1h?.length ? book.candles1h : book?.candles15)
+        : book?.candles15;
   const tape = useQuery({
     queryKey: ["chart-klines", sym, tf],
     queryFn: () => fetchChartKlines({ id: sym, bar: tf }),
-    refetchInterval: tf === "1m" || tf === "5m" ? 3_000 : 5_000,
-    staleTime: 1_000,
+    refetchInterval: tf === "1m" || tf === "5m" ? 5_000 : 8_000,
+    staleTime: 2_000,
+    retry: 2,
   });
   const liveTape = tape.data?.id === sym && tape.data.bar === tf ? tape.data : null;
   const candles =
     liveTape && liveTape.candles.length > 8
       ? liveTape.candles
-      : book?.candles15?.length
-        ? book.candles15
-        : (sym === "SOL" ? (fallback ?? []) : []);
+      : bookBars && bookBars.length > 8
+        ? bookBars
+        : [];
   const nAll = candles.length;
   const visN = Math.max(20, Math.min(span, nAll || 20));
   const visStart = follow ? Math.max(0, nAll - visN) : clamp(start, 0, Math.max(0, nAll - visN));
@@ -251,7 +258,7 @@ export function LiveChart({
       if (view.length < 2) {
         ctx.fillStyle = MUTED;
         ctx.font = "12px ui-monospace, monospace";
-        ctx.fillText("Waiting for 15m books…", 16, h / 2);
+        ctx.fillText(tape.isFetching ? `Loading ${sym} ${tf}…` : `No ${sym} ${tf} tape — tap 5M or wait`, 16, h / 2);
         return;
       }
 
@@ -618,7 +625,7 @@ export function LiveChart({
     const ro = new ResizeObserver(() => draw());
     ro.observe(el);
     return () => ro.disconnect();
-  }, [view, zones, on, hover, mine, lastPx]);
+  }, [view, zones, on, hover, mine, lastPx, tape.isFetching, sym, tf]);
 
   useEffect(() => {
     const el = wrap.current;
