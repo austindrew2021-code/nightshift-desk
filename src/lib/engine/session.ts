@@ -10,7 +10,6 @@ import {
   BANK_RATE,
   clampStopToLiq,
   ictLiqPct,
-  levForStop,
   MAX_DAILY_TRADES,
   MAX_HOLD_MS,
   MAX_OPEN,
@@ -1008,7 +1007,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     const corr = b.id === "BTC" ? eth : btc;
     const extra =
       corr && corr.id !== b.id ? scanSmt(b.candles15, corr.candles15, corr.symbol) : [];
-    const s15 = [...scanIct(b.candles15), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
+    const s15 = [...scanIct(b.candles15, { extra: 0 }), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
     const s5: typeof s15 = [];
     const s1h: typeof s15 = [];
     if (
@@ -1073,9 +1072,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         )
           continue;
         const trail = t.setup === "asia" || t.setup === "scalp" || t.setup === "silver" || t.setup === "judas" || t.setup === "amd" || t.setup === "daily" || t.setup === "sweep";
-        const rawPct = Math.abs(t.entryUsd - t.stop) / Math.max(1e-9, t.entryUsd);
-        const lev = levForStop(rawPct, s.ictLev || ICT_LEVERAGE);
-        if (!lev) continue;
+        const lev = s.ictLev || ICT_LEVERAGE;
         const clamped = clampStopToLiq(t.side, t.entryUsd, t.stop, lev);
         if (clamped.capped) continue;
         if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
@@ -1085,7 +1082,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const stopPx = clamped.stop;
         const stopDist = Math.abs(t.entryUsd - stopPx);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
-        const sized = ictRiskUsd(s, stopPct, lev);
+        const sized = ictRiskUsd(s, stopPct);
         const sizeUsd = sized.notional;
         const mark = b.last || t.entryUsd;
         const dir = t.side === "short" ? -1 : 1;
