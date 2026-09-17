@@ -10,6 +10,67 @@ type KlinePack = { m15: number[][]; h1: number[][]; m5: number[][] };
 
 const FALLBACK = fallback as KlinePack;
 
+const CLOUD_KLINES_URL =
+  "https://raw.githubusercontent.com/austindrew2021-code/nightshift-desk/ict-live/ict-klines.json";
+
+async function klinesFromBinance(id: string, bar: string): Promise<ChartTape | null> {
+  const iv: Record<string, string> = {
+    "1m": "1m",
+    "5m": "5m",
+    "10m": "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1H": "1h",
+    "2H": "2h",
+    "4H": "4h",
+    "8H": "4h",
+    "1D": "1d",
+    "1W": "1w",
+  };
+  try {
+    const res = await fetch(
+      `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(id)}USDT&interval=${iv[bar] || "15m"}&limit=200`,
+    );
+    if (!res.ok) return null;
+    const rows = (await res.json()) as unknown;
+    if (!Array.isArray(rows) || rows.length < 8) return null;
+    const cs: Candle[] = rows.map((r) => ({
+      t: num((r as number[])[0]),
+      o: num((r as number[])[1]),
+      h: num((r as number[])[2]),
+      l: num((r as number[])[3]),
+      c: num((r as number[])[4]),
+      v: num((r as number[])[5]),
+    }));
+    return { id, last: cs[cs.length - 1]!.c, candles: cs, source: "binance", bar };
+  } catch {
+    return null;
+  }
+}
+
+async function klinesFromCloud(id: string, bar: string): Promise<ChartTape | null> {
+  try {
+    const res = await fetch(`${CLOUD_KLINES_URL}?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const j = (await res.json()) as {
+      klines?: Record<string, { last?: number; m15?: Candle[]; m5?: Candle[]; h1?: Candle[] }>;
+    };
+    const row = j.klines?.[id];
+    if (!row) return null;
+    const tf =
+      bar === "5m" || bar === "1m" || bar === "10m"
+        ? row.m5
+        : bar === "1H" || bar === "2H" || bar === "4H" || bar === "8H"
+          ? row.h1
+          : row.m15;
+    const cs = Array.isArray(tf) ? tf : [];
+    if (cs.length < 8) return null;
+    return { id, last: row.last || cs[cs.length - 1]?.c || 0, candles: cs, source: "cloud", bar };
+  } catch {
+    return null;
+  }
+}
+
 async function getJson(url: string, timeout = 2800): Promise<unknown> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
@@ -336,6 +397,8 @@ export async function fetchIctBooks(): Promise<IctBook[]> {
 export const getIctBooks = createServerFn({ method: "GET" }).handler(fetchIctBooks);
 
 export async function fetchChartKlines(data: { id: string; bar: string }): Promise<ChartTape> {
+  const empty: ChartTape = { id: data.id, last: 0, candles: [], source: "down", bar: data.bar };
+  try {
     const asset =
       ICT_ASSETS.find((a) => a.id === data.id) ??
       ({
@@ -347,28 +410,30 @@ export async function fetchChartKlines(data: { id: string; bar: string }): Promi
       });
     const tf = CHART_BARS.find((b) => b.id === data.bar) ?? CHART_BARS[3]!;
     if (asset.venue === "kucoin") {
-      const [stats, candles] = await Promise.all([
-        getJson(`https://api.kucoin.com/api/v1/market/stats?symbol=${encodeURIComponent(asset.instId)}`, 12000),
-        getJson(
-          `https://api.kucoin.com/api/v1/market/candles?type=${encodeURIComponent(tf.kucoin)}&symbol=${encodeURIComponent(asset.instId)}`,
-          12000,
-        ),
-      ]);
-      const last = num((stats as { data?: Record<string, string> })?.data?.last);
-      let cs = candlesFromKucoin(candles);
-      if (tf.foldMs && tf.id !== "8H") cs = foldCandles(cs, tf.foldMs);
-      return { id: asset.id, last, candles: stampLast(cs, last), source: "kucoin", bar: tf.id };
+      try {
+        const [stats, candles] = await Promise.all([
+          getJson(`https://api.kucoin.com/api/v1/market/stats?symbol=${encodeURIComponent(asset.instId)}`, 12000),
+          getJson(
+            `https://api.kucoin.com/api/v1/market/candles?type=${encodeURIComponent(tf.kucoin)}&symbol=${encodeURIComponent(asset.instId)}`,
+            12000,
+          ),
+        ]);
+        const last = num((stats as { data?: Record<string, string> })?.data?.last);
+        let cs = candlesFromKucoin(candles);
+        if (tf.foldMs && tf.id !== "8H") cs = foldCandles(cs, tf.foldMs);
+        if (cs.length > 8) return { id: asset.id, last, candles: stampLast(cs, last), source: "kucoin", bar: tf.id };
+      } catch {
+        /* CORS / timeout on the phone */
+      }
     }
-    const [ticker, candles] = await Promise.all([
-      getJson(`https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(asset.instId)}`),
-      getJson(
-        `https://www.okx.com/api/v5/market/candles?instId=${encodeURIComponent(asset.instId)}&bar=${encodeURIComponent(tf.okx)}&limit=${tf.limit}`,
-      ),
-    ]);
-    const last = num((ticker as { data?: Record<string, string>[] })?.data?.[0]?.last);
-    let cs = candlesFromOkx(candles);
-    if (tf.foldMs) cs = foldCandles(cs, tf.foldMs);
-    return { id: asset.id, last, candles: stampLast(cs, last), source: "okx", bar: tf.id };
+    const bn = await klinesFromBinance(data.id, data.bar);
+    if (bn) return bn;
+    const cloud = await klinesFromCloud(data.id, data.bar);
+    if (cloud) return cloud;
+    return empty;
+  } catch {
+    return (await klinesFromCloud(data.id, data.bar)) ?? empty;
+  }
 }
 
 export const getChartKlines = createServerFn({ method: "POST" })

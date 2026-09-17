@@ -57,7 +57,7 @@ jobs:
             git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             git checkout -B ict-live
           fi
-          git add ict-state.json
+          git add ict-state.json ict-klines.json
           if git diff --cached --quiet; then echo "no change"; exit 0; fi
           git commit -m "ict tick $(date -u +%H:%M)"
           git push -u origin HEAD:ict-live

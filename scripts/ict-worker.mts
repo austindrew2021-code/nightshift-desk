@@ -163,6 +163,18 @@ async function main() {
   s.solUsd = market.solUsd;
   tick(s, market);
   writeFileSync(STATE, JSON.stringify(slim(s)));
+  const klinesPath = STATE.replace(/ict-state\.json$/, "ict-klines.json");
+  const klines: Record<string, { last: number; change24h: number; m15: Candle[]; m5: Candle[]; h1: Candle[] }> = {};
+  for (const b of books) {
+    klines[b.id] = {
+      last: b.last,
+      change24h: b.change24h,
+      m15: (b.candles15 ?? []).slice(-120),
+      m5: (b.candles5 ?? []).slice(-120),
+      h1: (b.candles1h ?? []).slice(-80),
+    };
+  }
+  writeFileSync(klinesPath, JSON.stringify({ t: Date.now(), klines }));
   const open = s.open.filter((p) => p.origin === "ict");
   console.log(
     JSON.stringify({
