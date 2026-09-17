@@ -11,6 +11,7 @@ import { LiveChart, deskOrders, ChipRow } from "./chart";
 import { InstallHint } from "./install";
 import { zostaffScale } from "@/lib/engine/zostaff";
 import { ICT_ASSETS } from "@/lib/engine/universe";
+import { cloudIsFresh } from "@/lib/cloud-live";
 
 const TONE: Record<string, string> = {
   up: "text-phosphor",
@@ -21,6 +22,7 @@ const TONE: Record<string, string> = {
 
 export function Desk() {
   const engine = useDesk((s) => s.engine);
+  const cloudAt = useDesk((s) => s.cloudAt);
   const market = useDesk((s) => s.market);
   const grokBusy = useDesk((s) => s.grokBusy);
   const grokNote = useDesk((s) => s.grokNote);
@@ -311,7 +313,9 @@ export function Desk() {
               {engine.ictUse5m === false ? "15m" : "15m+5m"} · {engine.ictLev || 40}x iso liq {((1 / Math.max(2, engine.ictLev || 40) - 0.005) * 100).toFixed(1)}% · 50% margin · 1R {engine.ictRegime === "expand" ? "22% expand" : `${((engine.ictRiskPct || 0.18) * 100).toFixed(0)}%`} · ¾@1R trail 5R · bank 25% / +$200 · lock 50% when expand dies
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
-              KEEP ALIVE · tap once, leave the green mini player on, then open YouTube — lock screen still pauses
+              {cloudIsFresh(cloudAt)
+                ? `CLOUD worker · last tick ${Math.max(0, Math.round((Date.now() - cloudAt) / 60000))}m ago · phone is a viewer · lock screen OK`
+                : "KEEP ALIVE · tap once, leave the green mini player on — lock screen still pauses until CLOUD worker is live"}
             </p>
             <p className={cn("mt-1 font-mono text-[11px] tabular", engine.ictRegime === "expand" ? "text-phosphor" : "text-subtle")}>
               {engine.ictRegime ?? "chop"} · {engine.ictRegimeNote || "A+ CISD still live"}{engine.ictRegime === "expand" ? " · full raid book" : " · A+ CISD only (like the SOL scalp)"}

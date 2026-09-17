@@ -1,0 +1,64 @@
+name: ict-worker
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - scripts/ict-worker.mts
+      - .github/workflows/ict-worker.yml
+      - src/lib/engine/**
+permissions:
+  contents: write
+concurrency:
+  group: ict-worker
+  cancel-in-progress: false
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src-tree
+      - uses: actions/checkout@v4
+        with:
+          ref: ict-live
+          path: live-data
+        continue-on-error: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: src-tree/package-lock.json
+      - name: install
+        working-directory: src-tree
+        run: npm ci
+      - name: tick
+        working-directory: src-tree
+        env:
+          ICT_STATE_PATH: ${{ github.workspace }}/live-data/ict-state.json
+          ICT_START_USD: "100"
+        run: |
+          mkdir -p "${{ github.workspace }}/live-data"
+          npx tsx scripts/ict-worker.mts
+      - name: publish state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: live-data
+        run: |
+          git config user.name "nightshift-worker"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ ! -d .git ]; then
+            git init
+            git checkout -B ict-live
+            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          else
+            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            git checkout -B ict-live
+          fi
+          git add ict-state.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "ict tick $(date -u +%H:%M)"
+          git push -u origin HEAD:ict-live
+

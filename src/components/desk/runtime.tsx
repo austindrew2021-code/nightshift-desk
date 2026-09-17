@@ -3,12 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchDeskSnapshot, fetchIctBooks, fetchMintQuotes } from "@/lib/market/api";
 import { useDesk } from "@/lib/store";
 import { loadEngine } from "@/lib/persist";
+import { fetchCloudLive } from "@/lib/cloud-live";
 
 export function DeskRuntime({ children }: { children: ReactNode }) {
   const hydrate = useDesk((s) => s.hydrateMarket);
   const hydrateQuotes = useDesk((s) => s.hydrateQuotes);
   const hydrateBooks = useDesk((s) => s.hydrateBooks);
   const restoreSession = useDesk((s) => s.restoreSession);
+  const applyCloud = useDesk((s) => s.applyCloud);
   const persistNow = useDesk((s) => s.persistNow);
   const setError = useDesk((s) => s.setMarketError);
   const step = useDesk((s) => s.step);
@@ -39,6 +41,14 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
     queryFn: () => fetchIctBooks(),
     refetchInterval: 8_000,
     refetchIntervalInBackground: true,
+  });
+
+  const cloud = useQuery({
+    queryKey: ["ict-cloud"],
+    queryFn: fetchCloudLive,
+    refetchInterval: 20_000,
+    refetchIntervalInBackground: true,
+    enabled: mode === "ict",
   });
 
   useLayoutEffect(() => {
@@ -103,6 +113,10 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (books.data) hydrateBooks(books.data);
   }, [books.data, hydrateBooks]);
+
+  useEffect(() => {
+    if (cloud.data?.engine && cloud.data.t) applyCloud(cloud.data.engine, cloud.data.t);
+  }, [cloud.data, applyCloud]);
 
   useEffect(() => {
     if (q.error) setError(q.error instanceof Error ? q.error.message : "market feed failed");

@@ -14,6 +14,7 @@ import {
 import { buildZostaffPlan } from "@/lib/engine/zostaff";
 import type { IctBook } from "@/lib/engine/universe";
 import { clearEngineSave, saveEngine, writeSavedStart } from "@/lib/persist";
+import { cloudIsFresh } from "@/lib/cloud-live";
 
 interface DeskStore {
   engine: EngineState;
@@ -23,6 +24,7 @@ interface DeskStore {
   grokBusy: boolean;
   grokNote: string | null;
   installedHint: boolean;
+  cloudAt: number;
   hydrateMarket: (m: MarketSnapshot) => void;
   hydrateQuotes: (q: Record<string, number>) => void;
   hydrateBooks: (books: IctBook[]) => void;
@@ -44,6 +46,7 @@ interface DeskStore {
   bumpGrokCalls: () => void;
   dismissInstall: () => void;
   restoreSession: (engine: EngineState) => void;
+  applyCloud: (engine: EngineState, t: number) => void;
   persistNow: () => void;
 }
 
@@ -59,6 +62,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
   grokBusy: false,
   grokNote: null,
   installedHint: true,
+  cloudAt: 0,
   hydrateMarket: (m) =>
     set((s) => {
       const books = m.books?.length ? m.books : s.market?.books ?? [];
@@ -66,7 +70,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
       const engine = s.engine;
       applyMarket(engine, merged);
       ingestLaunches(engine, merged.launches);
-      if (engine.mode === "ict" && books.length) ingestIct(engine, merged);
+      if (engine.mode === "ict" && books.length && !cloudIsFresh(s.cloudAt)) ingestIct(engine, merged);
       if (engine.mode === "zostaff" && engine.tickN < 4 && engine.zPlan.length === 0) {
         engine.zPlan = buildZostaffPlan(
           engine.startUsd,
@@ -88,27 +92,29 @@ export const useDesk = create<DeskStore>((set, get) => ({
     set((s) => {
       const market = s.market ? { ...s.market, books } : s.market;
       const engine = s.engine;
-      if (engine.mode === "ict" && market) ingestIct(engine, market);
+      if (engine.mode === "ict" && market) {
+        if (!cloudIsFresh(get().cloudAt)) ingestIct(engine, market);
+      }
       return { market, engine: { ...engine } };
     }),
   setIctFilter: (id) => {
     const engine = { ...get().engine, ictFilter: id };
     const market = get().market;
-    if (market && engine.mode === "ict") ingestIct(engine, market);
+    if (market && engine.mode === "ict" && !cloudIsFresh(get().cloudAt)) ingestIct(engine, market);
     set({ engine });
     saveEngine(engine);
   },
   setIctStyle: (id) => {
     const engine = { ...get().engine, ictStyle: id };
     const market = get().market;
-    if (market && engine.mode === "ict") ingestIct(engine, market);
+    if (market && engine.mode === "ict" && !cloudIsFresh(get().cloudAt)) ingestIct(engine, market);
     set({ engine });
     saveEngine(engine);
   },
   setIctUse5m: (on) => {
     const engine = { ...get().engine, ictUse5m: on };
     const market = get().market;
-    if (market && engine.mode === "ict") ingestIct(engine, market);
+    if (market && engine.mode === "ict" && !cloudIsFresh(get().cloudAt)) ingestIct(engine, market);
     set({ engine });
     saveEngine(engine);
   },
@@ -152,7 +158,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
     engine.ictRiskPct = prev.ictRiskPct;
     engine.ictLev = prev.ictLev;
     if (market) applyMarket(engine, market);
-    if (m === "ict" && market?.books?.length) ingestIct(engine, market);
+    if (m === "ict" && market?.books?.length && !cloudIsFresh(get().cloudAt)) ingestIct(engine, market);
     set({ engine, grokNote: null });
     saveEngine(engine);
   },
@@ -170,12 +176,17 @@ export const useDesk = create<DeskStore>((set, get) => ({
     engine.ictRiskPct = prev.ictRiskPct;
     engine.ictLev = prev.ictLev;
     if (market) applyMarket(engine, market);
-    if (mode === "ict" && market?.books?.length) ingestIct(engine, market);
+    if (mode === "ict" && market?.books?.length && !cloudIsFresh(get().cloudAt)) ingestIct(engine, market);
     set({ engine, grokNote: null });
     saveEngine(engine);
   },
   step: () =>
-    set((s) => ({ engine: { ...tick(s.engine, s.market) } })),
+    set((s) => {
+      if (s.engine.mode === "ict" && cloudIsFresh(s.cloudAt)) {
+        return { engine: { ...s.engine, simT: Date.now() } };
+      }
+      return { engine: { ...tick(s.engine, s.market) } };
+    }),
   reset: (mode) => {
     const m = mode ?? get().engine.mode;
     const market = get().market;
@@ -189,7 +200,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
     engine.ictRiskPct = prev.ictRiskPct;
     engine.ictLev = prev.ictLev;
     if (market) applyMarket(engine, market);
-    if (m === "ict" && market?.books?.length) ingestIct(engine, market);
+    if (m === "ict" && market?.books?.length && !cloudIsFresh(get().cloudAt)) ingestIct(engine, market);
     clearEngineSave();
     saveEngine(engine);
     set({ engine });
@@ -211,6 +222,9 @@ export const useDesk = create<DeskStore>((set, get) => ({
       engine = { ...engine, cashUsd: engine.startUsd + closedPnl };
     }
     set({ engine, grokNote: null });
+  },
+  applyCloud: (engine, t) => {
+    set({ engine: { ...engine, running: true, simT: Date.now() }, cloudAt: t, grokNote: null });
   },
   persistNow: () => saveEngine(get().engine),
 }));
