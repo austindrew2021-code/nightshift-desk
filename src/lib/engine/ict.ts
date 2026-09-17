@@ -1,4 +1,4 @@
-import { clampStopToLiq, ICT_LEVERAGE, type Candle, type ClosedTrade, type SetupKind, type SetupOdds } from "./types.ts";
+import { clampStopToLiq, ictLiqPct, ICT_LEVERAGE, type Candle, type ClosedTrade, type SetupKind, type SetupOdds } from "./types.ts";
 
 const NY_OFFSET_MS = 4 * 3600_000; // EDT in September
 
@@ -649,8 +649,15 @@ function aPlus(
   }
   const a = atr(cs, conf.i);
   const stopPad = a * 0.12;
-  /** Sweep wick is often 3–5% (20× leak). Invalidation is the CISD bar — that is what made 40× additive in the 28d grid. */
-  const stop = raid.side === "long" ? cs[conf.i]!.l - stopPad : cs[conf.i]!.h + stopPad;
+  const wickStop = raid.side === "long" ? raid.sweepPx - stopPad : raid.sweepPx + stopPad;
+  const cisdStop = raid.side === "long" ? cs[conf.i]!.l - stopPad : cs[conf.i]!.h + stopPad;
+  const liq = ictLiqPct(ICT_LEVERAGE);
+  const wickPct = Math.abs(entry - wickStop) / Math.max(1e-9, entry);
+  const cisdPct = Math.abs(entry - cisdStop) / Math.max(1e-9, entry);
+  const wickOk = raid.side === "long" ? wickStop < entry && wickPct >= 0.008 && wickPct <= liq * 1.05 : wickStop > entry && wickPct >= 0.008 && wickPct <= liq * 1.05;
+  const cisdOk = raid.side === "long" ? cisdStop < entry && cisdPct >= 0.008 && cisdPct <= liq * 1.05 : cisdStop > entry && cisdPct >= 0.008 && cisdPct <= liq * 1.05;
+  const stop = wickOk ? wickStop : cisdOk ? cisdStop : wickStop;
+  const slTag = wickOk ? "wick SL" : cisdOk ? "CISD SL" : "wick SL";
   const dol = dolPrice(sw, conf.i, raid.side, entry);
   const risk = Math.abs(entry - stop);
   if (risk <= 0) return null;
@@ -666,7 +673,7 @@ function aPlus(
     entry,
     stop,
     tgt,
-    `${note} · ${raid.src} · CISD · ${zone.tag}${oteHit ? " ∩ OTE 62–79" : ""} · ${grade} · ${targetMult.toFixed(1)}R`,
+    `${note} · ${raid.src} · CISD · ${zone.tag}${oteHit ? " ∩ OTE 62–79" : ""} · ${grade} · ${slTag} · ${targetMult.toFixed(1)}R`,
     maxRisk,
   );
 }
