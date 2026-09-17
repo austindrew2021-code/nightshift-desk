@@ -1077,7 +1077,6 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         if (clamped.capped) continue;
         if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
         const ch = finite(b.change24h);
-        if (t.side === "short" && ch >= 0.08) continue;
         if (t.side === "long" && ch <= -0.08) continue;
         const stopPx = clamped.stop;
         const stopDist = Math.abs(t.entryUsd - stopPx);
