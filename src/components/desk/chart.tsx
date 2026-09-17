@@ -145,6 +145,7 @@ export function LiveChart({
   fullscreen,
   onToggleFs,
   orders = [],
+  onSelect,
 }: {
   books: IctBook[];
   filter: string;
@@ -152,8 +153,15 @@ export function LiveChart({
   fullscreen?: boolean;
   onToggleFs?: () => void;
   orders?: ChartOrder[];
+  onSelect?: (id: string) => void;
 }) {
-  const [sym, setSym] = useState(filter === "ALL" ? "SOL" : filter);
+  const [sym, setSym] = useState(() => {
+    try {
+      const s = sessionStorage.getItem("ns-chart-pair");
+      if (s) return s;
+    } catch { /* private */ }
+    return filter && filter !== "ALL" ? filter : "SOL";
+  });
   const [tf, setTf] = useState("5m");
   const [hover, setHover] = useState<number | null>(null);
   const [span, setSpan] = useState(72);
@@ -182,10 +190,19 @@ export function LiveChart({
   }>({ x: 0, start: 0, moved: false, ids: new Map(), pinch: null, span0: 72 });
 
   useEffect(() => {
-    if (filter !== "ALL") setSym(filter);
+    if (filter && filter !== "ALL") setSym(filter);
   }, [filter]);
 
-  const book = books.find((b) => b.id === sym) ?? books.find((b) => b.id === "SOL") ?? books[0];
+  const pick = (id: string) => {
+    setSym(id);
+    setFollow(true);
+    try {
+      sessionStorage.setItem("ns-chart-pair", id);
+    } catch { /* private */ }
+    onSelect?.(id);
+  };
+
+  const book = books.find((b) => b.id === sym || b.symbol === sym);
   const tape = useQuery({
     queryKey: ["chart-klines", sym, tf],
     queryFn: () => fetchChartKlines({ id: sym, bar: tf }),
@@ -198,7 +215,7 @@ export function LiveChart({
       ? liveTape.candles
       : book?.candles15?.length
         ? book.candles15
-        : (fallback ?? []);
+        : (sym === "SOL" ? (fallback ?? []) : []);
   const nAll = candles.length;
   const visN = Math.max(20, Math.min(span, nAll || 20));
   const visStart = follow ? Math.max(0, nAll - visN) : clamp(start, 0, Math.max(0, nAll - visN));
@@ -744,13 +761,10 @@ export function LiveChart({
           <button
             key={a.id}
             type="button"
-            onClick={() => {
-              setSym(a.id);
-              setFollow(true);
-            }}
+            onClick={() => pick(a.id)}
             className={cn(
               "h-7 shrink-0 rounded px-2 font-mono text-[10px] tracking-[0.1em]",
-              a.id === (book?.id ?? sym) ? "bg-phosphor text-phosphor-ink" : "text-muted hover:text-fg",
+              a.id === sym ? "bg-phosphor text-phosphor-ink" : "text-muted hover:text-fg",
             )}
           >
             {a.symbol}

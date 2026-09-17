@@ -39,7 +39,13 @@ export function Desk() {
   const setIctLev = useDesk((s) => s.setIctLev);
   const setGrok = useDesk((s) => s.setGrok);
   const bumpGrok = useDesk((s) => s.bumpGrokCalls);
-  const [chartPair, setChartPair] = useState("SOL");
+  const [chartPair, setChartPair] = useState(() => {
+    try {
+      return sessionStorage.getItem("ns-chart-pair") || "SOL";
+    } catch {
+      return "SOL";
+    }
+  });
   const [chartFs, setChartFs] = useState(false);
   const chartOrders = useMemo(
     () => deskOrders(engine.open, engine.closed),
@@ -236,6 +242,7 @@ export function Desk() {
             filter={engine.mode === "ict" ? chartPair : "SOL"}
             fallback={market?.candles15}
             orders={chartOrders}
+            onSelect={setChartPair}
             onToggleFs={() => {
               setChartFs(true);
               const root = document.documentElement;
@@ -388,6 +395,7 @@ export function Desk() {
             filter={engine.mode === "ict" ? chartPair : "SOL"}
             fallback={market?.candles15}
             orders={chartOrders}
+            onSelect={setChartPair}
             fullscreen
             onToggleFs={() => {
               setChartFs(false);
