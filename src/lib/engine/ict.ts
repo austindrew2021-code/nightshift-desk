@@ -267,8 +267,8 @@ function atr(cs: Candle[], i: number, n = 14): number {
 }
 
 /** CISD: close through the candle series that made the swept swing. */
-function cisd(cs: Candle[], sweepI: number, side: "long" | "short", fromBar?: number): { ok: boolean; i: number; fvg?: FVG } {
-  const fvgs = detectFvgs(cs);
+function cisd(cs: Candle[], sweepI: number, side: "long" | "short", fromBar?: number, fvgsAll?: FVG[]): { ok: boolean; i: number; fvg?: FVG } {
+  const fvgs = fvgsAll ?? detectFvgs(cs);
   const from = Math.max(0, sweepI - 8);
   const start = fromBar ?? sweepI + 1;
   if (side === "long") {
@@ -1108,6 +1108,7 @@ export function scanPlayback(cs: Candle[]): IctSignal[] {
   const obs = detectObs(cs);
   // 2/1 fractals: second top can confirm 1 bar after the tap so CISD isn't late.
   const sw = swings(cs, 2, 1);
+  const fvgs = detectFvgs(cs);
   const out: IctSignal[] = [];
   const into = (px: number, z: OrderBlock, pad: number) => px >= z.bot - pad && px <= z.top + pad;
 
@@ -1136,7 +1137,7 @@ export function scanPlayback(cs: Candle[]): IctSignal[] {
       if (dt) {
         const tap = cs[dt.b.i]!;
         if (tap.c < bear.top && tap.c < tap.h) {
-          const conf = cisd(cs, dt.b.i, "short", dt.b.i);
+          const conf = cisd(cs, dt.b.i, "short", dt.b.i, fvgs);
           if (conf.ok && conf.i === i) {
             const eqh = Math.max(dt.a.price, dt.b.price);
             const entry = c.c;
@@ -1186,7 +1187,7 @@ export function scanPlayback(cs: Candle[]): IctSignal[] {
       if (db) {
         const tap = cs[db.b.i]!;
         if (tap.c > bull.bot && tap.c > tap.l) {
-          const conf = cisd(cs, db.b.i, "long", db.b.i);
+          const conf = cisd(cs, db.b.i, "long", db.b.i, fvgs);
           if (conf.ok && conf.i === i) {
             const eql = Math.min(db.a.price, db.b.price);
             const entry = c.c;
