@@ -3,6 +3,7 @@
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { ICT_ASSETS, type IctBook } from "../src/lib/engine/universe.ts";
+import { fetchKucoinHotAssets } from "../src/lib/market/kucoin-hot.ts";
 import { createEngine, tick, type EngineState } from "../src/lib/engine/session.ts";
 import type { Candle, MarketSnapshot } from "../src/lib/engine/types.ts";
 
@@ -127,9 +128,11 @@ function load(): EngineState {
 }
 
 async function main() {
+  const hot = await fetchKucoinHotAssets();
+  const assets = [...ICT_ASSETS, ...hot.filter((a) => !ICT_ASSETS.some((c) => c.id === a.id))];
   const books: IctBook[] = [];
-  for (let i = 0; i < ICT_ASSETS.length; i += 6) {
-    const chunk = ICT_ASSETS.slice(i, i + 6);
+  for (let i = 0; i < assets.length; i += 6) {
+    const chunk = assets.slice(i, i + 6);
     const got = await Promise.allSettled(chunk.map(book));
     for (const r of got) {
       if (r.status === "fulfilled" && r.value.candles15.length > 20) books.push(r.value);

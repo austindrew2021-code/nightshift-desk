@@ -740,7 +740,7 @@ export function LiveChart({
         </ChipRow>
       </div>
       <ChipRow>
-        {ICT_ASSETS.map((a) => (
+        {[...ICT_ASSETS, ...books.filter((b) => !ICT_ASSETS.some((a) => a.id === b.id))].map((a) => (
           <button
             key={a.id}
             type="button"

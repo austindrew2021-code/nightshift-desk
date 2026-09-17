@@ -122,7 +122,7 @@ export function Desk() {
 
       {engine.mode === "ict" && (
         <ChipRow className="border-b border-line">
-          {[{ id: "ALL", symbol: "ALL" }, ...ICT_ASSETS].map((a) => {
+          {[{ id: "ALL", symbol: "ALL" }, ...ICT_ASSETS, ...(market?.books ?? []).filter((b) => !ICT_ASSETS.some((a) => a.id === b.id))].map((a) => {
             const view = a.id === "ALL" ? "SOL" : a.id;
             const on = a.id === "ALL" ? engine.ictFilter === "ALL" && chartPair === "SOL" : chartPair === a.id;
             return (

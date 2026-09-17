@@ -3,6 +3,7 @@ import type { Candle, Launch, MarketSnapshot } from "@/lib/engine/types";
 import { parseKlines } from "@/lib/engine/ict";
 import { estimateUniqueBuyers } from "@/lib/engine/pipeline";
 import { CHART_BARS, ICT_ASSETS, type ChartTape, type IctBook } from "@/lib/engine/universe";
+import { fetchKucoinHotAssets } from "@/lib/market/kucoin-hot";
 import fallback from "./fallback-klines.json";
 
 type KlinePack = { m15: number[][]; h1: number[][]; m5: number[][] };
@@ -308,15 +309,17 @@ export async function fetchDeskSnapshot(): Promise<MarketSnapshot> {
 export const getDeskSnapshot = createServerFn({ method: "GET" }).handler(fetchDeskSnapshot);
 
 export async function fetchIctBooks(): Promise<IctBook[]> {
+  const extra = await fetchKucoinHotAssets();
+  const assets = [...ICT_ASSETS, ...extra.filter((a) => !ICT_ASSETS.some((c) => c.id === a.id))];
   const settled = await Promise.allSettled(
-    ICT_ASSETS.map((a) =>
+    assets.map((a) =>
       a.venue === "kucoin"
         ? fetchKucoinBook(a.instId, a.symbol, a.name, a.id)
         : fetchOkxBook(a.instId, a.symbol, a.name, a.id),
     ),
   );
   return settled.map((r, i) => {
-    const a = ICT_ASSETS[i]!;
+    const a = assets[i]!;
     if (r.status === "fulfilled" && r.value.candles15.length > 10) return r.value;
     return {
       id: a.id,
@@ -333,7 +336,15 @@ export async function fetchIctBooks(): Promise<IctBook[]> {
 export const getIctBooks = createServerFn({ method: "GET" }).handler(fetchIctBooks);
 
 export async function fetchChartKlines(data: { id: string; bar: string }): Promise<ChartTape> {
-    const asset = ICT_ASSETS.find((a) => a.id === data.id) ?? ICT_ASSETS[2]!;
+    const asset =
+      ICT_ASSETS.find((a) => a.id === data.id) ??
+      ({
+        id: data.id,
+        symbol: data.id,
+        name: data.id,
+        venue: "kucoin" as const,
+        instId: `${data.id}-USDT`,
+      });
     const tf = CHART_BARS.find((b) => b.id === data.bar) ?? CHART_BARS[3]!;
     if (asset.venue === "kucoin") {
       const [stats, candles] = await Promise.all([
