@@ -718,8 +718,7 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
     const pd = prevDayOf(days, day);
     const wk = weekOf(days, day);
     const dealing = today && today.h > today.l ? today : pd;
-    const fade = sig.setup === "daily" || sig.setup === "weekly" || sig.setup === "sweep";
-    if (!fade && !inRangePd(sig.side, sig.entry, dealing, 0.58, 0.42)) return;
+    if (!inRangePd(sig.side, sig.entry, dealing, 0.58, 0.42)) return;
     if (sig.setup !== "sweep" && !inRangePd(sig.side, sig.entry, wk, 0.62, 0.38)) return;
     signals.push(sig);
   };
@@ -992,14 +991,14 @@ export function scanIct(cs: Candle[], opts?: { skipSwing?: boolean; includeSwing
       if (rng >= a * 2.2) {
         const upW = c.h - Math.max(c.o, c.c);
         const dnW = Math.min(c.o, c.c) - c.l;
-        if (dnW >= rng * 0.45 && c.c > c.o) {
+        if (dnW >= rng * 0.45 && c.c > c.o && (c.c - c.l) / rng <= 0.4) {
           const stop = c.l - a * 0.1;
           add(
             pack(i, c.t, "long", "sweep", c.c, stop, twoR("long", c.c, stop, undefined, 2), "Panic fade · long the crash", 0.06),
             days,
             day,
           );
-        } else if (upW >= rng * 0.45 && c.c < c.o) {
+        } else if (upW >= rng * 0.45 && c.c < c.o && (c.h - c.c) / rng <= 0.4) {
           const stop = c.h + a * 0.1;
           add(
             pack(i, c.t, "short", "sweep", c.c, stop, twoR("short", c.c, stop, undefined, 2), "Panic fade · short the grab", 0.06),
