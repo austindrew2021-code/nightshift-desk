@@ -1098,25 +1098,34 @@ function pickKill(raw: IctSignal[]): IctSignal[] {
 }
 
 /**
- * Playback scalp the tape prints all day:
- *   equal highs inside a Bear OB → CISD down → short into the Bull OB (1R)
- *   equal lows inside a Bull OB → CISD up → long into the Bear OB (1R)
- * Allowed against HTF trend. Quick 1R, not a 2R swing. Sweep-tagged so ¾@1R already applies.
+ * Playback scalp — only the nested tape:
+ *   5m equal highs in a Bear OB AND the same movie on 15m (or 15m+1H)
+ *   CISD displacement ≥ 1.4 ATR, skip NY 7–9 (Judas fake DT).
+ * 5m-only double tops are noise. Nested ones print on every coin the same way.
+ * Second-priority to CISD: session.ts will not let this steal an A+ slot.
  */
-export function scanPlayback(cs: Candle[]): IctSignal[] {
+export function scanPlayback(cs: Candle[], htf?: Candle[]): IctSignal[] {
   if (cs.length < 48) return [];
   const obs = detectObs(cs);
   // 2/1 fractals: second top can confirm 1 bar after the tap so CISD isn't late.
   const sw = swings(cs, 2, 1);
   const fvgs = detectFvgs(cs);
+  const htfSigs = htf && htf.length >= 48 ? scanPlayback(htf) : null;
   const out: IctSignal[] = [];
   const into = (px: number, z: OrderBlock, pad: number) => px >= z.bot - pad && px <= z.top + pad;
+  const nested = (side: "long" | "short", t: number) => {
+    if (!htfSigs) return true;
+    return htfSigs.some((h) => h.side === side && Math.abs(h.t - t) <= 3 * 3600_000);
+  };
 
   for (let i = 40; i < cs.length; i++) {
     const c = cs[i]!;
+    const h = nyHour(c.t);
+    if (h >= 7 && h < 9) continue; // Judas: 5m DT here is the real NY continuation
     if (!inKill(c.t) && !isHuntWindow(c.t)) continue;
     const a = atr(cs, i);
     if (!(a > 0)) continue;
+    if (c.h - c.l < a * 1.4) continue; // CISD bar must be a real displacement
     const tol = Math.max(a * 0.22, c.c * 0.0015);
 
     const bear = [...obs].reverse().find((o) => o.dir === -1 && o.i < i && o.i >= i - 28 && o.top > o.bot);
@@ -1138,7 +1147,7 @@ export function scanPlayback(cs: Candle[]): IctSignal[] {
         const tap = cs[dt.b.i]!;
         if (tap.c < bear.top && tap.c < tap.h) {
           const conf = cisd(cs, dt.b.i, "short", dt.b.i, fvgs);
-          if (conf.ok && conf.i === i) {
+          if (conf.ok && conf.i === i && nested("short", c.t)) {
             const eqh = Math.max(dt.a.price, dt.b.price);
             const entry = c.c;
             const stop = eqh + a * 0.12;
@@ -1162,7 +1171,7 @@ export function scanPlayback(cs: Candle[]): IctSignal[] {
                 entry,
                 stop,
                 tgt,
-                "Playback · DT Bear OB · CISD · SSL magnet · 1.0R",
+                "Playback · nested · DT Bear OB · CISD · SSL magnet · 1.0R",
                 0.04,
               );
               if (sig) out.push(sig);
@@ -1188,7 +1197,7 @@ export function scanPlayback(cs: Candle[]): IctSignal[] {
         const tap = cs[db.b.i]!;
         if (tap.c > bull.bot && tap.c > tap.l) {
           const conf = cisd(cs, db.b.i, "long", db.b.i, fvgs);
-          if (conf.ok && conf.i === i) {
+          if (conf.ok && conf.i === i && nested("long", c.t)) {
             const eql = Math.min(db.a.price, db.b.price);
             const entry = c.c;
             const stop = eql - a * 0.12;
@@ -1212,7 +1221,7 @@ export function scanPlayback(cs: Candle[]): IctSignal[] {
                 entry,
                 stop,
                 tgt,
-                "Playback · DB Bull OB · CISD · BSL magnet · 1.0R",
+                "Playback · nested · DB Bull OB · CISD · BSL magnet · 1.0R",
                 0.04,
               );
               if (sig) out.push(sig);

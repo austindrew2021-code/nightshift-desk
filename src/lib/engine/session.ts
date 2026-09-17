@@ -1009,7 +1009,12 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     const corr = b.id === "BTC" ? eth : btc;
     const extra =
       corr && corr.id !== b.id ? scanSmt(b.candles15, corr.candles15, corr.symbol) : [];
-    const s15 = [...scanIct(b.candles15, { extra: 0 }), ...scanPlayback(b.candles15), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
+    const s15 = [...scanIct(b.candles15, { extra: 0 }), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
+    for (const sig of scanPlayback(b.candles15, b.candles1h)) {
+      if (!styleAllows(s.ictStyle, sig.setup)) continue;
+      if (s15.some((x) => x.side === sig.side && Math.abs(x.t - sig.t) < 45 * 60_000)) continue;
+      s15.push(sig);
+    }
     const s5: typeof s15 = [];
     const s1h: typeof s15 = [];
     if (
@@ -1028,8 +1033,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         if (!styleAllows(s.ictStyle, sig.setup)) continue;
         s5.push({ ...sig, note: sig.note.includes("5m") ? sig.note : `${sig.note} · 5m` });
       }
-      for (const sig of scanPlayback(b.candles5)) {
+      for (const sig of scanPlayback(b.candles5, b.candles15)) {
         if (!styleAllows(s.ictStyle, sig.setup)) continue;
+        if (s5.some((x) => x.side === sig.side && Math.abs(x.t - sig.t) < 45 * 60_000)) continue;
         s5.push({ ...sig, note: sig.note.includes("5m") ? sig.note : `${sig.note} · 5m` });
       }
     }
