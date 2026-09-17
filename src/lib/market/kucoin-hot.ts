@@ -1,8 +1,11 @@
 import { ICT_ASSETS, type IctAssetDef } from "@/lib/engine/universe";
 
 const CORE = new Set(ICT_ASSETS.map((a) => a.symbol.toUpperCase()));
-const SKIP = new Set(["USDT", "USDC", "USD", "DAI", "KCS", "XBT", "BTC", "XAUT"]);
-const HOT_N = 6;
+const SKIP = new Set([
+  "USDT", "USDC", "USD", "DAI", "KCS", "XBT", "BTC", "XAUT", "PAXG", "XAG",
+  "SOXL", "SKHYNIX", "SNDK", "SPCX",
+]);
+const HOT_N = 10;
 
 /** KuCoin USDT-M names that are actually hot: 50×+ and real volume. Not spot lottery ticks. */
 export async function fetchKucoinHotAssets(): Promise<IctAssetDef[]> {
@@ -21,7 +24,7 @@ export async function fetchKucoinHotAssets(): Promise<IctAssetDef[]> {
       const im = Number(r.initialMargin) || 1;
       const lev = im > 0 ? 1 / im : 0;
       const vol = Number(r.turnoverOf24h) || 0;
-      if (lev < 50 || vol < 8_000_000) continue;
+      if (lev < 20 || vol < 4_000_000) continue;
       scored.push({
         vol,
         a: { id: base, symbol: base, name: base, venue: "kucoin", instId: `${base}-USDT` },
