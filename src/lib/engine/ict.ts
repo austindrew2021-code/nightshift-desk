@@ -649,7 +649,8 @@ function aPlus(
   }
   const a = atr(cs, conf.i);
   const stopPad = a * 0.12;
-  const stop = raid.side === "long" ? raid.sweepPx - stopPad : raid.sweepPx + stopPad;
+  /** Sweep wick is often 3–5% (20× leak). Invalidation is the CISD bar — that is what made 40× additive in the 28d grid. */
+  const stop = raid.side === "long" ? cs[conf.i]!.l - stopPad : cs[conf.i]!.h + stopPad;
   const dol = dolPrice(sw, conf.i, raid.side, entry);
   const risk = Math.abs(entry - stop);
   if (risk <= 0) return null;
