@@ -887,13 +887,14 @@ function markIct(s: EngineState, market: MarketSnapshot | null) {
       }
       if (mfe >= risk && !p.partialed) {
         const px = p.side === "long" ? p.entryUsd + risk : p.entryUsd - risk;
-        ictTakePartial(s, p, px, 0.75);
+        const run = (p.side === "long" && finite(b?.change24h) >= 0.12) || (p.side === "short" && finite(b?.change24h) <= -0.12);
+        ictTakePartial(s, p, px, run ? 0.25 : 0.75);
         stopPx = p.entryUsd;
         tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
         p.stopUsd = stopPx;
         p.targetUsd = tgtPx;
         p.targetR = 5;
-        p.note = `${p.note} · runner`;
+        p.note = `${p.note} · runner${run ? " · keep ¾ (24h run)" : ""}`;
       }
       if (p.partialed) {
         const wave = isWaveRide(p.side, mfe, risk, finite(b?.change24h));
