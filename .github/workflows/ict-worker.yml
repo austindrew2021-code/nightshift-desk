@@ -1,7 +1,7 @@
 name: ict-worker
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/2 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -13,7 +13,7 @@ permissions:
   contents: write
 concurrency:
   group: ict-worker
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   tick:
     runs-on: ubuntu-latest

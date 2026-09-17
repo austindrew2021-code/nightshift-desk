@@ -314,7 +314,7 @@ export function Desk() {
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               {cloudIsFresh(cloudAt)
-                ? `CLOUD worker · last tick ${Math.max(0, Math.round((Date.now() - cloudAt) / 60000))}m ago · phone is a viewer · lock screen OK`
+                ? `CLOUD worker · last tick ${Math.max(0, Math.round((Date.now() - cloudAt) / 60000))}m ago · ~2m scan · phone is a viewer · lock screen OK`
                 : "KEEP ALIVE · tap once, leave the green mini player on — lock screen still pauses until CLOUD worker is live"}
             </p>
             <p className={cn("mt-1 font-mono text-[11px] tabular", engine.ictRegime === "expand" ? "text-phosphor" : "text-subtle")}>
