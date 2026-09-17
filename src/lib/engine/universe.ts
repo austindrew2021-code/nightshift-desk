@@ -8,7 +8,6 @@ export interface IctAssetDef {
   instId: string;
 }
 
-/** Liquid KuCoin USDT-M names. All candles + 24h from KuCoin (live venue). */
 export const ICT_ASSETS: IctAssetDef[] = [
   { id: "BTC", symbol: "BTC", name: "Bitcoin", venue: "kucoin", instId: "BTC-USDT" },
   { id: "ETH", symbol: "ETH", name: "Ethereum", venue: "kucoin", instId: "ETH-USDT" },
@@ -76,6 +75,11 @@ export const ICT_ASSETS: IctAssetDef[] = [
   { id: "COMP", symbol: "COMP", name: "Compound", venue: "kucoin", instId: "COMP-USDT" },
   { id: "SNX", symbol: "SNX", name: "Synthetix", venue: "kucoin", instId: "SNX-USDT" },
 ];
+
+/** Majors always scanned. Alts only in expand or if that coin’s 24h is already ≥6% (alt bid). */
+export const ICT_CORE_IDS = new Set([
+  "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "AVAX", "LINK", "ADA", "SUI", "TAO", "HYPE",
+]);
 
 export interface ChartBar {
   id: string;

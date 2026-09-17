@@ -35,7 +35,7 @@ import {
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
 import { fadingAcceptedBreak, inKill, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
-import type { IctBook } from "./universe";
+import { ICT_CORE_IDS, type IctBook } from "./universe";
 import {
   ZOSTAFF_LAST_TICK,
   ZOSTAFF_SCANNED,
@@ -1003,6 +1003,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     restoreWorkingFloor(s);
   }
   for (const b of liveBooks) {
+    const hot = Math.abs(finite(b.change24h)) >= 0.06;
+    if (!ICT_CORE_IDS.has(b.id) && s.ictRegime !== "expand" && !hot) continue;
     const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
     const corr = b.id === "BTC" ? eth : btc;
     const extra =
