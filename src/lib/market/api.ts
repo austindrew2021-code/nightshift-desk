@@ -441,15 +441,17 @@ export async function fetchChartKlines(data: { id: string; bar: string }): Promi
         const last = num((stats as { data?: Record<string, string> })?.data?.last);
         let cs = candlesFromKucoin(candles);
         if (tf.foldMs && tf.id !== "8H") cs = foldCandles(cs, tf.foldMs);
-        if (cs.length > 8) return { id: asset.id, last, candles: stampLast(cs, last), source: "kucoin", bar: tf.id };
+        if (cs.length > 8) return { id: asset.id, last: last || cs[cs.length - 1]!.c, candles: stampLast(cs, last), source: "kucoin", bar: tf.id };
       } catch {
         /* CORS / timeout on the phone */
       }
     }
-    const bn = await klinesFromBinance(data.id, data.bar);
-    if (bn) return bn;
     const cloud = await klinesFromCloud(data.id, data.bar);
     if (cloud) return cloud;
+    if (!["XMR", "ZEC", "DASH", "XVG"].includes(data.id)) {
+      const bn = await klinesFromBinance(data.id, data.bar);
+      if (bn) return bn;
+    }
     return empty;
   } catch {
     return (await klinesFromCloud(data.id, data.bar)) ?? empty;
