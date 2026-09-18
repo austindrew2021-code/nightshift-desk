@@ -36,7 +36,7 @@ import {
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
 import { fadingAcceptedBreak, inKill, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
-import { type IctBook } from "./universe";
+import { ICT_ASSETS, type IctBook } from "./universe";
 import {
   ZOSTAFF_LAST_TICK,
   ZOSTAFF_SCANNED,
@@ -1061,6 +1061,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       origin: "ict" as const,
       pnlSol: t.pnlUsd / Math.max(1e-6, s.solUsd),
     }));
+    sim.sort((a, b) => {
+      const rank = (x: string) => (x === "scalp" || x === "judas" ? 0 : x === "sweep" ? 1 : 2);
+      return rank(a.setup) - rank(b.setup);
+    });
+    const MEME = new Set(["FARTCOIN", "BONK", "WIF", "PEPE", "FLOKI", "PENGU", "MARSCOIN"]);
     for (const t of sim) {
       const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
       const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
@@ -1069,8 +1074,20 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       } else if (t.openedAt < liveFromClosed || t.closedAt < liveFromClosed) {
         continue;
       }
-      const key = `${t.symbol}-${t.setup}-${t.openedAt}`;
+      const key = `${t.symbol}-${t.side}-${t.openedAt}`;
       if (s.ictSeen.includes(key)) continue;
+      if (fresh.some((f) => f.symbol === t.symbol)) continue;
+      if (
+        s.closed.some(
+          (c) =>
+            c.origin === "ict" &&
+            c.symbol === t.symbol &&
+            Math.abs(c.openedAt - t.openedAt) < 45 * 60_000,
+        )
+      )
+        continue;
+      if (MEME.has(t.symbol) && !t.note.includes("OTE")) continue;
+      if (!ICT_ASSETS.some((a) => a.id === t.symbol) && !t.note.includes("OTE")) continue;
       const cooled = s.closed.some(
         (c) =>
           c.origin === "ict" &&
