@@ -138,8 +138,20 @@ function load(): EngineState {
 }
 
 async function main() {
+  const s = load();
   const hot = await fetchKucoinHotAssets();
-  const assets = [...ICT_ASSETS, ...hot.filter((a) => !ICT_ASSETS.some((c) => c.id === a.id))];
+  const seen = new Set(ICT_ASSETS.map((a) => a.id));
+  const assets = [...ICT_ASSETS];
+  for (const p of [...s.open, ...s.closed]) {
+    if (p.origin !== "ict" || !p.symbol || seen.has(p.symbol)) continue;
+    seen.add(p.symbol);
+    assets.push({ id: p.symbol, symbol: p.symbol, name: p.symbol, venue: "kucoin", instId: `${p.symbol}-USDT` });
+  }
+  for (const a of hot) {
+    if (seen.has(a.id)) continue;
+    seen.add(a.id);
+    assets.push(a);
+  }
   const books: IctBook[] = [];
   for (let i = 0; i < assets.length; i += 6) {
     const chunk = assets.slice(i, i + 6);
@@ -169,7 +181,6 @@ async function main() {
     books,
     source: "kucoin",
   };
-  const s = load();
   s.solUsd = market.solUsd;
   tick(s, market);
   writeFileSync(STATE, JSON.stringify(slim(s)));

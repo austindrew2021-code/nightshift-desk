@@ -4,6 +4,7 @@ import { parseKlines } from "@/lib/engine/ict";
 import { estimateUniqueBuyers } from "@/lib/engine/pipeline";
 import { CHART_BARS, ICT_ASSETS, type ChartTape, type IctBook } from "@/lib/engine/universe";
 import { fetchKucoinHotAssets } from "@/lib/market/kucoin-hot";
+import { CLOUD_LIVE_URL } from "@/lib/cloud-live";
 import fallback from "./fallback-klines.json";
 
 type KlinePack = { m15: number[][]; h1: number[][]; m5: number[][] };
@@ -371,7 +372,26 @@ export const getDeskSnapshot = createServerFn({ method: "GET" }).handler(fetchDe
 
 export async function fetchIctBooks(): Promise<IctBook[]> {
   const extra = await fetchKucoinHotAssets();
-  const assets = [...ICT_ASSETS, ...extra.filter((a) => !ICT_ASSETS.some((c) => c.id === a.id))];
+  const seen = new Set(ICT_ASSETS.map((a) => a.id));
+  const assets = [...ICT_ASSETS];
+  try {
+    const res = await fetch(`${CLOUD_LIVE_URL}?t=${Date.now()}`, { cache: "no-store" });
+    if (res.ok) {
+      const j = (await res.json()) as { engine?: { open?: { origin?: string; symbol?: string }[]; closed?: { origin?: string; symbol?: string }[] } };
+      for (const p of [...(j.engine?.open ?? []), ...(j.engine?.closed ?? [])]) {
+        if (p.origin !== "ict" || !p.symbol || seen.has(p.symbol)) continue;
+        seen.add(p.symbol);
+        assets.push({ id: p.symbol, symbol: p.symbol, name: p.symbol, venue: "kucoin", instId: `${p.symbol}-USDT` });
+      }
+    }
+  } catch {
+    /* cloud pins optional */
+  }
+  for (const a of extra) {
+    if (seen.has(a.id)) continue;
+    seen.add(a.id);
+    assets.push(a);
+  }
   const settled = await Promise.allSettled(
     assets.map((a) =>
       a.venue === "kucoin"
