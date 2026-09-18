@@ -6,6 +6,7 @@ import {
   clampStart,
   createEngine,
   ingestIct,
+  markIct,
   ingestLaunches,
   resetEngine,
   tick,
@@ -94,6 +95,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
       const engine = s.engine;
       if (engine.mode === "ict" && market) {
         if (!cloudIsFresh(get().cloudAt)) ingestIct(engine, market);
+        markIct(engine, market);
       }
       return { market, engine: { ...engine } };
     }),
@@ -183,6 +185,9 @@ export const useDesk = create<DeskStore>((set, get) => ({
   step: () =>
     set((s) => {
       if (s.engine.mode === "ict" && cloudIsFresh(s.cloudAt)) {
+        if (s.market && s.engine.open.some((p) => p.origin === "ict")) {
+          markIct(s.engine, s.market);
+        }
         return { engine: { ...s.engine, simT: Date.now() } };
       }
       return { engine: { ...tick(s.engine, s.market) } };
@@ -230,7 +235,12 @@ export const useDesk = create<DeskStore>((set, get) => ({
   },
   applyCloud: (engine, t) => {
     if (!cloudIsFresh(t)) return;
-    set({ engine: { ...engine, running: true, simT: Date.now() }, cloudAt: t, grokNote: null });
+    const cur = get().engine;
+    const closedKeys = new Set(
+      (cur.closed ?? []).filter((c) => c.origin === "ict").map((c) => `${c.symbol}-${c.openedAt}`),
+    );
+    const open = (engine.open ?? []).filter((p) => !closedKeys.has(`${p.symbol}-${p.openedAt}`));
+    set({ engine: { ...engine, open, running: true, simT: Date.now() }, cloudAt: t, grokNote: null });
   },
   persistNow: () => saveEngine(get().engine),
 }));

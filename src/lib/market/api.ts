@@ -370,18 +370,43 @@ export async function fetchDeskSnapshot(): Promise<MarketSnapshot> {
 
 export const getDeskSnapshot = createServerFn({ method: "GET" }).handler(fetchDeskSnapshot);
 
+async function kucoinLast(id: string): Promise<number> {
+  try {
+    const j = await getJson(
+      `https://api-futures.kucoin.com/api/v1/ticker?symbol=${encodeURIComponent(`${id}USDTM`)}`,
+      6000,
+    );
+    const px = num((j as { data?: { price?: string } })?.data?.price);
+    if (px > 0) return px;
+  } catch {
+    /* try spot */
+  }
+  try {
+    const j = await getJson(`https://api.kucoin.com/api/v1/market/stats?symbol=${encodeURIComponent(`${id}-USDT`)}`, 6000);
+    return num((j as { data?: { last?: string } })?.data?.last);
+  } catch {
+    return 0;
+  }
+}
+
 export async function fetchIctBooks(): Promise<IctBook[]> {
   const extra = await fetchKucoinHotAssets();
   const seen = new Set(ICT_ASSETS.map((a) => a.id));
   const assets = [...ICT_ASSETS];
+  const openIds: string[] = [];
   try {
     const res = await fetch(`${CLOUD_LIVE_URL}?t=${Date.now()}`, { cache: "no-store" });
     if (res.ok) {
       const j = (await res.json()) as { engine?: { open?: { origin?: string; symbol?: string }[]; closed?: { origin?: string; symbol?: string }[] } };
       for (const p of [...(j.engine?.open ?? []), ...(j.engine?.closed ?? [])]) {
-        if (p.origin !== "ict" || !p.symbol || seen.has(p.symbol)) continue;
+        if (p.origin !== "ict" || !p.symbol) continue;
+        if (p.origin === "ict" && (j.engine?.open ?? []).some((o) => o.symbol === p.symbol)) openIds.push(p.symbol);
+        if (seen.has(p.symbol)) continue;
         seen.add(p.symbol);
         assets.push({ id: p.symbol, symbol: p.symbol, name: p.symbol, venue: "kucoin", instId: `${p.symbol}-USDT` });
+      }
+      for (const p of j.engine?.open ?? []) {
+        if (p.origin === "ict" && p.symbol && !openIds.includes(p.symbol)) openIds.push(p.symbol);
       }
     }
   } catch {
@@ -392,6 +417,30 @@ export async function fetchIctBooks(): Promise<IctBook[]> {
     seen.add(a.id);
     assets.push(a);
   }
+  const cloudBooks = new Map<string, IctBook>();
+  try {
+    const res = await fetch(`${CLOUD_KLINES_URL}?t=${Date.now()}`, { cache: "no-store" });
+    if (res.ok) {
+      const j = (await res.json()) as {
+        klines?: Record<string, { last?: number; change24h?: number; m15?: Candle[]; m5?: Candle[]; h1?: Candle[] }>;
+      };
+      for (const [id, row] of Object.entries(j.klines ?? {})) {
+        cloudBooks.set(id, {
+          id,
+          symbol: id,
+          name: id,
+          last: row.last || 0,
+          change24h: row.change24h || 0,
+          candles15: row.m15 ?? [],
+          candles5: row.m5 ?? [],
+          candles1h: row.h1 ?? [],
+          source: "kucoin",
+        });
+      }
+    }
+  } catch {
+    /* cloud klines optional */
+  }
   const settled = await Promise.allSettled(
     assets.map((a) =>
       a.venue === "kucoin"
@@ -399,9 +448,11 @@ export async function fetchIctBooks(): Promise<IctBook[]> {
         : fetchOkxBook(a.instId, a.symbol, a.name, a.id),
     ),
   );
-  return settled.map((r, i) => {
-    const a = assets[i]!;
+  const books: IctBook[] = assets.map((a, i) => {
+    const r = settled[i]!;
     if (r.status === "fulfilled" && r.value.candles15.length > 10) return r.value;
+    const cloud = cloudBooks.get(a.id);
+    if (cloud && (cloud.candles15.length > 8 || cloud.last > 0)) return cloud;
     return {
       id: a.id,
       symbol: a.symbol,
@@ -412,6 +463,24 @@ export async function fetchIctBooks(): Promise<IctBook[]> {
       source: "down",
     };
   });
+  const live = [...new Set(openIds)];
+  if (live.length) {
+    const px = await Promise.all(live.map((id) => kucoinLast(id)));
+    for (let i = 0; i < live.length; i++) {
+      const last = px[i]!;
+      if (!(last > 0)) continue;
+      const b = books.find((x) => x.id === live[i]);
+      if (!b) continue;
+      b.last = last;
+      if (b.candles5?.length) {
+        const z = b.candles5[b.candles5.length - 1]!;
+        z.c = last;
+        z.h = Math.max(z.h, last);
+        z.l = Math.min(z.l, last);
+      }
+    }
+  }
+  return books;
 }
 
 export const getIctBooks = createServerFn({ method: "GET" }).handler(fetchIctBooks);

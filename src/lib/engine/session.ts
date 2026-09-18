@@ -861,7 +861,7 @@ function ictTakePartial(s: EngineState, p: Position, exitUsd: number, frac: numb
   maybeBank(s);
 }
 
-function markIct(s: EngineState, market: MarketSnapshot | null) {
+export function markIct(s: EngineState, market: MarketSnapshot | null) {
   const books = market?.books ?? [];
   const trailSet = new Set(["asia", "scalp", "silver", "judas", "amd", "daily", "sweep"]);
   for (const p of s.open) {
