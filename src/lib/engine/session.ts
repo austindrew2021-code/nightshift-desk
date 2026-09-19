@@ -864,50 +864,59 @@ function ictTakePartial(s: EngineState, p: Position, exitUsd: number, frac: numb
 export function markIct(s: EngineState, market: MarketSnapshot | null) {
   const books = market?.books ?? [];
   const trailSet = new Set(["asia", "scalp", "silver", "judas", "amd", "daily", "sweep"]);
-  for (const p of s.open) {
+  for (const p of [...s.open]) {
     if (p.origin !== "ict") continue;
+    if (!s.open.some((x) => x.id === p.id)) continue;
     const b = books.find((x) => x.symbol === p.symbol || x.id === p.symbol);
     const last = b?.last || b?.candles15[b.candles15.length - 1]?.c;
     if (!last) continue;
     const series = (b?.candles5 && b.candles5.length > 8 ? b.candles5 : b?.candles15) ?? [];
     const c = series[series.length - 1];
     const opened = p.openedAt || 0;
-    let hi = last;
-    let lo = last;
-    for (const bar of series) {
-      if (opened && bar.t < opened) continue;
-      hi = Math.max(hi, bar.h);
-      lo = Math.min(lo, bar.l);
-    }
-    if (c) {
-      hi = Math.max(hi, c.h, last);
-      lo = Math.min(lo, c.l, last);
-    }
+    const dt = series.length > 1 ? Math.max(60_000, series[1]!.t - series[0]!.t) : 5 * 60_000;
+    const path = series.filter((bar) => !opened || bar.t + dt > opened);
     const risk = Math.max(1e-9, p.entryUsd * p.stopPct);
     let stopPx = p.stopUsd ?? (p.side === "long" ? p.entryUsd - risk : p.entryUsd + risk);
     let tgtPx =
       p.targetUsd ??
       (p.side === "long" ? p.entryUsd + risk * p.targetR : p.entryUsd - risk * p.targetR);
-    if (trailSet.has(p.setup)) {
-      const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
-      const hour = nyHour(c?.t ?? Date.now());
-      if (p.setup === "asia" && hour >= 2 && hour < 7 && mfe < risk) {
+    const trail = trailSet.has(p.setup);
+    let dead = false;
+    const bars = path.length ? path : c ? [c] : [];
+    for (let i = 0; i < bars.length; i++) {
+      const bar = bars[i]!;
+      const live = i === bars.length - 1 && last > 0 && Math.abs(last / Math.max(1e-9, bar.c) - 1) < 0.02;
+      const hi = live ? Math.max(bar.h, last) : bar.h;
+      const lo = live ? Math.min(bar.l, last) : bar.l;
+      if (p.side === "long" && lo <= stopPx) {
         s.open = s.open.filter((x) => x.id !== p.id);
-        closePos(s, p, last, "time");
-        continue;
+        closePos(s, p, stopPx, stopPx >= p.entryUsd ? "target" : "stop");
+        dead = true;
+        break;
       }
-      if (mfe >= risk * 0.75 && !p.partialed) {
-        const px = p.side === "long" ? p.entryUsd + risk * 0.75 : p.entryUsd - risk * 0.75;
-        const run = (p.side === "long" && finite(b?.change24h) >= 0.12) || (p.side === "short" && finite(b?.change24h) <= -0.12);
-        ictTakePartial(s, p, px, run ? 0.25 : 0.75);
-        stopPx = p.entryUsd;
-        tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
-        p.stopUsd = stopPx;
-        p.targetUsd = tgtPx;
-        p.targetR = 5;
-        p.note = `${p.note} · runner${run ? " · keep ¾ (24h run)" : ""}`;
+      if (p.side === "short" && hi >= stopPx) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, stopPx, stopPx <= p.entryUsd ? "target" : "stop");
+        dead = true;
+        break;
       }
-      if (p.partialed) {
+      if (trail && !p.partialed) {
+        const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
+        if (mfe >= risk * 0.75) {
+          const px = p.side === "long" ? p.entryUsd + risk * 0.75 : p.entryUsd - risk * 0.75;
+          const run = (p.side === "long" && finite(b?.change24h) >= 0.12) || (p.side === "short" && finite(b?.change24h) <= -0.12);
+          ictTakePartial(s, p, px, run ? 0.25 : 0.75);
+          stopPx = p.entryUsd;
+          tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
+          p.stopUsd = stopPx;
+          p.targetUsd = tgtPx;
+          p.targetR = 5;
+          p.note = `${p.note} · runner${run ? " · keep ¾ (24h run)" : ""}`;
+          continue;
+        }
+      }
+      if (trail && p.partialed) {
+        const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
         const wave = isWaveRide(p.side, mfe, risk, finite(b?.change24h));
         const lock = lockRFromMfe(mfe, risk, wave);
         if (lock >= 0) {
@@ -919,41 +928,33 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         p.stopUsd = stopPx;
         p.targetUsd = tgtPx;
         p.targetR = far;
-        if (wave && !p.note.includes("wave")) {
-          p.note = `${p.note} · wave 24h · trail`;
-          pushTape(s, {
-            t: Date.now(),
-            kind: "note",
-            symbol: p.symbol,
-            text: `wave ${p.symbol} · 24h ${((b?.change24h ?? 0) * 100).toFixed(0)}% · 5R cap off · trail`,
-            tone: "up",
-          });
-        }
-      } else {
+      } else if (trail && !p.partialed) {
         tgtPx = p.side === "long" ? p.entryUsd + risk : p.entryUsd - risk;
         p.targetUsd = tgtPx;
         p.targetR = 1;
       }
+      if (p.side === "long" && hi >= tgtPx) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, tgtPx, "target");
+        dead = true;
+        break;
+      }
+      if (p.side === "short" && lo <= tgtPx) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, tgtPx, "target");
+        dead = true;
+        break;
+      }
     }
-    if (p.side === "long" && lo <= stopPx) {
-      s.open = s.open.filter((x) => x.id !== p.id);
-      closePos(s, p, stopPx, stopPx >= p.entryUsd ? "target" : "stop");
-      continue;
-    }
-    if (p.side === "short" && hi >= stopPx) {
-      s.open = s.open.filter((x) => x.id !== p.id);
-      closePos(s, p, stopPx, stopPx <= p.entryUsd ? "target" : "stop");
-      continue;
-    }
-    if (p.side === "long" && hi >= tgtPx) {
-      s.open = s.open.filter((x) => x.id !== p.id);
-      closePos(s, p, tgtPx, "target");
-      continue;
-    }
-    if (p.side === "short" && lo <= tgtPx) {
-      s.open = s.open.filter((x) => x.id !== p.id);
-      closePos(s, p, tgtPx, "target");
-      continue;
+    if (dead) continue;
+    if (trail && p.setup === "asia") {
+      const hour = nyHour(c?.t ?? Date.now());
+      const mfe = p.side === "long" ? last - p.entryUsd : p.entryUsd - last;
+      if (hour >= 2 && hour < 7 && mfe < risk) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, last, "time");
+        continue;
+      }
     }
     s.open = s.open.map((x) => (x.id === p.id ? { ...revalue(s, x, last), stopUsd: stopPx, targetUsd: tgtPx } : x));
   }
