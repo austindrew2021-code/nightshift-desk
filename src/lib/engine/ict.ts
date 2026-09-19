@@ -649,7 +649,8 @@ function aPlus(
   }
   const a = atr(cs, conf.i);
   const stopPad = a * 0.12;
-  const wickStop = raid.side === "long" ? raid.sweepPx - stopPad : raid.sweepPx + stopPad;
+  const ssl = raid.side === "long" ? dL : dH;
+  const wickStop = raid.side === "long" ? ssl - stopPad : ssl + stopPad;
   const cisdStop = raid.side === "long" ? cs[conf.i]!.l - stopPad : cs[conf.i]!.h + stopPad;
   const liq = ictLiqPct(ICT_LEVERAGE);
   const wickPct = Math.abs(entry - wickStop) / Math.max(1e-9, entry);

@@ -871,8 +871,18 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
     if (!last) continue;
     const series = (b?.candles5 && b.candles5.length > 8 ? b.candles5 : b?.candles15) ?? [];
     const c = series[series.length - 1];
-    const hi = c ? Math.max(c.h, last) : last;
-    const lo = c ? Math.min(c.l, last) : last;
+    const opened = p.openedAt || 0;
+    let hi = last;
+    let lo = last;
+    for (const bar of series) {
+      if (opened && bar.t < opened) continue;
+      hi = Math.max(hi, bar.h);
+      lo = Math.min(lo, bar.l);
+    }
+    if (c) {
+      hi = Math.max(hi, c.h, last);
+      lo = Math.min(lo, c.l, last);
+    }
     const risk = Math.max(1e-9, p.entryUsd * p.stopPct);
     let stopPx = p.stopUsd ?? (p.side === "long" ? p.entryUsd - risk : p.entryUsd + risk);
     let tgtPx =
