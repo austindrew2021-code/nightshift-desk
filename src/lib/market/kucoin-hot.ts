@@ -8,26 +8,58 @@ const SKIP = new Set([
 ]);
 const HOT_N = 10;
 
-export async function fetchKucoinLast(id: string): Promise<number> {
+/** Browser (GitHub Pages) cannot read KuCoin REST — no ACAO. OKX + Kraken send CORS. */
+async function fetchBrowserLast(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
   try {
-    const res = await fetch(
-      `https://api-futures.kucoin.com/api/v1/ticker?symbol=${encodeURIComponent(`${id}USDTM`)}`,
-      { headers: { Accept: "application/json" } },
-    );
+    const res = await fetch("https://www.okx.com/api/v5/market/tickers?instType=SWAP", {
+      headers: { Accept: "application/json" },
+    });
     if (res.ok) {
-      const d = (await res.json()) as { data?: { price?: string } };
-      const px = Number(d.data?.price);
-      if (px > 0) return px;
+      const d = (await res.json()) as { data?: { instId?: string; last?: string }[] };
+      for (const t of d.data ?? []) {
+        const id = String(t.instId ?? "");
+        if (!id.endsWith("-USDT-SWAP")) continue;
+        const base = id.slice(0, -"-USDT-SWAP".length);
+        const px = Number(t.last);
+        if (base && px > 0) out[base] = px;
+      }
     }
   } catch {
-    /* fall through */
+    /* okx optional */
   }
-  const all = await fetchKucoinAllLast();
-  return all[id] || 0;
+  try {
+    const res = await fetch("https://api.kraken.com/0/public/Ticker?pair=XMRUSD,DASHUSD,SOLUSD,XBTUSD", {
+      headers: { Accept: "application/json" },
+    });
+    if (res.ok) {
+      const d = (await res.json()) as { result?: Record<string, { c?: string[] }> };
+      const alias: Record<string, string> = {
+        XMRUSD: "XMR",
+        XXMRZUSD: "XMR",
+        DASHUSD: "DASH",
+        SOLUSD: "SOL",
+        XBTUSD: "BTC",
+        XXBTZUSD: "BTC",
+      };
+      for (const [k, v] of Object.entries(d.result ?? {})) {
+        const id = alias[k] ?? "";
+        const px = Number(v.c?.[0]);
+        if (id && px > 0) out[id] = px;
+      }
+    }
+  } catch {
+    /* kraken optional */
+  }
+  return out;
 }
 
-/** One shot: last trade on every USDT-M contract. Phone-safe (futures CORS). */
+/** One shot: last trade on every USDT-M contract. Phone uses OKX (CORS); worker uses KuCoin. */
 export async function fetchKucoinAllLast(): Promise<Record<string, number>> {
+  if (typeof window !== "undefined") {
+    const browser = await fetchBrowserLast();
+    if (Object.keys(browser).length > 5) return browser;
+  }
   try {
     const res = await fetch("https://api-futures.kucoin.com/api/v1/allTickers", {
       headers: { Accept: "application/json", "User-Agent": "NightshiftDesk/hot" },
@@ -46,6 +78,40 @@ export async function fetchKucoinAllLast(): Promise<Record<string, number>> {
   } catch {
     return {};
   }
+}
+
+export async function fetchKucoinLast(id: string): Promise<number> {
+  const all = await fetchKucoinAllLast();
+  if (all[id]! > 0) return all[id]!;
+  if (typeof window !== "undefined") {
+    try {
+      const res = await fetch(
+        `https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(`${id}-USDT-SWAP`)}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (res.ok) {
+        const d = (await res.json()) as { data?: { last?: string }[] };
+        const px = Number(d.data?.[0]?.last);
+        if (px > 0) return px;
+      }
+    } catch {
+      /* */
+    }
+  }
+  try {
+    const res = await fetch(
+      `https://api-futures.kucoin.com/api/v1/ticker?symbol=${encodeURIComponent(`${id}USDTM`)}`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (res.ok) {
+      const d = (await res.json()) as { data?: { price?: string } };
+      const px = Number(d.data?.price);
+      if (px > 0) return px;
+    }
+  } catch {
+    /* */
+  }
+  return 0;
 }
 
 /** Walk the last 5m/15m bar forward so the chart isn't frozen on a 1h-old close. */
