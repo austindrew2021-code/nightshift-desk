@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchDeskSnapshot, fetchIctBooks, fetchMintQuotes } from "@/lib/market/api";
+import { fetchKucoinAllLast } from "@/lib/market/kucoin-hot";
 import { useDesk } from "@/lib/store";
 import { loadEngine } from "@/lib/persist";
 import { fetchCloudLive } from "@/lib/cloud-live";
@@ -9,6 +10,7 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
   const hydrate = useDesk((s) => s.hydrateMarket);
   const hydrateQuotes = useDesk((s) => s.hydrateQuotes);
   const hydrateBooks = useDesk((s) => s.hydrateBooks);
+  const hydrateLast = useDesk((s) => s.hydrateLast);
   const restoreSession = useDesk((s) => s.restoreSession);
   const applyCloud = useDesk((s) => s.applyCloud);
   const persistNow = useDesk((s) => s.persistNow);
@@ -39,8 +41,16 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
   const books = useQuery({
     queryKey: ["ict-books"],
     queryFn: () => fetchIctBooks(),
-    refetchInterval: 8_000,
+    refetchInterval: 20_000,
     refetchIntervalInBackground: true,
+  });
+
+  const lastPx = useQuery({
+    queryKey: ["ict-last"],
+    queryFn: fetchKucoinAllLast,
+    refetchInterval: 2500,
+    refetchIntervalInBackground: true,
+    enabled: mode === "ict",
   });
 
   const cloud = useQuery({
@@ -113,6 +123,10 @@ export function DeskRuntime({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (books.data) hydrateBooks(books.data);
   }, [books.data, hydrateBooks]);
+
+  useEffect(() => {
+    if (lastPx.data && Object.keys(lastPx.data).length) hydrateLast(lastPx.data);
+  }, [lastPx.dataUpdatedAt, lastPx.data, hydrateLast]);
 
   useEffect(() => {
     if (cloud.data?.engine && cloud.data.t) applyCloud(cloud.data.engine, cloud.data.t);

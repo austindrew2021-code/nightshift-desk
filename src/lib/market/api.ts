@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import type { Candle, Launch, MarketSnapshot } from "@/lib/engine/types";
 import { parseKlines } from "@/lib/engine/ict";
 import { estimateUniqueBuyers } from "@/lib/engine/pipeline";
-import { CHART_BARS, ICT_ASSETS, type ChartTape, type IctBook } from "@/lib/engine/universe";
+import { CHART_BARS, ICT_ASSETS, ICT_CORE_IDS, type ChartTape, type IctBook } from "@/lib/engine/universe";
 import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "@/lib/market/kucoin-hot";
 import { CLOUD_LIVE_URL } from "@/lib/cloud-live";
 import fallback from "./fallback-klines.json";
@@ -409,6 +409,30 @@ async function kucoinLast(id: string): Promise<number> {
   }
 }
 
+async function fetchFuturesBook(id: string, name: string): Promise<IctBook> {
+  const inst = `${id}USDTM`;
+  const [m15, m5, h1] = await Promise.all([
+    getJson(`https://api-futures.kucoin.com/api/v1/kline/query?symbol=${encodeURIComponent(inst)}&granularity=15`, 8000),
+    getJson(`https://api-futures.kucoin.com/api/v1/kline/query?symbol=${encodeURIComponent(inst)}&granularity=5`, 8000),
+    getJson(`https://api-futures.kucoin.com/api/v1/kline/query?symbol=${encodeURIComponent(inst)}&granularity=60`, 8000),
+  ]);
+  const c15 = candlesFromFutures(m15);
+  const c5 = candlesFromFutures(m5);
+  const c1 = candlesFromFutures(h1);
+  const last = c5[c5.length - 1]?.c || c15[c15.length - 1]?.c || 0;
+  return {
+    id,
+    symbol: id,
+    name,
+    last,
+    change24h: 0,
+    candles15: c15,
+    candles5: c5,
+    candles1h: c1,
+    source: "kucoin",
+  };
+}
+
 export async function fetchIctBooks(): Promise<IctBook[]> {
   const extra = await fetchKucoinHotAssets();
   const seen = new Set(ICT_ASSETS.map((a) => a.id));
@@ -461,28 +485,40 @@ export async function fetchIctBooks(): Promise<IctBook[]> {
   } catch {
     /* cloud klines optional */
   }
-  const settled = await Promise.allSettled(
-    assets.map((a) =>
-      a.venue === "kucoin"
-        ? fetchKucoinBook(a.instId, a.symbol, a.name, a.id)
-        : fetchOkxBook(a.instId, a.symbol, a.name, a.id),
-    ),
-  );
-  const books: IctBook[] = assets.map((a, i) => {
-    const r = settled[i]!;
-    if (r.status === "fulfilled" && r.value.candles15.length > 10) return r.value;
-    const cloud = cloudBooks.get(a.id);
-    if (cloud && (cloud.candles15.length > 8 || cloud.last > 0)) return cloud;
-    return {
-      id: a.id,
-      symbol: a.symbol,
-      name: a.name,
-      last: 0,
-      change24h: 0,
-      candles15: [],
-      source: "down",
-    };
-  });
+  const onPhone = typeof window !== "undefined";
+  let books: IctBook[];
+  if (onPhone) {
+    const want = new Set<string>([...ICT_CORE_IDS, ...openIds, "XMR", "ONE", "AVA", "OP", "G", "S"]);
+    const scan = assets.filter((a) => want.has(a.id)).slice(0, 20);
+    const got = await Promise.allSettled(scan.map((a) => fetchFuturesBook(a.id, a.name)));
+    const live = new Map<string, IctBook>();
+    scan.forEach((a, i) => {
+      const r = got[i]!;
+      if (r.status === "fulfilled" && r.value.candles5 && r.value.candles5.length > 8) live.set(a.id, r.value);
+    });
+    books = assets.map((a) => {
+      const hit = live.get(a.id);
+      if (hit) return hit;
+      const cloud = cloudBooks.get(a.id);
+      if (cloud && (cloud.candles15.length > 8 || cloud.last > 0)) return cloud;
+      return { id: a.id, symbol: a.symbol, name: a.name, last: 0, change24h: 0, candles15: [], source: "down" };
+    });
+  } else {
+    const settled = await Promise.allSettled(
+      assets.map((a) =>
+        a.venue === "kucoin"
+          ? fetchKucoinBook(a.instId, a.symbol, a.name, a.id)
+          : fetchOkxBook(a.instId, a.symbol, a.name, a.id),
+      ),
+    );
+    books = assets.map((a, i) => {
+      const r = settled[i]!;
+      if (r.status === "fulfilled" && r.value.candles15.length > 10) return r.value;
+      const cloud = cloudBooks.get(a.id);
+      if (cloud && (cloud.candles15.length > 8 || cloud.last > 0)) return cloud;
+      return { id: a.id, symbol: a.symbol, name: a.name, last: 0, change24h: 0, candles15: [], source: "down" };
+    });
+  }
   const livePx = await fetchKucoinAllLast();
   for (const b of books) {
     if (livePx[b.id]! > 0) applyLiveLast(b, livePx[b.id]!);

@@ -15,6 +15,7 @@ import {
 import { buildZostaffPlan } from "@/lib/engine/zostaff";
 import type { IctBook } from "@/lib/engine/universe";
 import { clearEngineSave, saveEngine, writeSavedStart } from "@/lib/persist";
+import { applyLiveLast } from "@/lib/market/kucoin-hot";
 import { cloudIsFresh } from "@/lib/cloud-live";
 
 interface DeskStore {
@@ -29,6 +30,7 @@ interface DeskStore {
   hydrateMarket: (m: MarketSnapshot) => void;
   hydrateQuotes: (q: Record<string, number>) => void;
   hydrateBooks: (books: IctBook[]) => void;
+  hydrateLast: (px: Record<string, number>) => void;
   setIctFilter: (id: string) => void;
   setIctStyle: (id: IctStyle) => void;
   setIctUse5m: (on: boolean) => void;
@@ -97,6 +99,20 @@ export const useDesk = create<DeskStore>((set, get) => ({
         if (!cloudIsFresh(get().cloudAt)) ingestIct(engine, market);
         markIct(engine, market);
       }
+      return { market, engine: { ...engine } };
+    }),
+  hydrateLast: (px) =>
+    set((s) => {
+      if (!s.market?.books?.length) return {};
+      const books = s.market.books.map((b) => {
+        const last = px[b.id];
+        if (!(last > 0)) return b;
+        applyLiveLast(b, last);
+        return b;
+      });
+      const market = { ...s.market, books };
+      const engine = s.engine;
+      if (engine.mode === "ict") markIct(engine, market);
       return { market, engine: { ...engine } };
     }),
   setIctFilter: (id) => {
