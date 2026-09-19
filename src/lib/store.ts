@@ -107,8 +107,15 @@ export const useDesk = create<DeskStore>((set, get) => ({
       const books = s.market.books.map((b) => {
         const last = px[b.id];
         if (!(last > 0)) return b;
-        applyLiveLast(b, last);
-        return b;
+        const next = {
+          ...b,
+          last,
+          candles5: b.candles5?.slice(),
+          candles15: b.candles15?.slice(),
+          candles1h: b.candles1h?.slice(),
+        };
+        applyLiveLast(next, last);
+        return next;
       });
       const market = { ...s.market, books };
       const engine = s.engine;

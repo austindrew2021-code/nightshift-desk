@@ -8,6 +8,24 @@ const SKIP = new Set([
 ]);
 const HOT_N = 10;
 
+export async function fetchKucoinLast(id: string): Promise<number> {
+  try {
+    const res = await fetch(
+      `https://api-futures.kucoin.com/api/v1/ticker?symbol=${encodeURIComponent(`${id}USDTM`)}`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (res.ok) {
+      const d = (await res.json()) as { data?: { price?: string } };
+      const px = Number(d.data?.price);
+      if (px > 0) return px;
+    }
+  } catch {
+    /* fall through */
+  }
+  const all = await fetchKucoinAllLast();
+  return all[id] || 0;
+}
+
 /** One shot: last trade on every USDT-M contract. Phone-safe (futures CORS). */
 export async function fetchKucoinAllLast(): Promise<Record<string, number>> {
   try {

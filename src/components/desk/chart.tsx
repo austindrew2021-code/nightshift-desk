@@ -4,6 +4,7 @@ import { chartLayers, nyHour, type ChartZone } from "@/lib/engine/ict";
 import type { Candle, ClosedTrade, Position } from "@/lib/engine/types";
 import { CHART_BARS, ICT_ASSETS, type IctBook } from "@/lib/engine/universe";
 import { fetchChartKlines } from "@/lib/market/api";
+import { fetchKucoinLast } from "@/lib/market/kucoin-hot";
 import { cn } from "@/lib/utils";
 
 const UP = "#3dff8a";
@@ -216,31 +217,48 @@ export function LiveChart({
     staleTime: 2_000,
     retry: 2,
   });
+  const livePx = useQuery({
+    queryKey: ["chart-last", sym],
+    queryFn: () => fetchKucoinLast(sym),
+    refetchInterval: 1500,
+    refetchIntervalInBackground: true,
+    staleTime: 0,
+  });
   const liveTape = tape.data?.id === sym && tape.data.bar === tf ? tape.data : null;
   const mine = useMemo(() => {
     return orders.filter((o) => o.symbol === (book?.symbol ?? sym) || o.symbol === (book?.id ?? sym));
   }, [orders, book?.symbol, book?.id, sym]);
   const fillPx = mine.reduce((n, o) => n || Number("entryUsd" in o ? o.entryUsd : 0), 0);
-  const refPx = book?.last || fillPx;
+  const paintLast = (livePx.data && livePx.data > 0 ? livePx.data : 0) || book?.last || fillPx;
+  const refPx = paintLast || book?.last || fillPx;
   const tapeOk =
     Boolean(liveTape && liveTape.candles.length > 8) &&
     (!refPx || Math.abs((liveTape!.last || liveTape!.candles.at(-1)!.c) / refPx - 1) < 0.12);
   const bookFirst = tf === "5m" || tf === "15m" || tf === "1H";
-  const candles =
-    bookFirst && bookBars && bookBars.length > 8
-      ? bookBars
-      : tapeOk
-        ? liveTape!.candles
-        : bookBars && bookBars.length > 8
-          ? bookBars
-          : [];
+  const candles = useMemo(() => {
+    const src =
+      bookFirst && bookBars && bookBars.length > 8
+        ? bookBars
+        : tapeOk && liveTape
+          ? liveTape.candles
+          : bookBars && bookBars.length > 8
+            ? bookBars
+            : [];
+    if (!src.length) return [];
+    const out = src.map((c) => ({ ...c }));
+    if (paintLast > 0) {
+      const z = out[out.length - 1]!;
+      out[out.length - 1] = { ...z, c: paintLast, h: Math.max(z.h, paintLast), l: Math.min(z.l, paintLast) };
+    }
+    return out;
+  }, [bookBars, liveTape, tapeOk, bookFirst, paintLast]);
   const nAll = candles.length;
   const visN = Math.max(20, Math.min(span, nAll || 20));
   const visStart = follow ? Math.max(0, nAll - visN) : clamp(start, 0, Math.max(0, nAll - visN));
   const view = nAll ? candles.slice(visStart, visStart + visN) : [];
   const zones = useMemo(() => chartLayers(view.length ? view : candles, []), [view, candles]);
   const stale = book?.source === "fallback" || (!book && (fallback?.length ?? 0) > 0);
-  const lastPx = (bookFirst && book?.last) || (tapeOk ? liveTape?.last : 0) || book?.last || view[view.length - 1]?.c || 0;
+  const lastPx = paintLast || view[view.length - 1]?.c || 0;
 
   useEffect(() => {
     if (follow && nAll > 0) setStart(Math.max(0, nAll - visN));
