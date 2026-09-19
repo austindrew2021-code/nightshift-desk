@@ -251,31 +251,11 @@ export const useDesk = create<DeskStore>((set, get) => ({
     set({ engine, grokNote: null });
   },
   applyCloud: (engine, t) => {
+    if (!cloudIsFresh(t)) return;
     const cur = get().engine;
-    const cloudEq = Number(engine.equityUsd) || 0;
-    const localEq = Number(cur.equityUsd) || 0;
-    const cloudCash = Number(engine.cashUsd) || 0;
-    const localCash = Number(cur.cashUsd) || 0;
-    const richerCloud = cloudEq > localEq + 10 || cloudCash > localCash + 10;
-    const score = (e: EngineState) => {
-      const c = (e.closed ?? []).filter((x) => x.origin === "ict");
-      const o = (e.open ?? []).filter((p) => p.origin === "ict");
-      return {
-        n: c.length,
-        last: Math.max(0, ...c.map((x) => x.closedAt || 0), ...o.map((p) => p.openedAt || 0)),
-        bank: Number(e.bankedUsd) || 0,
-      };
-    };
-    const L = score(cur);
-    const C = score(engine);
-    if (!richerCloud && (L.n > C.n || L.last > C.last + 30_000 || L.bank > C.bank + 0.5)) {
-      if (cloudIsFresh(t)) set({ cloudAt: t });
-      return;
-    }
-    if (!richerCloud && !cloudIsFresh(t)) return;
     const seen = new Set<string>();
     const closed = [];
-    for (const c of [...(cur.closed ?? []), ...(engine.closed ?? [])]) {
+    for (const c of [...(engine.closed ?? []), ...(cur.closed ?? [])]) {
       const k = `${c.id || ""}-${c.symbol}-${c.openedAt}-${c.reason}`;
       if (seen.has(k)) continue;
       if (
@@ -298,9 +278,9 @@ export const useDesk = create<DeskStore>((set, get) => ({
       ...engine,
       open,
       closed: closed.slice(0, 120),
-      cashUsd: Math.max(cloudCash, localCash, Number(engine.cashUsd) || 0),
-      equityUsd: Math.max(cloudEq, localEq, Number(engine.equityUsd) || 0),
-      bankedUsd: Math.max(Number(engine.bankedUsd) || 0, Number(cur.bankedUsd) || 0),
+      cashUsd: Number(engine.cashUsd) || 0,
+      equityUsd: Number(engine.equityUsd) || 0,
+      bankedUsd: Number(engine.bankedUsd) || 0,
       running: true,
       simT: Date.now(),
     };
