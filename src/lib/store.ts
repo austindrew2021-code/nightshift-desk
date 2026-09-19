@@ -252,6 +252,11 @@ export const useDesk = create<DeskStore>((set, get) => ({
   },
   applyCloud: (engine, t) => {
     const cur = get().engine;
+    const cloudEq = Number(engine.equityUsd) || 0;
+    const localEq = Number(cur.equityUsd) || 0;
+    const cloudCash = Number(engine.cashUsd) || 0;
+    const localCash = Number(cur.cashUsd) || 0;
+    const richerCloud = cloudEq > localEq + 10 || cloudCash > localCash + 10;
     const score = (e: EngineState) => {
       const c = (e.closed ?? []).filter((x) => x.origin === "ict");
       const o = (e.open ?? []).filter((p) => p.origin === "ict");
@@ -263,13 +268,11 @@ export const useDesk = create<DeskStore>((set, get) => ({
     };
     const L = score(cur);
     const C = score(engine);
-    if (L.n > C.n || L.last > C.last + 30_000 || L.bank > C.bank + 0.5) {
+    if (!richerCloud && (L.n > C.n || L.last > C.last + 30_000 || L.bank > C.bank + 0.5)) {
       if (cloudIsFresh(t)) set({ cloudAt: t });
       return;
     }
-    const cloudEq = Number(engine.equityUsd) || 0;
-    const localEq = Number(cur.equityUsd) || 0;
-    if (!cloudIsFresh(t) && cloudEq <= localEq + 1) return;
+    if (!richerCloud && !cloudIsFresh(t)) return;
     const seen = new Set<string>();
     const closed = [];
     for (const c of [...(cur.closed ?? []), ...(engine.closed ?? [])]) {
@@ -281,11 +284,9 @@ export const useDesk = create<DeskStore>((set, get) => ({
     closed.sort((a, b) => b.closedAt - a.closedAt);
     const closedKeys = new Set(closed.filter((c) => c.origin === "ict").map((c) => `${c.symbol}-${c.openedAt}`));
     const open = (engine.open ?? []).filter((p) => !closedKeys.has(`${p.symbol}-${p.openedAt}`));
-    set({
-      engine: { ...engine, open, closed: closed.slice(0, 120), running: true, simT: Date.now() },
-      cloudAt: t,
-      grokNote: null,
-    });
+    const next = { ...engine, open, closed: closed.slice(0, 120), running: true, simT: Date.now() };
+    saveEngine(next);
+    set({ engine: next, cloudAt: t, grokNote: null });
   },
   persistNow: () => saveEngine(get().engine),
 }));
