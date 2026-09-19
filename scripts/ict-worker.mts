@@ -202,6 +202,8 @@ async function main() {
     };
   }
   writeFileSync(klinesPath, JSON.stringify({ t: Date.now(), klines }));
+  const lastPath = STATE.replace(/ict-state\.json$/, "ict-last.json");
+  writeFileSync(lastPath, JSON.stringify({ t: Date.now(), src: "kucoin-fut", px: livePx }));
   const open = s.open.filter((p) => p.origin === "ict");
   console.log(
     JSON.stringify({

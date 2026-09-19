@@ -1,23 +1,16 @@
-name: ict-worker
+name: ict-last
 on:
   schedule:
     - cron: "*/5 * * * *"
-    - cron: "2-59/5 * * * *"
+    - cron: "1-59/5 * * * *"
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - scripts/ict-worker.mts
-      - .github/workflows/ict-worker.yml
-      - src/lib/engine/**
-      - src/lib/market/**
 permissions:
   contents: write
 concurrency:
-  group: ict-worker
+  group: ict-last
   cancel-in-progress: true
 jobs:
-  tick:
+  last:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,31 +29,23 @@ jobs:
       - name: install
         working-directory: src-tree
         run: npm ci
-      - name: tick
+      - name: last
         working-directory: src-tree
         env:
-          ICT_STATE_PATH: ${{ github.workspace }}/live-data/ict-state.json
-          ICT_START_USD: "100"
+          ICT_LAST_PATH: ${{ github.workspace }}/live-data/ict-last.json
         run: |
           mkdir -p "${{ github.workspace }}/live-data"
-          npx tsx scripts/ict-worker.mts
-      - name: publish state
+          npx tsx scripts/ict-last.mts
+      - name: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: live-data
         run: |
           git config user.name "nightshift-worker"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ ! -d .git ]; then
-            git init
-            git checkout -B ict-live
-            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          else
-            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-            git checkout -B ict-live
-          fi
-          git add ict-state.json ict-klines.json ict-last.json
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git checkout -B ict-live
+          git add ict-last.json
           if git diff --cached --quiet; then echo "no change"; exit 0; fi
-          git commit -m "ict tick $(date -u +%H:%M)"
+          git commit -m "ict last $(date -u +%H:%M)"
           git push -u origin HEAD:ict-live
-

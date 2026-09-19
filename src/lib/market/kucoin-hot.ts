@@ -1,5 +1,6 @@
 import { ICT_ASSETS, type IctAssetDef, type IctBook } from "@/lib/engine/universe";
 import type { Candle } from "@/lib/engine/types";
+import { CLOUD_LAST_URL } from "@/lib/cloud-live";
 
 const CORE = new Set(ICT_ASSETS.map((a) => a.symbol.toUpperCase()));
 const SKIP = new Set([
@@ -60,11 +61,38 @@ async function fetchBrowserLast(): Promise<Record<string, number>> {
   return out;
 }
 
-/** One shot: last trade on every USDT-M contract. Phone uses OKX (CORS); worker uses KuCoin. */
+async function fetchCloudKucoinLast(): Promise<{ t: number; px: Record<string, number> } | null> {
+  try {
+    const res = await fetch(`${CLOUD_LAST_URL}?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { t?: number; px?: Record<string, number> };
+    if (!j?.t || !j.px) return null;
+    return { t: j.t, px: j.px };
+  } catch {
+    return null;
+  }
+}
+
+function mapFutBase(sym: string): string {
+  const base = sym.endsWith("USDTM") ? sym.slice(0, -5) : "";
+  if (base === "XBT") return "BTC";
+  return base;
+}
+
+/** One shot: last trade on every USDT-M contract. Phone prefers CLOUD (KuCoin). OKX only if it tracks within 30bps. */
 export async function fetchKucoinAllLast(): Promise<Record<string, number>> {
   if (typeof window !== "undefined") {
-    const browser = await fetchBrowserLast();
-    if (Object.keys(browser).length > 5) return browser;
+    const [cloud, ox] = await Promise.all([fetchCloudKucoinLast(), fetchBrowserLast()]);
+    const out: Record<string, number> = { ...(ox || {}) };
+    if (cloud && Date.now() - cloud.t < 15 * 60_000) {
+      for (const [id, px] of Object.entries(cloud.px)) {
+        if (!(px > 0)) continue;
+        const alt = out[id];
+        if (alt > 0 && Math.abs(alt / px - 1) < 0.003) continue;
+        out[id] = px;
+      }
+    }
+    if (Object.keys(out).length > 5) return out;
   }
   try {
     const res = await fetch("https://api-futures.kucoin.com/api/v1/allTickers", {
@@ -74,9 +102,7 @@ export async function fetchKucoinAllLast(): Promise<Record<string, number>> {
     const d = (await res.json()) as { data?: { symbol?: string; price?: string }[] };
     const out: Record<string, number> = {};
     for (const t of d.data ?? []) {
-      const sym = String(t.symbol ?? "");
-      if (!sym.endsWith("USDTM")) continue;
-      const base = sym.slice(0, -5);
+      const base = mapFutBase(String(t.symbol ?? ""));
       const px = Number(t.price);
       if (base && px > 0) out[base] = px;
     }
