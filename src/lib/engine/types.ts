@@ -128,6 +128,7 @@ export interface Position {
   virtualSol?: number;
   realSol?: number;
   partialed?: boolean;
+  markThru?: number;
 }
 
 export interface ClosedTrade {

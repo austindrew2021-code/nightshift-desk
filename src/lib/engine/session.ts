@@ -402,8 +402,13 @@ function closePos(
   } else {
     const dir = p.side === "short" ? -1 : 1;
     pnlUsd = ((exitUsd - p.entryUsd) / Math.max(1e-9, finite(p.entryUsd, 1))) * finite(p.sizeUsd) * dir;
-    if (p.origin === "ict") s.cashUsd = finite(s.cashUsd) + finite(pnlUsd);
-    else s.cashUsd = finite(s.cashUsd) + finite(p.sizeUsd) + finite(pnlUsd);
+    if (p.origin === "ict") {
+      const fee = Math.max(0, finite(p.sizeUsd) * 0.0006);
+      feeUsd += fee;
+      s.stats.feesUsd = finite(s.stats.feesUsd) + fee;
+      pnlUsd -= fee;
+      s.cashUsd = finite(s.cashUsd) + finite(pnlUsd);
+    } else s.cashUsd = finite(s.cashUsd) + finite(p.sizeUsd) + finite(pnlUsd);
   }
   const pnlSol = finite(pnlUsd) / Math.max(1e-6, s.solUsd);
   const rMultiple = finite(pnlUsd) / Math.max(1e-6, finite(p.sizeUsd) * p.stopPct);
@@ -817,7 +822,10 @@ function ictTakePartial(s: EngineState, p: Position, exitUsd: number, frac: numb
   const take = Math.max(0, finite(p.sizeUsd) * frac);
   if (take < 1) return;
   const dir = p.side === "short" ? -1 : 1;
-  const pnlUsd = ((exitUsd - p.entryUsd) / Math.max(1e-9, finite(p.entryUsd, 1))) * take * dir;
+  let pnlUsd = ((exitUsd - p.entryUsd) / Math.max(1e-9, finite(p.entryUsd, 1))) * take * dir;
+  const fee = Math.max(0, take * 0.0006);
+  pnlUsd -= fee;
+  s.stats.feesUsd = finite(s.stats.feesUsd) + fee;
   s.cashUsd = finite(s.cashUsd) + pnlUsd;
   p.sizeUsd = Math.max(0, finite(p.sizeUsd) - take);
   p.sizeSol = p.sizeUsd / Math.max(1e-6, s.solUsd);
@@ -873,8 +881,9 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
     const series = (b?.candles5 && b.candles5.length > 8 ? b.candles5 : b?.candles15) ?? [];
     const c = series[series.length - 1];
     const opened = p.openedAt || 0;
+    const thru = p.markThru || 0;
     const dt = series.length > 1 ? Math.max(60_000, series[1]!.t - series[0]!.t) : 5 * 60_000;
-    const path = series.filter((bar) => !opened || bar.t + dt > opened);
+    const path = series.filter((bar) => (!opened || bar.t + dt > opened) && bar.t > thru);
     const risk = Math.max(1e-9, p.entryUsd * p.stopPct);
     let stopPx = p.stopUsd ?? (p.side === "long" ? p.entryUsd - risk : p.entryUsd + risk);
     let tgtPx =
@@ -912,9 +921,11 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
           p.targetUsd = tgtPx;
           p.targetR = 5;
           p.note = `${p.note} · runner${run ? " · keep ¾ (24h run)" : ""}`;
+          p.markThru = bar.t;
           continue;
         }
       }
+      p.markThru = bar.t;
       if (trail && p.partialed) {
         const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
         const wave = isWaveRide(p.side, mfe, risk, finite(b?.change24h));
@@ -1087,6 +1098,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       }
       const key = `${t.symbol}-${t.side}-${t.openedAt}`;
       if (s.ictSeen.includes(key)) continue;
+      if (s.open.some((p) => p.origin === "ict" && p.symbol === t.symbol)) continue;
       if (fresh.some((f) => f.symbol === t.symbol)) continue;
       if (
         s.closed.some(
@@ -1184,6 +1196,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         ];
         s.stats.taken += 1;
         s.stats.openCount = s.open.length;
+        const openFee = Math.max(0, sizeUsd * 0.0006);
+        s.cashUsd = finite(s.cashUsd) - openFee;
+        s.stats.feesUsd = finite(s.stats.feesUsd) + openFee;
         s.ictSeen = [...s.ictSeen, key];
         pushTape(s, {
           t: s.simT,

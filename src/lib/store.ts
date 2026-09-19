@@ -278,6 +278,16 @@ export const useDesk = create<DeskStore>((set, get) => ({
     for (const c of [...(cur.closed ?? []), ...(engine.closed ?? [])]) {
       const k = `${c.id || ""}-${c.symbol}-${c.openedAt}-${c.reason}`;
       if (seen.has(k)) continue;
+      if (
+        c.origin === "ict" &&
+        closed.some(
+          (x) =>
+            x.origin === "ict" &&
+            x.symbol === c.symbol &&
+            Math.abs((x.openedAt || 0) - (c.openedAt || 0)) < 45 * 60_000,
+        )
+      )
+        continue;
       seen.add(k);
       closed.push(c);
     }
