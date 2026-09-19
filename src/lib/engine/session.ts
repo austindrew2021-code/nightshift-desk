@@ -840,7 +840,7 @@ function ictTakePartial(s: EngineState, p: Position, exitUsd: number, frac: numb
       rMultiple: r,
       reason: "target",
       score: 0.7,
-      note: `${p.note} · ¾ @ 1R`,
+      note: `${p.note} · ¾ @ 0.75R`,
       origin: p.origin,
       stopUsd: p.stopUsd,
       targetUsd: p.targetUsd,
@@ -855,7 +855,7 @@ function ictTakePartial(s: EngineState, p: Position, exitUsd: number, frac: numb
     kind: "close",
     agent: p.agent,
     symbol: p.symbol,
-    text: `¾ @ 1R ${p.symbol} ${pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)} · runner on`,
+    text: `¾ @ 0.75R ${p.symbol} ${pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)} · runner on`,
     tone: "up",
   });
   maybeBank(s);
@@ -896,8 +896,8 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         closePos(s, p, last, "time");
         continue;
       }
-      if (mfe >= risk && !p.partialed) {
-        const px = p.side === "long" ? p.entryUsd + risk : p.entryUsd - risk;
+      if (mfe >= risk * 0.75 && !p.partialed) {
+        const px = p.side === "long" ? p.entryUsd + risk * 0.75 : p.entryUsd - risk * 0.75;
         const run = (p.side === "long" && finite(b?.change24h) >= 0.12) || (p.side === "short" && finite(b?.change24h) <= -0.12);
         ictTakePartial(s, p, px, run ? 0.25 : 0.75);
         stopPx = p.entryUsd;
@@ -1172,7 +1172,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             peakUsd: mark,
             agent: "timing",
             note: trail
-              ? `${t.note} · ¾@1R trail 5R · ${lev}x${liqNote}`
+              ? `${t.note} · ¾@0.75R trail 5R · ${lev}x${liqNote}`
               : `${t.note} · ${lev}x${liqNote}`,
             origin: "ict",
             stopUsd: stopPx,
@@ -1428,7 +1428,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ¾@1R trail 5R${s.ictStyle === "cisd" ? " · no Silver · no 15m · no Playback" : ""}`,
+      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ¾@0.75R trail 5R${s.ictStyle === "cisd" ? " · no Silver · no 15m · no Playback" : ""}`,
       tone: "mute",
     });
   }
