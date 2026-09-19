@@ -62,5 +62,6 @@ jobs:
           git add ict-state.json ict-klines.json ict-last.json
           if git diff --cached --quiet; then echo "no change"; exit 0; fi
           git commit -m "ict tick $(date -u +%H:%M)"
+          git pull --rebase origin ict-live || git pull --rebase --autostash origin ict-live || true
           git push -u origin HEAD:ict-live
 
