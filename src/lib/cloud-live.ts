@@ -9,7 +9,7 @@ export const CLOUD_KLINES_URL =
 export const CLOUD_LAST_URL =
   "https://raw.githubusercontent.com/austindrew2021-code/nightshift-desk/ict-live/ict-last.json";
 
-export const CLOUD_FRESH_MS = 6 * 60_000;
+export const CLOUD_FRESH_MS = 15 * 60_000;
 
 export interface CloudLive {
   t: number;

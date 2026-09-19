@@ -267,7 +267,9 @@ export const useDesk = create<DeskStore>((set, get) => ({
       if (cloudIsFresh(t)) set({ cloudAt: t });
       return;
     }
-    if (!cloudIsFresh(t)) return;
+    const cloudEq = Number(engine.equityUsd) || 0;
+    const localEq = Number(cur.equityUsd) || 0;
+    if (!cloudIsFresh(t) && cloudEq <= localEq + 1) return;
     const seen = new Set<string>();
     const closed = [];
     for (const c of [...(cur.closed ?? []), ...(engine.closed ?? [])]) {
