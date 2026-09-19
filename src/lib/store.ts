@@ -257,13 +257,39 @@ export const useDesk = create<DeskStore>((set, get) => ({
     set({ engine, grokNote: null });
   },
   applyCloud: (engine, t) => {
-    if (!cloudIsFresh(t)) return;
     const cur = get().engine;
-    const closedKeys = new Set(
-      (cur.closed ?? []).filter((c) => c.origin === "ict").map((c) => `${c.symbol}-${c.openedAt}`),
-    );
+    const score = (e: EngineState) => {
+      const c = (e.closed ?? []).filter((x) => x.origin === "ict");
+      const o = (e.open ?? []).filter((p) => p.origin === "ict");
+      return {
+        n: c.length,
+        last: Math.max(0, ...c.map((x) => x.closedAt || 0), ...o.map((p) => p.openedAt || 0)),
+        bank: Number(e.bankedUsd) || 0,
+      };
+    };
+    const L = score(cur);
+    const C = score(engine);
+    if (L.n > C.n || L.last > C.last + 30_000 || L.bank > C.bank + 0.5) {
+      if (cloudIsFresh(t)) set({ cloudAt: t });
+      return;
+    }
+    if (!cloudIsFresh(t)) return;
+    const seen = new Set<string>();
+    const closed = [];
+    for (const c of [...(cur.closed ?? []), ...(engine.closed ?? [])]) {
+      const k = `${c.id || ""}-${c.symbol}-${c.openedAt}-${c.reason}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      closed.push(c);
+    }
+    closed.sort((a, b) => b.closedAt - a.closedAt);
+    const closedKeys = new Set(closed.filter((c) => c.origin === "ict").map((c) => `${c.symbol}-${c.openedAt}`));
     const open = (engine.open ?? []).filter((p) => !closedKeys.has(`${p.symbol}-${p.openedAt}`));
-    set({ engine: { ...engine, open, running: true, simT: Date.now() }, cloudAt: t, grokNote: null });
+    set({
+      engine: { ...engine, open, closed: closed.slice(0, 120), running: true, simT: Date.now() },
+      cloudAt: t,
+      grokNote: null,
+    });
   },
   persistNow: () => saveEngine(get().engine),
 }));

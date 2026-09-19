@@ -8,8 +8,13 @@ const SKIP = new Set([
 ]);
 const HOT_N = 10;
 
+let browserLastCache: { t: number; px: Record<string, number> } = { t: 0, px: {} };
+
 /** Browser (GitHub Pages) cannot read KuCoin REST — no ACAO. OKX + Kraken send CORS. */
 async function fetchBrowserLast(): Promise<Record<string, number>> {
+  if (Date.now() - browserLastCache.t < 2000 && Object.keys(browserLastCache.px).length > 5) {
+    return browserLastCache.px;
+  }
   const out: Record<string, number> = {};
   try {
     const res = await fetch("https://www.okx.com/api/v5/market/tickers?instType=SWAP", {
@@ -51,6 +56,7 @@ async function fetchBrowserLast(): Promise<Record<string, number>> {
   } catch {
     /* kraken optional */
   }
+  if (Object.keys(out).length > 5) browserLastCache = { t: Date.now(), px: out };
   return out;
 }
 
