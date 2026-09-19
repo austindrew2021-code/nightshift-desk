@@ -3,7 +3,7 @@ import type { Candle, Launch, MarketSnapshot } from "@/lib/engine/types";
 import { parseKlines } from "@/lib/engine/ict";
 import { estimateUniqueBuyers } from "@/lib/engine/pipeline";
 import { CHART_BARS, ICT_ASSETS, type ChartTape, type IctBook } from "@/lib/engine/universe";
-import { fetchKucoinHotAssets } from "@/lib/market/kucoin-hot";
+import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "@/lib/market/kucoin-hot";
 import { CLOUD_LIVE_URL } from "@/lib/cloud-live";
 import fallback from "./fallback-klines.json";
 
@@ -122,6 +122,26 @@ function candlesFromKucoin(data: unknown): Candle[] {
       const close = num(row[2]);
       const h = num(row[3]);
       const l = num(row[4]);
+      const v = num(row[5]);
+      return { t: t > 1e12 ? t : t * 1000, o, h, l, c: close, v };
+    })
+    .filter((c): c is Candle => Boolean(c && c.t && c.o));
+  parsed.sort((a, b) => a.t - b.t);
+  return parsed.slice(-200);
+}
+
+function candlesFromFutures(data: unknown): Candle[] {
+  if (!data || typeof data !== "object") return [];
+  const rows = (data as { data?: unknown }).data;
+  if (!Array.isArray(rows)) return [];
+  const parsed = rows
+    .map((row) => {
+      if (!Array.isArray(row)) return null;
+      const t = num(row[0]);
+      const o = num(row[1]);
+      const h = num(row[2]);
+      const l = num(row[3]);
+      const close = num(row[4]);
       const v = num(row[5]);
       return { t: t > 1e12 ? t : t * 1000, o, h, l, c: close, v };
     })
@@ -463,22 +483,9 @@ export async function fetchIctBooks(): Promise<IctBook[]> {
       source: "down",
     };
   });
-  const live = [...new Set(openIds)];
-  if (live.length) {
-    const px = await Promise.all(live.map((id) => kucoinLast(id)));
-    for (let i = 0; i < live.length; i++) {
-      const last = px[i]!;
-      if (!(last > 0)) continue;
-      const b = books.find((x) => x.id === live[i]);
-      if (!b) continue;
-      b.last = last;
-      if (b.candles5?.length) {
-        const z = b.candles5[b.candles5.length - 1]!;
-        z.c = last;
-        z.h = Math.max(z.h, last);
-        z.l = Math.min(z.l, last);
-      }
-    }
+  const livePx = await fetchKucoinAllLast();
+  for (const b of books) {
+    if (livePx[b.id]! > 0) applyLiveLast(b, livePx[b.id]!);
   }
   return books;
 }
@@ -512,7 +519,22 @@ export async function fetchChartKlines(data: { id: string; bar: string }): Promi
         if (tf.foldMs && tf.id !== "8H") cs = foldCandles(cs, tf.foldMs);
         if (cs.length > 8) return { id: asset.id, last: last || cs[cs.length - 1]!.c, candles: stampLast(cs, last), source: "kucoin", bar: tf.id };
       } catch {
-        /* CORS / timeout on the phone */
+        /* CORS / timeout on the phone — futures klines are CORS-ok */
+      }
+      try {
+        const gran: Record<string, number> = { "1m": 1, "5m": 5, "10m": 5, "15m": 15, "30m": 30, "1H": 60, "2H": 60, "4H": 240, "8H": 240 };
+        const g = gran[tf.id] ?? 15;
+        const fut = await getJson(
+          `https://api-futures.kucoin.com/api/v1/kline/query?symbol=${encodeURIComponent(`${asset.id}USDTM`)}&granularity=${g}`,
+          12000,
+        );
+        let cs = candlesFromFutures(fut);
+        if (tf.foldMs) cs = foldCandles(cs, tf.foldMs);
+        const ticks = await fetchKucoinAllLast();
+        const last = ticks[asset.id] || cs[cs.length - 1]?.c || 0;
+        if (cs.length > 8) return { id: asset.id, last, candles: stampLast(cs, last), source: "kucoin", bar: tf.id };
+      } catch {
+        /* fall through */
       }
     }
     const cloud = await klinesFromCloud(data.id, data.bar);

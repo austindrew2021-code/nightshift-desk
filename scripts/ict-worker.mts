@@ -3,7 +3,7 @@
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { ICT_ASSETS, type IctBook } from "../src/lib/engine/universe.ts";
-import { fetchKucoinHotAssets } from "../src/lib/market/kucoin-hot.ts";
+import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "../src/lib/market/kucoin-hot.ts";
 import { createEngine, tick, type EngineState } from "../src/lib/engine/session.ts";
 import type { Candle, MarketSnapshot } from "../src/lib/engine/types.ts";
 
@@ -181,6 +181,12 @@ async function main() {
     books,
     source: "kucoin",
   };
+  const livePx = await fetchKucoinAllLast();
+  for (const b of books) {
+    if (livePx[b.id]! > 0) applyLiveLast(b, livePx[b.id]!);
+  }
+  market.solUsd = livePx.SOL || sol?.last || market.solUsd;
+  market.btcUsd = livePx.BTC || btc?.last || market.btcUsd;
   s.solUsd = market.solUsd;
   tick(s, market);
   writeFileSync(STATE, JSON.stringify(slim(s)));
