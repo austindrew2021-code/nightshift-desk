@@ -79,16 +79,18 @@ function mapFutBase(sym: string): string {
   return base;
 }
 
-/** One shot: last trade on every USDT-M contract. Phone prefers CLOUD (KuCoin). OKX only if it tracks within 30bps. */
+/** Phone: live OKX/Kraken for the chart. KuCoin CLOUD wins on thin names (ONE-class) and when fresh. */
 export async function fetchKucoinAllLast(): Promise<Record<string, number>> {
   if (typeof window !== "undefined") {
     const [cloud, ox] = await Promise.all([fetchCloudKucoinLast(), fetchBrowserLast()]);
     const out: Record<string, number> = { ...(ox || {}) };
-    if (cloud && Date.now() - cloud.t < 15 * 60_000) {
+    if (cloud?.px) {
+      const age = Date.now() - cloud.t;
+      const gate = age < 3 * 60_000 ? 0.003 : 0.02;
       for (const [id, px] of Object.entries(cloud.px)) {
         if (!(px > 0)) continue;
         const alt = out[id];
-        if (alt > 0 && Math.abs(alt / px - 1) < 0.003) continue;
+        if (alt > 0 && Math.abs(alt / px - 1) < gate) continue;
         out[id] = px;
       }
     }
