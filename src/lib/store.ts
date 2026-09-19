@@ -284,7 +284,16 @@ export const useDesk = create<DeskStore>((set, get) => ({
     closed.sort((a, b) => b.closedAt - a.closedAt);
     const closedKeys = new Set(closed.filter((c) => c.origin === "ict").map((c) => `${c.symbol}-${c.openedAt}`));
     const open = (engine.open ?? []).filter((p) => !closedKeys.has(`${p.symbol}-${p.openedAt}`));
-    const next = { ...engine, open, closed: closed.slice(0, 120), running: true, simT: Date.now() };
+    const next = {
+      ...engine,
+      open,
+      closed: closed.slice(0, 120),
+      cashUsd: Math.max(cloudCash, localCash, Number(engine.cashUsd) || 0),
+      equityUsd: Math.max(cloudEq, localEq, Number(engine.equityUsd) || 0),
+      bankedUsd: Math.max(Number(engine.bankedUsd) || 0, Number(cur.bankedUsd) || 0),
+      running: true,
+      simT: Date.now(),
+    };
     saveEngine(next);
     set({ engine: next, cloudAt: t, grokNote: null });
   },

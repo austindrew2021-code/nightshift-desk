@@ -30,7 +30,7 @@ export function saveEngine(engine: EngineState) {
       liveQueue: [],
       heatmap: engine.heatmap.slice(0, 192),
       tape: engine.tape.slice(0, 40),
-      closed: engine.closed.slice(0, 50),
+      closed: engine.closed.slice(0, 120),
       equity: engine.equity.slice(-120),
       ictTrades: engine.ictTrades.slice(0, 80),
       ictSeen: engine.ictSeen.slice(-400),

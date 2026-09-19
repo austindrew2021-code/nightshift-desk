@@ -1325,22 +1325,20 @@ export function applyMarket(s: EngineState, m: MarketSnapshot) {
 }
 
 function repairIctCash(s: EngineState) {
+  if (finite(s.cashUsd) >= 0) return;
   const closedPnl = s.closed
     .filter((t) => t.origin === "ict")
     .reduce((acc, t) => acc + finite(t.pnlUsd), 0);
-  const next = s.startUsd + closedPnl - finite(s.bankedUsd);
-  if (Math.abs(finite(s.cashUsd) - next) < 0.5 && finite(s.cashUsd) >= 0) return;
+  const next = Math.max(0, s.startUsd + closedPnl - finite(s.bankedUsd));
   const was = finite(s.cashUsd);
   s.cashUsd = next;
-  if (was < 0) {
-    pushTape(s, {
-      t: s.simT || Date.now(),
-      kind: "note",
-      symbol: "ICT",
-      text: `ICT cash repaired · was ${was.toFixed(0)} · now $${next.toFixed(0)} · 20x×50% notional, 1R capped 18% · open swings kept`,
-      tone: "warn",
-    });
-  }
+  pushTape(s, {
+    t: s.simT || Date.now(),
+    kind: "note",
+    symbol: "ICT",
+    text: `ICT cash repaired · was ${was.toFixed(0)} · now $${next.toFixed(0)}`,
+    tone: "warn",
+  });
 }
 
 export function tick(s: EngineState, market: MarketSnapshot | null): EngineState {
