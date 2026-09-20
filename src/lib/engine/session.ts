@@ -982,7 +982,13 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         closePos(s, p, last, "time");
         continue;
       }
-      if ((openedH >= 20 || openedH < 2) && hour >= 2 && hour < 7 && !p.partialed && mfeNow < risk * 0.5) {
+      const asiaOpen = openedH >= 20 || openedH < 2;
+      const kzOver =
+        (asiaOpen && hour >= 2 && hour < 7) ||
+        (openedH >= 2 && openedH < 5 && hour >= 5 && hour < 7) ||
+        (openedH >= 7 && openedH < 11 && hour >= 11 && hour < 13.5) ||
+        (openedH >= 13.5 && openedH < 16 && hour >= 16 && hour < 20);
+      if (kzOver && !p.partialed && mfeNow < risk * 0.5) {
         s.open = s.open.filter((x) => x.id !== p.id);
         closePos(s, p, last, "time");
         continue;
