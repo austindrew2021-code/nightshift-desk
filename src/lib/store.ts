@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_START_USD, type DeskMode, type IctStyle, type MarketSnapshot } from "@/lib/engine/types";
+import { DEFAULT_START_USD, MAX_OPEN, type DeskMode, type IctStyle, type MarketSnapshot } from "@/lib/engine/types";
 import {
   applyMarket,
   applyQuotes,
@@ -273,7 +273,15 @@ export const useDesk = create<DeskStore>((set, get) => ({
     }
     closed.sort((a, b) => b.closedAt - a.closedAt);
     const closedKeys = new Set(closed.filter((c) => c.origin === "ict").map((c) => `${c.symbol}-${c.openedAt}`));
-    const open = (engine.open ?? []).filter((p) => !closedKeys.has(`${p.symbol}-${p.openedAt}`));
+    const seenSym = new Set<string>();
+    const open = [];
+    for (const p of [...(engine.open ?? []), ...(cur.open ?? [])]) {
+      if (closedKeys.has(`${p.symbol}-${p.openedAt}`)) continue;
+      if (seenSym.has(p.symbol)) continue;
+      seenSym.add(p.symbol);
+      open.push(p);
+      if (open.length >= MAX_OPEN) break;
+    }
     const next = {
       ...engine,
       open,
