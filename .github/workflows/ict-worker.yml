@@ -20,7 +20,7 @@ concurrency:
 jobs:
   tick:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,19 +38,14 @@ jobs:
       - name: install
         working-directory: src-tree
         run: npm ci
-      - name: tick
-        working-directory: src-tree
+      - name: hunt ~1m for 6 ticks
         env:
           ICT_STATE_PATH: ${{ github.workspace }}/live-data/ict-state.json
           ICT_START_USD: "100"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p "${{ github.workspace }}/live-data"
-          npx tsx scripts/ict-worker.mts
-      - name: publish state
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        working-directory: live-data
-        run: |
+          cd "${{ github.workspace }}/live-data"
           git config user.name "nightshift-worker"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [ ! -d .git ]; then
@@ -61,8 +56,17 @@ jobs:
             git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             git checkout -B ict-live
           fi
-          git add ict-state.json ict-klines.json ict-last.json
-          if git diff --cached --quiet; then echo "no change"; exit 0; fi
-          git commit -m "ict tick $(date -u +%H:%M)"
-          git pull --rebase origin ict-live || git pull --rebase --autostash origin ict-live || true
-          git push -u origin HEAD:ict-live
+          cd "${{ github.workspace }}/src-tree"
+          for i in 1 2 3 4 5 6; do
+            echo "tick $i"
+            npx tsx scripts/ict-worker.mts || true
+            cd "${{ github.workspace }}/live-data"
+            git add ict-state.json ict-klines.json ict-last.json || true
+            if ! git diff --cached --quiet; then
+              git commit -m "ict tick $(date -u +%H:%M:%S) #$i"
+              git pull --rebase origin ict-live || git pull --rebase --autostash origin ict-live || true
+              git push -u origin HEAD:ict-live || true
+            fi
+            cd "${{ github.workspace }}/src-tree"
+            if [ "$i" -lt 6 ]; then sleep 45; fi
+          done
