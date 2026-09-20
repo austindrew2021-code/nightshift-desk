@@ -321,8 +321,8 @@ export function Desk() {
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               {cloudIsFresh(cloudAt)
-                ? `CLOUD worker · last tick ${Math.max(0, Math.round((Date.now() - cloudAt) / 60000))}m ago · GitHub cron is jumpy · after 6m this phone scans (KEEP ALIVE on)`
-                : "KEEP ALIVE · tap once, leave the green mini player on — CLOUD is stale, this phone is the scanner until the worker ticks"}
+                ? `CLOUD worker · last tick ${Math.max(0, Math.round((Date.now() - cloudAt) / 60000))}m ago · phone can sleep (DoorDash/Uber OK)`
+                : "CLOUD worker late · GitHub cron is jumpy · phone does not hunt — wait for the next tick, don't Reset"}
             </p>
             <p className={cn("mt-1 font-mono text-[11px] tabular", engine.ictRegime === "expand" ? "text-phosphor" : "text-subtle")}>
               {engine.ictRegime ?? "chop"} · {engine.ictRegimeNote || "A+ CISD still live"}{engine.ictRegime === "expand" ? " · full raid book" : " · A+ CISD only (like the SOL scalp)"}
@@ -352,7 +352,7 @@ export function Desk() {
           {grokNote ?? `Grok calls ${engine.stats.grokCalls}/8 · user-initiated, capped.`}
         </p>
         <p className="ml-auto max-w-xl text-right font-sans text-[11px] text-subtle">
-          Paper desk. Book saves on this phone — swipe-off pauses ticks, reopen restores. Live paper / ICT are mechanical. Zostaff run is the published 80× replay. No wallet.
+          Paper desk. CLOUD hunts on GitHub every ~5m — this phone is a viewer. Sleep, DoorDash, Uber: leave it. Don't Reset. No wallet.
         </p>
       </div>
 

@@ -2,7 +2,8 @@ name: ict-worker
 on:
   schedule:
     - cron: "*/5 * * * *"
-    - cron: "2-59/5 * * * *"
+    - cron: "1-59/5 * * * *"
+    - cron: "3-59/5 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -15,10 +16,11 @@ permissions:
   contents: write
 concurrency:
   group: ict-worker
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   tick:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,4 +66,3 @@ jobs:
           git commit -m "ict tick $(date -u +%H:%M)"
           git pull --rebase origin ict-live || git pull --rebase --autostash origin ict-live || true
           git push -u origin HEAD:ict-live
-

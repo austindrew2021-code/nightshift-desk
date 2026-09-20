@@ -12,7 +12,7 @@ export function KeepAliveChip() {
     if (!v) return;
     const left = () => {
       setOn(false);
-      setNote("mini player closed · tap KEEP ALIVE before YouTube");
+      setNote("mini player closed · optional — CLOUD still hunts");
     };
     v.addEventListener("leavepictureinpicture", left);
     return () => v.removeEventListener("leavepictureinpicture", left);
@@ -39,7 +39,7 @@ export function KeepAliveChip() {
 
   useEffect(() => {
     if (!wantsKeepAlive()) return;
-    setNote("tap KEEP ALIVE once · then YouTube");
+    setNote("optional · CLOUD hunts while the phone sleeps");
   }, []);
 
   return (
