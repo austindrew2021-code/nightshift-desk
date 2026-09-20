@@ -1206,6 +1206,19 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         }
         if (clamped.capped) continue;
         if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
+        const cs5 = b.candles5 || [];
+        const si = cs5.findIndex((c) => Math.abs(c.t - t.openedAt) < 4 * 60_000);
+        if (si >= 0) {
+          const cisdC = cs5[si]!;
+          let failed = false;
+          for (let k = si + 1; k <= Math.min(cs5.length - 1, si + 2); k++) {
+            const n = cs5[k]!;
+            if (n.t >= t.openedAt) break;
+            if (t.side === "long" && n.c < cisdC.c) failed = true;
+            if (t.side === "short" && n.c > cisdC.c) failed = true;
+          }
+          if (failed) continue;
+        }
         const ch = finite(b.change24h);
         if (t.side === "long" && ch <= -0.08) continue;
         if (t.side === "long" && t.note.includes("Panic") && ch >= 0.08) continue;
