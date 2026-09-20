@@ -301,6 +301,9 @@ export function levForStop(stopPct: number, pref = ICT_LEVERAGE): number {
 }
 export const BANK_EVERY_USD = 200;
 export const BANK_RATE = 0.25;
+/** Once equity ≥ this, vault 50% of lifetime profit. 18% 1R stays on the tradable remainder. */
+export const SCALE_USD = 600;
+export const SCALE_BANK = 0.5;
 export const ICT_DAILY_LOSS_PCT = 0.22;
 
 /** @deprecated use DEFAULT_START_USD — kept so older imports keep compiling */

@@ -8,6 +8,8 @@ import {
   ICT_HARD_RISK_PCT,
   BANK_EVERY_USD,
   BANK_RATE,
+  SCALE_USD,
+  SCALE_BANK,
   clampStopToLiq,
   ictLiqPct,
   levForStop,
@@ -179,9 +181,15 @@ function ictDayNet(s: EngineState, now = Date.now()): number {
 
 function maybeBank(s: EngineState) {
   if (s.mode !== "ict") return;
-  const lifetime = finite(s.equityUsd) - s.startUsd;
-  if (lifetime < BANK_EVERY_USD) return;
-  const targetVault = Math.floor(lifetime / BANK_EVERY_USD) * (BANK_EVERY_USD * BANK_RATE);
+  const eq = finite(s.equityUsd);
+  const lifetime = eq - s.startUsd;
+  if (lifetime < BANK_EVERY_USD && eq < SCALE_USD) return;
+  let targetVault = lifetime >= BANK_EVERY_USD ? Math.floor(lifetime / BANK_EVERY_USD) * (BANK_EVERY_USD * BANK_RATE) : 0;
+  let scale = false;
+  if (eq >= SCALE_USD) {
+    targetVault = Math.max(targetVault, lifetime * SCALE_BANK);
+    scale = true;
+  }
   const take = targetVault - finite(s.bankedUsd);
   if (take < 1) return;
   const room = Math.max(0, finite(s.cashUsd) - s.startUsd * 0.25);
@@ -189,11 +197,14 @@ function maybeBank(s: EngineState) {
   if (moved < 1) return;
   s.bankedUsd = finite(s.bankedUsd) + moved;
   s.cashUsd = finite(s.cashUsd) - moved;
+  const trade = finite(s.equityUsd) - s.bankedUsd;
   pushTape(s, {
     t: s.simT || Date.now(),
     kind: "note",
     symbol: "BANK",
-    text: `banked ${moved.toFixed(0)} · 25% of +$${BANK_EVERY_USD} after first $${BANK_EVERY_USD} · vault $${s.bankedUsd.toFixed(0)} · trade $${(finite(s.equityUsd) - s.bankedUsd).toFixed(0)}`,
+    text: scale
+      ? `scale $${SCALE_USD} · vault ${(SCALE_BANK * 100).toFixed(0)}% of profit · banked ${moved.toFixed(0)} · vault $${s.bankedUsd.toFixed(0)} · trade $${trade.toFixed(0)} · 18% 1R on tradable`
+      : `banked ${moved.toFixed(0)} · 25% of +$${BANK_EVERY_USD} after first $${BANK_EVERY_USD} · vault $${s.bankedUsd.toFixed(0)} · trade $${trade.toFixed(0)}`,
     tone: "up",
   });
 }
