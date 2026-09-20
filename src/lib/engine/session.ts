@@ -1055,10 +1055,12 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const now = Date.now();
   const liveFromOpen = now - 12 * 60_000;
   const liveFromClosed = now - 15 * 60_000;
-  const cap = s.startUsd * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT);
+  const capBase = Math.max(s.startUsd, finite(s.equityUsd), finite(s.cashUsd) + finite(s.bankedUsd));
+  const cap = capBase * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT);
   const dayNet = s.mode === "ict" ? ictDayNet(s, now) : -finite(s.dayLoss);
   if (dayNet <= -cap) {
-    if (s.tickN % 120 === 1) {
+    const lastHalt = s.tape.find((t) => t.text?.startsWith("daily halt"));
+    if (!lastHalt || now - lastHalt.t > 4 * 3600_000) {
       pushTape(s, {
         t: now,
         kind: "note",
