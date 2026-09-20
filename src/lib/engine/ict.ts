@@ -1062,6 +1062,8 @@ export function scan5mCisd(cs: Candle[]): IctSignal[] {
     if (!raid || i - raid.sweepI > 8) continue;
     const sig = aPlus(cs, fvgs, obs, sw, raid, "scalp", "5m CISD · FVG", 2, 0.06, true);
     if (!sig) continue;
+    // Judas 7–10 NY: 5m BSL shorts are the fake open. London / PM shorts stay (BR).
+    if (sig.side === "short" && nyHour(c.t) >= 7 && nyHour(c.t) < 10) continue;
     if (out.some((x) => Math.abs(x.i - sig.i) < 6 && x.side === sig.side)) continue;
     out.push(sig);
   }
