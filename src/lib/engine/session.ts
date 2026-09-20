@@ -965,6 +965,29 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       }
     }
     if (dead) continue;
+    const heldMs = Date.now() - (p.openedAt || 0);
+    const hour = nyHour(c?.t ?? Date.now());
+    const openedH = nyHour(p.openedAt || Date.now());
+    const mfeNow = p.side === "long" ? last - p.entryUsd : p.entryUsd - last;
+    const scalp = p.setup === "scalp" || p.setup === "sweep" || p.setup === "judas" || p.setup === "amd";
+    if (scalp) {
+      const wave = isWaveRide(p.side, Math.max(0, mfeNow), risk, finite(b?.change24h));
+      if (!p.partialed && heldMs > 2 * 3600_000) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, last, "time");
+        continue;
+      }
+      if (p.partialed && heldMs > 4 * 3600_000 && !wave) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, last, "time");
+        continue;
+      }
+      if ((openedH >= 20 || openedH < 2) && hour >= 2 && hour < 7 && !p.partialed && mfeNow < risk * 0.5) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, last, "time");
+        continue;
+      }
+    }
     if (trail && p.setup === "asia") {
       const hour = nyHour(c?.t ?? Date.now());
       const mfe = p.side === "long" ? last - p.entryUsd : p.entryUsd - last;
@@ -981,6 +1004,17 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
 
 function reasonLabel(r: ClosedTrade["reason"]) {
   return r;
+}
+
+/** Last ~40m volume vs the hour before. SUI/ONE ghosts and thin Asia prints dry up before they dump. */
+function volDried(cs?: { v: number }[]) {
+  if (!cs || cs.length < 36) return false;
+  const recent = cs.slice(-9, -1);
+  const base = cs.slice(-33, -9);
+  const avg = (xs: { v: number }[]) => xs.reduce((n, x) => n + (x.v || 0), 0) / Math.max(1, xs.length);
+  const r = avg(recent);
+  const b = avg(base);
+  return b > 0 && r < b * 0.28;
 }
 
 export function ingestIct(s: EngineState, market: MarketSnapshot) {
@@ -1003,8 +1037,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const eth = books.find((b) => b.id === "ETH");
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
-  const liveFromOpen = now - 50 * 60_000;
-  const liveFromClosed = now - 45 * 60_000;
+  const liveFromOpen = now - 12 * 60_000;
+  const liveFromClosed = now - 15 * 60_000;
   const cap = s.startUsd * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT);
   const dayNet = s.mode === "ict" ? ictDayNet(s, now) : -finite(s.dayLoss);
   if (dayNet <= -cap) {
@@ -1123,6 +1157,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         ? bodies.reduce((a, c) => a + c.c, 0) / bodies.length
         : b.last || t.entryUsd;
       if (mid > 0 && Math.abs(t.entryUsd / mid - 1) > 0.02) continue;
+      if (stillOpen && volDried(b.candles5)) continue;
       const cooled = s.closed.some(
         (c) =>
           c.origin === "ict" &&
