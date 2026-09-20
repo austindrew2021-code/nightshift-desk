@@ -1111,6 +1111,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         continue;
       if (MEME.has(t.symbol) && !t.note.includes("OTE")) continue;
       if (!ICT_ASSETS.some((a) => a.id === t.symbol) && !t.note.includes("OTE")) continue;
+      const bodies = (b.candles5 || b.candles15 || []).slice(-5, -1);
+      const mid = bodies.length
+        ? bodies.reduce((a, c) => a + c.c, 0) / bodies.length
+        : b.last || t.entryUsd;
+      if (mid > 0 && Math.abs(t.entryUsd / mid - 1) > 0.02) continue;
       const cooled = s.closed.some(
         (c) =>
           c.origin === "ict" &&
@@ -1205,7 +1210,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           kind: "open",
           agent: "timing",
           symbol: t.symbol,
-          text: `live ${t.side} ${t.symbol} @ ${t.entryUsd.toFixed(t.entryUsd < 2 ? 5 : 2)} · LIQ ${clamped.liq.toFixed(t.entryUsd < 2 ? 5 : 2)} (${liqPct}%)${clamped.capped ? " · SL capped" : " · SL inside"} · ${t.note}`,
+          text: `live ${t.side} ${t.symbol} @ ${t.entryUsd.toFixed(t.entryUsd < 0.01 ? 8 : t.entryUsd < 2 ? 5 : 2)} · LIQ ${clamped.liq.toFixed(t.entryUsd < 0.01 ? 8 : t.entryUsd < 2 ? 5 : 2)} (${liqPct}%)${clamped.capped ? " · SL capped" : " · SL inside"} · ${t.note}`,
           tone: "up",
         });
         added += 1;

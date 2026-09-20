@@ -148,7 +148,9 @@ export async function fetchKucoinLast(id: string): Promise<number> {
   return 0;
 }
 
-/** Walk the last 5m/15m bar forward so the chart isn't frozen on a 1h-old close. */
+/** Walk the last 5m/15m bar forward so the chart isn't frozen on a 1h-old close.
+ *  Never invent a sweep: a stale LAST 6% off the body (ONE @ 0.00333 vs 0.00370) used to
+ *  pull the wick and become a ghost fill. */
 export function applyLiveLast(b: IctBook, last: number, now = Date.now()) {
   if (!(last > 0)) return;
   b.last = last;
@@ -156,11 +158,17 @@ export function applyLiveLast(b: IctBook, last: number, now = Date.now()) {
     if (!bars?.length) return;
     const bucket = Math.floor(now / ms) * ms;
     const z = bars[bars.length - 1]!;
+    const away = Math.abs(last / Math.max(1e-12, z.c) - 1);
     if (z.t === bucket) {
+      if (away > 0.015) {
+        z.c = Math.min(z.h, Math.max(z.l, last));
+        return;
+      }
       z.c = last;
       z.h = Math.max(z.h, last);
       z.l = Math.min(z.l, last);
     } else if (bucket > z.t) {
+      if (away > 0.02) return;
       bars.push({ t: bucket, o: z.c, h: Math.max(z.c, last), l: Math.min(z.c, last), c: last, v: 0 });
       if (bars.length > 200) bars.splice(0, bars.length - 200);
     }
