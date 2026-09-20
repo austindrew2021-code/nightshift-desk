@@ -1,0 +1,17 @@
+[Unit]
+Description=NIGHTSHIFT ICT hunter (KuCoin paper / live later)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nightshift
+WorkingDirectory=/home/nightshift/desk
+EnvironmentFile=/home/nightshift/desk/.env
+ExecStart=/usr/bin/npx tsx scripts/ict-daemon.mts
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target
