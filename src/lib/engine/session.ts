@@ -891,7 +891,14 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       (p.side === "long" ? p.entryUsd + risk * p.targetR : p.entryUsd - risk * p.targetR);
     const trail = trailSet.has(p.setup);
     let dead = false;
-    const bars = path.length ? path : c ? [c] : [];
+    // Empty path must NOT replay the ¾ bar (fallback [c] was closing the ¼ at BE the next tick).
+    const bars = path.length ? path : !thru && c ? [c] : [];
+    if (!bars.length) {
+      p.markUsd = last;
+      p.pnlUsd =
+        ((last - p.entryUsd) / Math.max(1e-9, p.entryUsd)) * finite(p.sizeUsd) * (p.side === "long" ? 1 : -1);
+      continue;
+    }
     for (let i = 0; i < bars.length; i++) {
       const bar = bars[i]!;
       const live = i === bars.length - 1 && last > 0 && Math.abs(last / Math.max(1e-9, bar.c) - 1) < 0.02;
