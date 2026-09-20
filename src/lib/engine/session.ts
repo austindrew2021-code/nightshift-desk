@@ -993,6 +993,16 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         closePos(s, p, last, "time");
         continue;
       }
+      if (p.partialed && !wave && b?.candles5 && b.candles5.length >= 80) {
+        const flip = scan5mCisd(b.candles5).find(
+          (x) => x.side !== p.side && x.t >= (p.openedAt || 0) && Date.now() - x.t <= 12 * 60_000,
+        );
+        if (flip) {
+          s.open = s.open.filter((x) => x.id !== p.id);
+          closePos(s, p, last, "time");
+          continue;
+        }
+      }
     }
     if (trail && p.setup === "asia") {
       const hour = nyHour(c?.t ?? Date.now());
