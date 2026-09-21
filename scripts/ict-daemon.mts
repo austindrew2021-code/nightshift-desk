@@ -28,7 +28,7 @@ async function pushLive() {
   const add = await run("git", ["add", "ict-state.json", "ict-klines.json", "ict-last.json"], liveDir);
   if (add !== 0) return;
   await run("git", ["-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "-c", "user.name=nightshift-vps", "commit", "-m", `vps tick ${new Date().toISOString().slice(11, 19)}Z`], liveDir);
-  await run("git", ["push", "--force-with-lease", "origin", "HEAD:ict-live"], liveDir);
+  await run("git", ["push", "--force", "origin", "HEAD:ict-live"], liveDir);
 }
 
 async function main() {
