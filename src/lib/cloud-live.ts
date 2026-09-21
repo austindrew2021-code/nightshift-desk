@@ -17,14 +17,15 @@ export interface CloudLive {
 }
 
 export async function fetchLiveJson<T>(file: string): Promise<T | null> {
-  const urls = [`${TOKYO_ORIGIN}/${file}`, `${GH_LIVE_ORIGIN}/${file}`];
+  const bust = `t=${Date.now()}`;
+  const urls = [`${TOKYO_ORIGIN}/${file}?${bust}`, `${GH_LIVE_ORIGIN}/${file}?${bust}`];
   for (const u of urls) {
     try {
-      const res = await fetch(`${u}?t=${Date.now()}`, { cache: "no-store" });
+      const res = await fetch(u, { cache: "no-store", signal: AbortSignal.timeout(2500) });
       if (!res.ok) continue;
       return (await res.json()) as T;
     } catch {
-      /* try next origin */
+      /* dead tunnel must not hang the phone on GitHub */
     }
   }
   return null;
