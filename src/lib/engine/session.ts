@@ -1020,6 +1020,28 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       });
       continue;
     }
+    // JASMY/HBAR class: CISD never engages. Two closed 5m against, no 0.35R MFE → scratch, don't wait for −1R.
+    if (!p.partialed && peakMfe < risk * 0.35 && series.length > 4) {
+      const closed = series.filter((bar) => bar.t > opened + 30_000).slice(0, -1);
+      if (closed.length >= 2) {
+        const lastTwo = closed.slice(-2);
+        const against = lastTwo.every((bar) =>
+          p.side === "long" ? bar.c < p.entryUsd : bar.c > p.entryUsd,
+        );
+        if (against) {
+          s.open = s.open.filter((x) => x.id !== p.id);
+          closePos(s, p, last, "time");
+          pushTape(s, {
+            t: Date.now(),
+            kind: "note",
+            symbol: p.symbol,
+            text: `dead CISD ${p.symbol} · 2 bars against · never ${(0.35).toFixed(2)}R · scratch`,
+            tone: "warn",
+          });
+          continue;
+        }
+      }
+    }
     const scalp = p.setup === "scalp" || p.setup === "sweep" || p.setup === "judas" || p.setup === "amd";
     if (scalp) {
       const wave = isWaveRide(p.side, Math.max(0, lastMfe), risk, finite(b?.change24h));
