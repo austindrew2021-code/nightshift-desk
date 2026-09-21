@@ -1,13 +1,13 @@
 import type { EngineState } from "@/lib/engine/session";
 
-/** Tokyo Lightsail HTTPS (sslip.io). GitHub raw is a 5m-cache fallback. */
-export const TOKYO_ORIGIN = "https://54-95-202-110.sslip.io";
+export const TOKYO_ORIGIN = "https://development-suspension-brad-demo.trycloudflare.com";
 export const GH_LIVE_ORIGIN =
   "https://raw.githubusercontent.com/austindrew2021-code/nightshift-desk/ict-live";
 
 export const CLOUD_LIVE_URL = `${TOKYO_ORIGIN}/ict-state.json`;
 export const CLOUD_KLINES_URL = `${TOKYO_ORIGIN}/ict-klines.json`;
 export const CLOUD_LAST_URL = `${TOKYO_ORIGIN}/ict-last.json`;
+
 
 export const CLOUD_FRESH_MS = 15 * 60_000;
 
