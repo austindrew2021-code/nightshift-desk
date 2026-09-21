@@ -6,6 +6,7 @@ import {
   ICT_MARGIN_PCT,
   ICT_MAX_RISK_PCT,
   ICT_HARD_RISK_PCT,
+  ICT_PARTIAL_R,
   BANK_EVERY_USD,
   BANK_RATE,
   SCALE_USD,
@@ -870,7 +871,7 @@ function ictTakePartial(s: EngineState, p: Position, exitUsd: number, frac: numb
       rMultiple: r,
       reason: "target",
       score: 0.7,
-      note: `${p.note} · ¾ @ 0.75R`,
+      note: `${p.note} · ¾ @ ${ICT_PARTIAL_R}R`,
       origin: p.origin,
       stopUsd: p.stopUsd,
       targetUsd: p.targetUsd,
@@ -885,7 +886,7 @@ function ictTakePartial(s: EngineState, p: Position, exitUsd: number, frac: numb
     kind: "close",
     agent: p.agent,
     symbol: p.symbol,
-    text: `¾ @ 0.75R ${p.symbol} ${pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)} · runner on`,
+    text: `¾ @ ${ICT_PARTIAL_R}R ${p.symbol} ${pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)} · runner on`,
     tone: "up",
   });
   maybeBank(s);
@@ -926,11 +927,11 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       const live = i === bars.length - 1 && last > 0 && Math.abs(last / Math.max(1e-9, bar.c) - 1) < 0.02;
       const hi = live ? Math.max(bar.h, last) : bar.h;
       const lo = live ? Math.min(bar.l, last) : bar.l;
-      // ONE/SUI/ENA/FIL: same 5m bar tagged 0.75R and the SL. Bank ¾ + BE first or we record −1R.
+      // INJ/ZEC class: wick 0.50–0.70R then death. Bank ¾ at 0.50R + BE before SL.
       if (trail && !p.partialed) {
         const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
-        if (mfe >= risk * 0.75) {
-          const px = p.side === "long" ? p.entryUsd + risk * 0.75 : p.entryUsd - risk * 0.75;
+        if (mfe >= risk * ICT_PARTIAL_R) {
+          const px = p.side === "long" ? p.entryUsd + risk * ICT_PARTIAL_R : p.entryUsd - risk * ICT_PARTIAL_R;
           const run = (p.side === "long" && finite(b?.change24h) >= 0.12) || (p.side === "short" && finite(b?.change24h) <= -0.12);
           ictTakePartial(s, p, px, run ? 0.25 : 0.75);
           stopPx = p.entryUsd;
@@ -996,8 +997,8 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         : Math.max(finite(p.peakUsd, last), last);
     p.peakUsd = peakPx;
     const peakMfe = p.side === "long" ? peakPx - p.entryUsd : p.entryUsd - peakPx;
-    if (trail && !p.partialed && lastMfe >= risk * 0.75) {
-      const px = p.side === "long" ? p.entryUsd + risk * 0.75 : p.entryUsd - risk * 0.75;
+    if (trail && !p.partialed && lastMfe >= risk * ICT_PARTIAL_R) {
+      const px = p.side === "long" ? p.entryUsd + risk * ICT_PARTIAL_R : p.entryUsd - risk * ICT_PARTIAL_R;
       ictTakePartial(s, p, px, 0.75);
       stopPx = p.entryUsd;
       tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
@@ -1019,8 +1020,8 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       });
       continue;
     }
-    // JASMY/S class: never tagged 0.75R, two closed 5m against → scratch. Do not wait for −1R.
-    if (!p.partialed && peakMfe < risk * 0.75 && series.length > 4) {
+    // Never tagged ¾ (0.50R), two closed 5m against → scratch. Do not wait for −1R.
+    if (!p.partialed && peakMfe < risk * ICT_PARTIAL_R && series.length > 4) {
       const closed = series.filter((bar) => bar.t > opened + 30_000).slice(0, -1);
       if (closed.length >= 2) {
         const lastTwo = closed.slice(-2);
@@ -1034,7 +1035,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
             t: Date.now(),
             kind: "note",
             symbol: p.symbol,
-            text: `dead CISD ${p.symbol} · 2 bars against · never 0.75R · scratch`,
+            text: `dead CISD ${p.symbol} · 2 bars against · never ${ICT_PARTIAL_R.toFixed(2)}R · scratch`,
             tone: "warn",
           });
           continue;
@@ -1346,7 +1347,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             peakUsd: mark,
             agent: "timing",
             note: trail
-              ? `${t.note} · ¾@0.75R trail 5R · ${lev}x${liqNote}`
+              ? `${t.note} · ¾@${ICT_PARTIAL_R}R trail 5R · ${lev}x${liqNote}`
               : `${t.note} · ${lev}x${liqNote}`,
             origin: "ict",
             stopUsd: stopPx,
@@ -1603,7 +1604,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ¾@0.75R trail 5R${s.ictStyle === "cisd" ? " · no Silver · no 15m · no Playback" : ""}`,
+      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ¾@${ICT_PARTIAL_R}R trail 5R${s.ictStyle === "cisd" ? " · no Silver · no 15m · no Playback" : ""}`,
       tone: "mute",
     });
   }
