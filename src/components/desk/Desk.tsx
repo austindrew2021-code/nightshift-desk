@@ -321,8 +321,8 @@ export function Desk() {
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               {cloudIsFresh(cloudAt)
-                ? `CLOUD worker · last tick ${Math.max(0, Math.round((Date.now() - cloudAt) / 60000))}m ago · phone can sleep (DoorDash/Uber OK)`
-                : "CLOUD worker late · GitHub cron is jumpy · phone does not hunt — wait for the next tick, don't Reset"}
+                ? `TOKYO box · last tick ${Math.max(0, Math.round((Date.now() - cloudAt) / 60000))}m ago · phone is a viewer`
+                : "TOKYO box · waiting for next CLOUD pull (~20s) · don't Reset"}
             </p>
             <p className={cn("mt-1 font-mono text-[11px] tabular", engine.ictRegime === "expand" ? "text-phosphor" : "text-subtle")}>
               {engine.ictRegime ?? "chop"} · {engine.ictRegimeNote || "A+ CISD still live"}{engine.ictRegime === "expand" ? " · full raid book" : " · A+ CISD only (like the SOL scalp)"}
@@ -352,7 +352,7 @@ export function Desk() {
           {grokNote ?? `Grok calls ${engine.stats.grokCalls}/8 · user-initiated, capped.`}
         </p>
         <p className="ml-auto max-w-xl text-right font-sans text-[11px] text-subtle">
-          Paper desk. CLOUD hunts on GitHub every ~5m — this phone is a viewer. Sleep, DoorDash, Uber: leave it. Don't Reset. No wallet.
+          Paper desk. Tokyo VPS hunts ~20s. This phone is a viewer. Sleep, DoorDash, Uber: leave it. Don't Reset. No wallet.
         </p>
       </div>
 
