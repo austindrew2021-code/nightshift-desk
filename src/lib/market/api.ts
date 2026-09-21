@@ -4,15 +4,12 @@ import { parseKlines } from "@/lib/engine/ict";
 import { estimateUniqueBuyers } from "@/lib/engine/pipeline";
 import { CHART_BARS, ICT_ASSETS, ICT_CORE_IDS, type ChartTape, type IctBook } from "@/lib/engine/universe";
 import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "@/lib/market/kucoin-hot";
-import { CLOUD_LIVE_URL } from "@/lib/cloud-live";
+import { fetchLiveJson } from "@/lib/cloud-live";
 import fallback from "./fallback-klines.json";
 
 type KlinePack = { m15: number[][]; h1: number[][]; m5: number[][] };
 
 const FALLBACK = fallback as KlinePack;
-
-const CLOUD_KLINES_URL =
-  "https://raw.githubusercontent.com/austindrew2021-code/nightshift-desk/ict-live/ict-klines.json";
 
 async function klinesFromBinance(id: string, bar: string): Promise<ChartTape | null> {
   const iv: Record<string, string> = {
@@ -51,12 +48,10 @@ async function klinesFromBinance(id: string, bar: string): Promise<ChartTape | n
 
 async function klinesFromCloud(id: string, bar: string): Promise<ChartTape | null> {
   try {
-    const res = await fetch(`${CLOUD_KLINES_URL}?t=${Date.now()}`, { cache: "no-store" });
-    if (!res.ok) return null;
-    const j = (await res.json()) as {
+    const j = await fetchLiveJson<{
       klines?: Record<string, { last?: number; m15?: Candle[]; m5?: Candle[]; h1?: Candle[] }>;
-    };
-    const row = j.klines?.[id];
+    }>("ict-klines.json");
+    const row = j?.klines?.[id];
     if (!row) return null;
     const tf =
       bar === "5m" || bar === "1m" || bar === "10m"
@@ -439,9 +434,8 @@ export async function fetchIctBooks(): Promise<IctBook[]> {
   const assets = [...ICT_ASSETS];
   const openIds: string[] = [];
   try {
-    const res = await fetch(`${CLOUD_LIVE_URL}?t=${Date.now()}`, { cache: "no-store" });
-    if (res.ok) {
-      const j = (await res.json()) as { engine?: { open?: { origin?: string; symbol?: string }[]; closed?: { origin?: string; symbol?: string }[] } };
+    const j = await fetchLiveJson<{ engine?: { open?: { origin?: string; symbol?: string }[]; closed?: { origin?: string; symbol?: string }[] } }>("ict-state.json");
+    if (j?.engine) {
       for (const p of [...(j.engine?.open ?? []), ...(j.engine?.closed ?? [])]) {
         if (p.origin !== "ict" || !p.symbol) continue;
         if (p.origin === "ict" && (j.engine?.open ?? []).some((o) => o.symbol === p.symbol)) openIds.push(p.symbol);
@@ -463,24 +457,21 @@ export async function fetchIctBooks(): Promise<IctBook[]> {
   }
   const cloudBooks = new Map<string, IctBook>();
   try {
-    const res = await fetch(`${CLOUD_KLINES_URL}?t=${Date.now()}`, { cache: "no-store" });
-    if (res.ok) {
-      const j = (await res.json()) as {
-        klines?: Record<string, { last?: number; change24h?: number; m15?: Candle[]; m5?: Candle[]; h1?: Candle[] }>;
-      };
-      for (const [id, row] of Object.entries(j.klines ?? {})) {
-        cloudBooks.set(id, {
-          id,
-          symbol: id,
-          name: id,
-          last: row.last || 0,
-          change24h: row.change24h || 0,
-          candles15: row.m15 ?? [],
-          candles5: row.m5 ?? [],
-          candles1h: row.h1 ?? [],
-          source: "kucoin",
-        });
-      }
+    const j = await fetchLiveJson<{
+      klines?: Record<string, { last?: number; change24h?: number; m15?: Candle[]; m5?: Candle[]; h1?: Candle[] }>;
+    }>("ict-klines.json");
+    for (const [id, row] of Object.entries(j?.klines ?? {})) {
+      cloudBooks.set(id, {
+        id,
+        symbol: id,
+        name: id,
+        last: row.last || 0,
+        change24h: row.change24h || 0,
+        candles15: row.m15 ?? [],
+        candles5: row.m5 ?? [],
+        candles1h: row.h1 ?? [],
+        source: "kucoin",
+      });
     }
   } catch {
     /* cloud klines optional */

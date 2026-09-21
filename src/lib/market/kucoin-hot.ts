@@ -1,6 +1,6 @@
 import { ICT_ASSETS, type IctAssetDef, type IctBook } from "@/lib/engine/universe";
 import type { Candle } from "@/lib/engine/types";
-import { CLOUD_LAST_URL } from "@/lib/cloud-live";
+import { fetchLiveJson } from "@/lib/cloud-live";
 
 const CORE = new Set(ICT_ASSETS.map((a) => a.symbol.toUpperCase()));
 const SKIP = new Set([
@@ -62,15 +62,9 @@ async function fetchBrowserLast(): Promise<Record<string, number>> {
 }
 
 async function fetchCloudKucoinLast(): Promise<{ t: number; px: Record<string, number> } | null> {
-  try {
-    const res = await fetch(`${CLOUD_LAST_URL}?t=${Date.now()}`, { cache: "no-store" });
-    if (!res.ok) return null;
-    const j = (await res.json()) as { t?: number; px?: Record<string, number> };
-    if (!j?.t || !j.px) return null;
-    return { t: j.t, px: j.px };
-  } catch {
-    return null;
-  }
+  const j = await fetchLiveJson<{ t?: number; px?: Record<string, number> }>("ict-last.json");
+  if (!j?.t || !j.px) return null;
+  return { t: j.t, px: j.px };
 }
 
 function mapFutBase(sym: string): string {

@@ -1,9 +1,11 @@
 /**
- * Always-on hunter for a Singapore VPS. GitHub cron is backup only.
- *   ICT_STATE_PATH=/home/nightshift/live/ict-state.json ICT_PUSH=1 npx tsx scripts/ict-daemon.mts
+ * Always-on hunter for Tokyo Lightsail. GitHub is backup for the phone if HTTPS is down.
+ * Serves live JSON on 127.0.0.1:8787 (Caddy terminates HTTPS).
  */
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import { join, dirname } from "node:path";
 import { spawn } from "node:child_process";
-import { dirname } from "node:path";
 
 const every = Math.max(8000, Number(process.env.ICT_EVERY_MS || 20_000));
 const state = process.env.ICT_STATE_PATH || "ict-state.json";
@@ -22,6 +24,35 @@ function run(cmd: string, args: string[], cwd?: string): Promise<number> {
   });
 }
 
+function serveLive() {
+  const files: Record<string, string> = {
+    "/": "ict-state.json",
+    "/ict-state.json": "ict-state.json",
+    "/ict-klines.json": "ict-klines.json",
+    "/ict-last.json": "ict-last.json",
+  };
+  createServer((req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    const path = (req.url || "/").split("?")[0] || "/";
+    const file = files[path];
+    if (!file) {
+      res.statusCode = 404;
+      res.end("no");
+      return;
+    }
+    void readFile(join(liveDir, file))
+      .then((b) => {
+        res.setHeader("Content-Type", "application/json");
+        res.end(b);
+      })
+      .catch(() => {
+        res.statusCode = 404;
+        res.end("{}");
+      });
+  }).listen(8787, "127.0.0.1", () => console.log("live http 127.0.0.1:8787"));
+}
+
 async function pushLive() {
   if (!shouldPush) return;
   await run("git", ["rebase", "--abort"], liveDir);
@@ -32,6 +63,7 @@ async function pushLive() {
 }
 
 async function main() {
+  serveLive();
   console.log(`hunt every ${every}ms · state ${state} · push ${shouldPush ? "on" : "off"}`);
   for (;;) {
     const t0 = Date.now();

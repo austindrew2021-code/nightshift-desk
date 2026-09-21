@@ -321,8 +321,8 @@ export function Desk() {
             </p>
             <p className="mt-1 font-mono text-[11px] text-subtle tabular">
               {cloudIsFresh(cloudAt)
-                ? `TOKYO box · last tick ${Math.max(0, Math.round((Date.now() - cloudAt) / 60000))}m ago · phone is a viewer`
-                : "TOKYO box · waiting for next CLOUD pull (~20s) · don't Reset"}
+                ? `TOKYO live · last tick ${Math.max(0, Math.round((Date.now() - cloudAt) / 1000))}s ago · phone is a viewer`
+                : "TOKYO live · waiting for next pull · don't Reset"}
             </p>
             <p className={cn("mt-1 font-mono text-[11px] tabular", engine.ictRegime === "expand" ? "text-phosphor" : "text-subtle")}>
               {engine.ictRegime ?? "chop"} · {engine.ictRegimeNote || "A+ CISD still live"}{engine.ictRegime === "expand" ? " · full raid book" : " · A+ CISD only (like the SOL scalp)"}
