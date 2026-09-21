@@ -926,18 +926,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       const live = i === bars.length - 1 && last > 0 && Math.abs(last / Math.max(1e-9, bar.c) - 1) < 0.02;
       const hi = live ? Math.max(bar.h, last) : bar.h;
       const lo = live ? Math.min(bar.l, last) : bar.l;
-      if (p.side === "long" && lo <= stopPx) {
-        s.open = s.open.filter((x) => x.id !== p.id);
-        closePos(s, p, stopPx, stopPx >= p.entryUsd ? "target" : "stop");
-        dead = true;
-        break;
-      }
-      if (p.side === "short" && hi >= stopPx) {
-        s.open = s.open.filter((x) => x.id !== p.id);
-        closePos(s, p, stopPx, stopPx <= p.entryUsd ? "target" : "stop");
-        dead = true;
-        break;
-      }
+      // ONE/SUI/ENA/FIL: same 5m bar tagged 0.75R and the SL. Bank ¾ + BE first or we record −1R.
       if (trail && !p.partialed) {
         const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
         if (mfe >= risk * 0.75) {
@@ -950,9 +939,19 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
           p.targetUsd = tgtPx;
           p.targetR = 5;
           p.note = `${p.note} · runner${run ? " · keep ¾ (24h run)" : ""}`;
-          p.markThru = bar.t;
-          continue;
         }
+      }
+      if (p.side === "long" && lo <= stopPx) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, stopPx, stopPx >= p.entryUsd ? "target" : "stop");
+        dead = true;
+        break;
+      }
+      if (p.side === "short" && hi >= stopPx) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, stopPx, stopPx <= p.entryUsd ? "target" : "stop");
+        dead = true;
+        break;
       }
       p.markThru = bar.t;
       if (trail && p.partialed) {
@@ -1020,8 +1019,8 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       });
       continue;
     }
-    // JASMY/HBAR class: CISD never engages. Two closed 5m against, no 0.35R MFE → scratch, don't wait for −1R.
-    if (!p.partialed && peakMfe < risk * 0.35 && series.length > 4) {
+    // JASMY/S class: never tagged 0.75R, two closed 5m against → scratch. Do not wait for −1R.
+    if (!p.partialed && peakMfe < risk * 0.75 && series.length > 4) {
       const closed = series.filter((bar) => bar.t > opened + 30_000).slice(0, -1);
       if (closed.length >= 2) {
         const lastTwo = closed.slice(-2);
