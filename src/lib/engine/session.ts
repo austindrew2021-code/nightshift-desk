@@ -138,11 +138,9 @@ export function tradableUsd(s: EngineState): number {
   return Math.max(0, finite(s.equityUsd, s.startUsd) - finite(s.bankedUsd));
 }
 
-/** 18% chip stays 18% in chop; expand (the DOGE/ADA tape) sizes 22%. 12/30 chips unchanged. */
+/** 18% chip stays 18%. Expand used to bump to 22% and overnight 1Rs became $80–$105. */
 export function liveRiskPct(s: EngineState): number {
-  const base = s.ictRiskPct || ICT_MAX_RISK_PCT;
-  if (s.ictRegime === "expand" && Math.abs(base - 0.18) < 1e-9) return 0.22;
-  return base;
+  return s.ictRiskPct || ICT_MAX_RISK_PCT;
 }
 
 /** 20× on 50% is the default 10× notional. 1R follows liveRiskPct. Hard cap = that 1R. */
@@ -171,12 +169,22 @@ function ictHaltPct(s: EngineState) {
   return 0.28;
 }
 
-/** Net ICT PnL for the current NY day. Winners count — two stops on a green day is not a halt. */
-function ictDayNet(s: EngineState, now = Date.now()): number {
-  const day = nyParts(now).day;
+/** Net ICT PnL for this NY session. Overnight (00–07) halt must not sit out NY AM. */
+function ictSessionNet(s: EngineState, now = Date.now()): number {
+  const cur = nyParts(now);
+  const nyAm = cur.h >= 7;
   return s.closed
-    .filter((c) => c.origin === "ict" && nyParts(c.closedAt).day === day)
+    .filter((c) => {
+      if (c.origin !== "ict") return false;
+      const p = nyParts(c.closedAt);
+      if (p.day !== cur.day) return false;
+      return (p.h >= 7) === nyAm;
+    })
     .reduce((a, c) => a + finite(c.pnlUsd), 0);
+}
+
+function ictDayNet(s: EngineState, now = Date.now()): number {
+  return ictSessionNet(s, now);
 }
 
 function maybeBank(s: EngineState) {
@@ -1066,21 +1074,24 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const now = Date.now();
   const liveFromOpen = now - 12 * 60_000;
   const liveFromClosed = now - 15 * 60_000;
-  const capBase = Math.max(s.startUsd, finite(s.equityUsd), finite(s.cashUsd) + finite(s.bankedUsd));
+  const capBase = Math.max(s.startUsd, tradableUsd(s));
   const cap = capBase * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT);
   const dayNet = s.mode === "ict" ? ictDayNet(s, now) : -finite(s.dayLoss);
-  if (dayNet <= -cap) {
-    const lastHalt = s.tape.find((t) => t.text?.startsWith("daily halt"));
-    if (!lastHalt || now - lastHalt.t > 4 * 3600_000) {
+  const oneR = capBase * liveRiskPct(s);
+  const nyAm = nyParts(now).h >= 7;
+  const sess = nyAm ? "NY AM" : "overnight";
+  if (dayNet <= -cap || dayNet - oneR <= -cap) {
+    const lastHalt = s.tape.find((t) => t.text?.startsWith("daily halt") || t.text?.startsWith("session halt"));
+    if (!lastHalt || now - lastHalt.t > 2 * 3600_000) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `daily halt · net $${dayNet.toFixed(0)} · cap -$${cap.toFixed(0)} · NY day, not Reset`,
+        text: `session halt · ${sess} · net $${dayNet.toFixed(0)} · cap -$${cap.toFixed(0)} · vault safe · not Reset`,
         tone: "warn",
       });
     }
-    return;
+    if (dayNet <= -cap || dayNet - oneR <= -cap) return;
   }
   let added = 0;
   const fresh: ClosedTrade[] = [];
@@ -1179,7 +1190,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         )
       )
         continue;
-      if (MEME.has(t.symbol) && !t.note.includes("OTE")) continue;
+      if (MEME.has(t.symbol)) continue;
       if (!ICT_ASSETS.some((a) => a.id === t.symbol) && !t.note.includes("OTE")) continue;
       const bodies = (b.candles5 || b.candles15 || []).slice(-5, -1);
       const mid = bodies.length
