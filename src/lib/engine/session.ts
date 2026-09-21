@@ -384,7 +384,10 @@ function revalue(s: EngineState, p: Position, next: number): Position {
   return {
     ...p,
     markUsd: mark,
-    peakUsd: Math.max(finite(p.peakUsd, mark), mark),
+    peakUsd:
+      p.side === "short"
+        ? Math.min(finite(p.peakUsd, mark) || mark, mark)
+        : Math.max(finite(p.peakUsd, mark), mark),
     pnlUsd,
     pnlSol: pnlUsd / Math.max(1e-6, s.solUsd),
   };
@@ -986,11 +989,40 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
     if (dead) continue;
     const heldMs = Date.now() - (p.openedAt || 0);
     const hour = nyHour(c?.t ?? Date.now());
-    const openedH = nyHour(p.openedAt || Date.now());
-    const mfeNow = p.side === "long" ? last - p.entryUsd : p.entryUsd - last;
+    const openedH = nyHour(p.openedAt || 0);
+    const lastMfe = p.side === "long" ? last - p.entryUsd : p.entryUsd - last;
+    const peakPx =
+      p.side === "short"
+        ? Math.min(finite(p.peakUsd, last) || last, last)
+        : Math.max(finite(p.peakUsd, last), last);
+    p.peakUsd = peakPx;
+    const peakMfe = p.side === "long" ? peakPx - p.entryUsd : p.entryUsd - peakPx;
+    if (trail && !p.partialed && lastMfe >= risk * 0.75) {
+      const px = p.side === "long" ? p.entryUsd + risk * 0.75 : p.entryUsd - risk * 0.75;
+      ictTakePartial(s, p, px, 0.75);
+      stopPx = p.entryUsd;
+      tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
+      p.stopUsd = stopPx;
+      p.targetUsd = tgtPx;
+      p.targetR = 5;
+      p.note = `${p.note} · runner`;
+    }
+    // TAO-class: +1R on last, then giveback to SL. If the peak was real, fade = momentum died.
+    if (peakMfe >= risk * 0.75 && lastMfe <= risk * 0.25) {
+      s.open = s.open.filter((x) => x.id !== p.id);
+      closePos(s, p, last, lastMfe >= 0 ? "target" : "time");
+      pushTape(s, {
+        t: Date.now(),
+        kind: "note",
+        symbol: p.symbol,
+        text: `fade ${p.symbol} · peak ${(peakMfe / risk).toFixed(2)}R → ${(lastMfe / risk).toFixed(2)}R · momentum lost`,
+        tone: "warn",
+      });
+      continue;
+    }
     const scalp = p.setup === "scalp" || p.setup === "sweep" || p.setup === "judas" || p.setup === "amd";
     if (scalp) {
-      const wave = isWaveRide(p.side, Math.max(0, mfeNow), risk, finite(b?.change24h));
+      const wave = isWaveRide(p.side, Math.max(0, lastMfe), risk, finite(b?.change24h));
       if (!p.partialed && heldMs > 2 * 3600_000) {
         s.open = s.open.filter((x) => x.id !== p.id);
         closePos(s, p, last, "time");
@@ -1007,18 +1039,25 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         (openedH >= 2 && openedH < 5 && hour >= 5 && hour < 7) ||
         (openedH >= 7 && openedH < 11 && hour >= 11 && hour < 13.5) ||
         (openedH >= 13.5 && openedH < 16 && hour >= 16 && hour < 20);
-      if (kzOver && !p.partialed && mfeNow < risk * 0.5) {
+      if (kzOver && !p.partialed && lastMfe < risk * 0.5) {
         s.open = s.open.filter((x) => x.id !== p.id);
         closePos(s, p, last, "time");
         continue;
       }
-      if (p.partialed && !wave && b?.candles5 && b.candles5.length >= 80) {
+      if (peakMfe >= risk * 0.5 && !wave && b?.candles5 && b.candles5.length >= 80) {
         const flip = scan5mCisd(b.candles5).find(
           (x) => x.side !== p.side && x.t >= (p.openedAt || 0) && Date.now() - x.t <= 12 * 60_000,
         );
         if (flip) {
           s.open = s.open.filter((x) => x.id !== p.id);
           closePos(s, p, last, "time");
+          pushTape(s, {
+            t: Date.now(),
+            kind: "note",
+            symbol: p.symbol,
+            text: `flip CISD ${p.symbol} · close · ${flip.note?.slice(0, 48) || "against"}`,
+            tone: "warn",
+          });
           continue;
         }
       }
