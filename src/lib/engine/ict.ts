@@ -1873,6 +1873,51 @@ export function isWaveRide(side: "long" | "short", mfe: number, risk: number, ch
   return change24h <= -0.12;
 }
 
+/** Exit tells after we're already in profit. RSI regular div, volume fuel gone, or 5m structure break. */
+export function exitTells(cs: Candle[] | undefined, side: "long" | "short", openedAt: number): string | null {
+  if (!cs || cs.length < 30) return null;
+  const rsi = rsiWilder(cs, 14);
+  const n = cs.length - 1;
+  let i0 = 0;
+  for (let i = 0; i < cs.length; i++) {
+    if (cs[i]!.t >= openedAt) {
+      i0 = i;
+      break;
+    }
+  }
+  i0 = Math.max(0, Math.min(i0, n - 8));
+  let ext = side === "long" ? -Infinity : Infinity;
+  let extRsi = 50;
+  let extI = i0;
+  for (let i = i0; i < n; i++) {
+    if (side === "long" && cs[i]!.h >= ext) {
+      ext = cs[i]!.h;
+      extRsi = rsi[i]!;
+      extI = i;
+    }
+    if (side === "short" && cs[i]!.l <= ext) {
+      ext = cs[i]!.l;
+      extRsi = rsi[i]!;
+      extI = i;
+    }
+  }
+  if (n - extI >= 2) {
+    if (side === "long" && cs[n]!.h >= ext && rsi[n]! < extRsi - 4) return "rsi-div";
+    if (side === "short" && cs[n]!.l <= ext && rsi[n]! > extRsi + 4) return "rsi-div";
+  }
+  const fuel = cs.slice(i0, n + 1);
+  const peakV = Math.max(0, ...fuel.map((c) => c.v || 0));
+  const tail = cs.slice(-4, -1);
+  const tailV = tail.reduce((a, c) => a + (c.v || 0), 0) / Math.max(1, tail.length);
+  if (peakV > 0 && tailV < peakV * 0.35 && n - i0 >= 6) return "vol-dry";
+  const win = cs.slice(Math.max(i0, n - 7), n);
+  if (win.length >= 3) {
+    if (side === "long" && cs[n]!.c < Math.min(...win.map((c) => c.l))) return "mss";
+    if (side === "short" && cs[n]!.c > Math.max(...win.map((c) => c.h))) return "mss";
+  }
+  return null;
+}
+
 export function simulateIct(
   cs: Candle[],
   signals: IctSignal[],

@@ -36,7 +36,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { fadingAcceptedBreak, inKill, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows } from "./ict";
+import { fadingAcceptedBreak, inKill, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows, exitTells } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import { ICT_ASSETS, type IctBook } from "./universe";
 import {
@@ -1048,14 +1048,15 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         const flip = scan5mCisd(b.candles5).find(
           (x) => x.side !== p.side && x.t >= (p.openedAt || 0) && Date.now() - x.t <= 12 * 60_000,
         );
-        if (flip) {
+        const tell = exitTells(b.candles5, p.side, p.openedAt || 0);
+        if (flip || tell) {
           s.open = s.open.filter((x) => x.id !== p.id);
           closePos(s, p, last, "time");
           pushTape(s, {
             t: Date.now(),
             kind: "note",
             symbol: p.symbol,
-            text: `flip CISD ${p.symbol} · close · ${flip.note?.slice(0, 48) || "against"}`,
+            text: `fade ${p.symbol} · ${flip ? "flip CISD" : tell} · peak ${(peakMfe / risk).toFixed(2)}R`,
             tone: "warn",
           });
           continue;
