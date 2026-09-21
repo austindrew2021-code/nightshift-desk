@@ -1034,7 +1034,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
             t: Date.now(),
             kind: "note",
             symbol: p.symbol,
-            text: `dead CISD ${p.symbol} · 2 bars against · never ${(0.35).toFixed(2)}R · scratch`,
+            text: `dead CISD ${p.symbol} · 2 bars against · never 0.75R · scratch`,
             tone: "warn",
           });
           continue;
