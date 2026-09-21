@@ -1,6 +1,6 @@
 import type { EngineState } from "@/lib/engine/session";
 
-export const TOKYO_ORIGIN = "https://development-suspension-brad-demo.trycloudflare.com";
+export const TOKYO_ORIGIN = "https://living-relationship-folder-tampa.trycloudflare.com";
 export const GH_LIVE_ORIGIN =
   "https://raw.githubusercontent.com/austindrew2021-code/nightshift-desk/ict-live";
 
