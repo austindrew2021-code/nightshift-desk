@@ -6,6 +6,7 @@ import { createHmac } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import type { EngineState, Position, Side } from "./types";
 import { ICT_HARD_RISK_PCT, ICT_PARTIAL_R, ictLiqPct } from "./types";
+import { ictLivePend } from "./live-pend";
 
 const BASE = "https://api-futures.kucoin.com";
 const LIVE_FILE = process.env.ICT_LIVE_STATE || "ict-live-orders.json";
@@ -345,18 +346,21 @@ export async function syncKucoinLive(s: EngineState) {
   }
   const book = loadBook();
   const paperOpen = s.open.filter((p) => p.origin === "ict");
-  const paperIds = new Set(paperOpen.map((p) => p.id));
-
-  for (const p of paperOpen) {
-    if (book.seats.some((x) => x.paperId === p.id || x.symbol === p.symbol)) continue;
-    if (Date.now() - p.openedAt > 90_000) continue;
+  const queued = ictLivePend.splice(0);
+  const seen = new Set(book.seats.map((x) => x.paperId + x.symbol));
+  for (const p of [...queued, ...paperOpen]) {
+    if (p.origin !== "ict") continue;
+    if (seen.has(p.id + p.symbol) || book.seats.some((x) => x.paperId === p.id || x.symbol === p.symbol)) continue;
+    if (!queued.includes(p) && Date.now() - p.openedAt > 90_000) continue;
     await enter(s, p, mode, book);
+    seen.add(p.id + p.symbol);
     break;
   }
 
   for (const seat of [...book.seats]) {
     const paper = paperOpen.find((p) => p.id === seat.paperId || p.symbol === seat.symbol);
     if (!paper) {
+      if (Date.now() - seat.openedAt < 25_000) continue;
       await flatten(mode, seat, "paper-closed");
       book.seats = book.seats.filter((x) => x.paperId !== seat.paperId);
       saveBook(book);
@@ -370,9 +374,4 @@ export async function syncKucoinLive(s: EngineState) {
       push(s, `LIVE ¾ assumed filled ${seat.symbol} (resting TP)`, "up");
     }
   }
-
-  if (book.seats.length > liveSeats()) {
-    /* hard cap — should not happen */
-  }
-  void paperIds;
 }
