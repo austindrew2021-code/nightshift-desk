@@ -1,0 +1,373 @@
+/**
+ * KuCoin USDT-M isolated live probe. Off unless ICT_LIVE=1 and keys exist.
+ * Paper book is untouched. 1 seat, 18% of min(wallet, KUCOIN_LIVE_USD).
+ */
+import { createHmac } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import type { EngineState, Position, Side } from "./types";
+import { ICT_HARD_RISK_PCT, ICT_PARTIAL_R, ictLiqPct } from "./types";
+
+const BASE = "https://api-futures.kucoin.com";
+const LIVE_FILE = process.env.ICT_LIVE_STATE || "ict-live-orders.json";
+const LOG = process.env.ICT_LIVE_LOG || "ict-live-log.jsonl";
+
+export type LiveMode = "off" | "dry" | "on";
+
+export function liveMode(): LiveMode {
+  const v = (process.env.ICT_LIVE || "0").toLowerCase();
+  if (v === "1" || v === "on" || v === "true") return "on";
+  if (v === "dry" || v === "paper") return "dry";
+  return "off";
+}
+
+function keys() {
+  return {
+    key: process.env.KUCOIN_API_KEY || "",
+    secret: process.env.KUCOIN_API_SECRET || "",
+    pass: process.env.KUCOIN_API_PASSPHRASE || "",
+    version: process.env.KUCOIN_KEY_VERSION || "2",
+  };
+}
+
+function liveUsd() {
+  return Math.max(20, Math.min(200, Number(process.env.KUCOIN_LIVE_USD || 50)));
+}
+
+function liveSeats() {
+  return 1;
+}
+
+type LiveSeat = {
+  paperId: string;
+  symbol: string;
+  inst: string;
+  side: Side;
+  entry: number;
+  stop: number;
+  lots: number;
+  lotsLeft: number;
+  lev: number;
+  entryOid?: string;
+  tpOid?: string;
+  slOid?: string;
+  partialed: boolean;
+  openedAt: number;
+};
+
+type LiveBook = { seats: LiveSeat[] };
+
+function loadBook(): LiveBook {
+  if (!existsSync(LIVE_FILE)) return { seats: [] };
+  try {
+    return JSON.parse(readFileSync(LIVE_FILE, "utf8")) as LiveBook;
+  } catch {
+    return { seats: [] };
+  }
+}
+
+function saveBook(b: LiveBook) {
+  writeFileSync(LIVE_FILE, JSON.stringify(b, null, 2));
+}
+
+function log(row: Record<string, unknown>) {
+  appendFileSync(LOG, JSON.stringify({ t: Date.now(), ...row }) + "\n");
+  console.log("kucoin-live", JSON.stringify(row));
+}
+
+function sign(secret: string, ts: string, method: string, path: string, body: string) {
+  return createHmac("sha256", secret)
+    .update(ts + method + path + body)
+    .digest("base64");
+}
+
+async function kucoin<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const { key, secret, pass, version } = keys();
+  const ts = Date.now().toString();
+  const payload = body ? JSON.stringify(body) : "";
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "KC-API-KEY": key,
+    "KC-API-SIGN": sign(secret, ts, method, path, payload),
+    "KC-API-TIMESTAMP": ts,
+    "KC-API-PASSPHRASE":
+      version === "2"
+        ? createHmac("sha256", secret).update(pass).digest("base64")
+        : pass,
+    "KC-API-KEY-VERSION": version,
+    "User-Agent": "NightshiftDesk/live",
+  };
+  const res = await fetch(BASE + path, { method, headers, body: payload || undefined });
+  const json = (await res.json()) as { code?: string; msg?: string; data?: T };
+  if (json.code !== "200000") throw new Error(json.msg || json.code || `http ${res.status}`);
+  return json.data as T;
+}
+
+type Contract = { symbol: string; multiplier: number; lotSize: number; tickSize: number; maxLeverage: number };
+
+const contractCache = new Map<string, Contract>();
+
+async function contractFor(sym: string): Promise<Contract | null> {
+  const want = instOf(sym);
+  if (contractCache.has(want)) return contractCache.get(want)!;
+  const rows = await kucoin<Record<string, unknown>[]>("GET", "/api/v1/contracts/active");
+  for (const r of rows || []) {
+    const symbol = String(r.symbol || "");
+    const c: Contract = {
+      symbol,
+      multiplier: Number(r.multiplier) || 1,
+      lotSize: Number(r.lotSize) || 1,
+      tickSize: Number(r.tickSize) || 0.0001,
+      maxLeverage: Number(r.maxLeverage) || 20,
+    };
+    contractCache.set(symbol, c);
+  }
+  return contractCache.get(want) || null;
+}
+
+function instOf(sym: string): string {
+  const u = sym.toUpperCase();
+  if (u === "BTC" || u === "XBT") return "XBTUSDTM";
+  if (u === "BONK") return "1000BONKUSDTM";
+  if (u === "PEPE") return "1000PEPEUSDTM";
+  if (u === "FLOKI") return "1000FLOKIUSDTM";
+  return `${u}USDTM`;
+}
+
+function roundTick(px: number, tick: number) {
+  if (!(tick > 0)) return px;
+  return Math.round(px / tick) * tick;
+}
+
+function lotsFor(notional: number, px: number, c: Contract) {
+  const raw = notional / Math.max(1e-12, px * c.multiplier);
+  const n = Math.floor(raw / c.lotSize) * c.lotSize;
+  return Math.max(c.lotSize, n);
+}
+
+async function usdtEquity(): Promise<number> {
+  const d = await kucoin<{ availableBalance?: string; accountEquity?: string }>(
+    "GET",
+    "/api/v1/account-overview?currency=USDT",
+  );
+  return Number(d?.availableBalance || d?.accountEquity || 0);
+}
+
+async function place(mode: LiveMode, body: Record<string, unknown>) {
+  log({ kind: "order", mode, body: { ...body, clientOid: body.clientOid } });
+  if (mode !== "on") return { orderId: `dry-${body.clientOid}`, dry: true };
+  return kucoin<{ orderId?: string }>("POST", "/api/v1/orders", body);
+}
+
+async function cancel(mode: LiveMode, id?: string) {
+  if (!id || id.startsWith("dry-")) return;
+  if (mode !== "on") return;
+  try {
+    await kucoin("DELETE", `/api/v1/orders/${id}`);
+  } catch (e) {
+    log({ kind: "cancel-fail", id, err: String(e) });
+  }
+}
+
+function oid(prefix: string) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function push(s: EngineState, text: string, tone: "up" | "warn" | "mute" | "down" = "warn") {
+  s.tape = [
+    {
+      id: `t-live-${Date.now()}`,
+      t: s.simT || Date.now(),
+      kind: "note",
+      symbol: "LIVE",
+      text,
+      tone,
+    },
+    ...s.tape,
+  ].slice(0, 80);
+}
+
+async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook) {
+  if (book.seats.length >= liveSeats()) return;
+  const c = await contractFor(p.symbol);
+  if (!c) {
+    log({ kind: "skip", why: "no-contract", symbol: p.symbol });
+    return;
+  }
+  let eq = liveUsd();
+  if (mode === "on") {
+    try {
+      eq = Math.min(liveUsd(), await usdtEquity());
+    } catch (e) {
+      log({ kind: "equity-fail", err: String(e) });
+      push(s, `LIVE equity fail · ${String(e).slice(0, 80)}`, "down");
+      return;
+    }
+  }
+  const riskUsd = eq * ICT_HARD_RISK_PCT;
+  const stopPct = Math.max(1e-6, p.stopPct || Math.abs(p.entryUsd - (p.stopUsd || p.entryUsd)) / p.entryUsd);
+  const notional = riskUsd / stopPct;
+  const lots = lotsFor(notional, p.entryUsd, c);
+  const lev = Math.min(40, Math.max(20, Number(String(p.note.match(/(\d+)x/)?.[1] || 40))));
+  const side = p.side === "long" ? "buy" : "sell";
+  const stopPx = p.stopUsd || (p.side === "long" ? p.entryUsd * (1 - stopPct) : p.entryUsd * (1 + stopPct));
+  const riskPx = Math.abs(p.entryUsd - stopPx);
+  const tpPx = roundTick(
+    p.side === "long" ? p.entryUsd + riskPx * ICT_PARTIAL_R : p.entryUsd - riskPx * ICT_PARTIAL_R,
+    c.tickSize,
+  );
+  const slPx = roundTick(
+    p.side === "long" ? Math.max(stopPx, p.entryUsd * (1 - ictLiqPct(lev) + 0.002)) : Math.min(stopPx, p.entryUsd * (1 + ictLiqPct(lev) - 0.002)),
+    c.tickSize,
+  );
+
+  const entryBody: Record<string, unknown> = {
+    clientOid: oid("e"),
+    symbol: c.symbol,
+    side,
+    type: "market",
+    lever: String(lev),
+    size: lots,
+    marginMode: "ISOLATED",
+    reduceOnly: false,
+  };
+
+  let fillOid = "";
+  try {
+    const r = await place(mode, entryBody);
+    fillOid = String(r.orderId || "");
+  } catch (e) {
+    log({ kind: "entry-fail", symbol: p.symbol, err: String(e) });
+    push(s, `LIVE entry FAIL ${p.symbol} · ${String(e).slice(0, 80)}`, "down");
+    return;
+  }
+
+  const tpLots = Math.max(c.lotSize, Math.floor(lots * 0.75 / c.lotSize) * c.lotSize);
+  const tpBody: Record<string, unknown> = {
+    clientOid: oid("tp"),
+    symbol: c.symbol,
+    side: p.side === "long" ? "sell" : "buy",
+    type: "limit",
+    price: String(tpPx),
+    size: tpLots,
+    postOnly: true,
+    reduceOnly: true,
+    marginMode: "ISOLATED",
+    lever: String(lev),
+  };
+  const slBody: Record<string, unknown> = {
+    clientOid: oid("sl"),
+    symbol: c.symbol,
+    side: p.side === "long" ? "sell" : "buy",
+    type: "market",
+    stop: p.side === "long" ? "down" : "up",
+    stopPrice: String(slPx),
+    stopPriceType: "TP",
+    size: lots,
+    reduceOnly: true,
+    closeOrder: true,
+    marginMode: "ISOLATED",
+    lever: String(lev),
+  };
+
+  let tpOid = "";
+  let slOid = "";
+  try {
+    tpOid = String((await place(mode, tpBody)).orderId || "");
+  } catch (e) {
+    log({ kind: "tp-fail", err: String(e) });
+  }
+  try {
+    slOid = String((await place(mode, slBody)).orderId || "");
+  } catch (e) {
+    log({ kind: "sl-fail", err: String(e) });
+  }
+
+  book.seats.push({
+    paperId: p.id,
+    symbol: p.symbol,
+    inst: c.symbol,
+    side: p.side,
+    entry: p.entryUsd,
+    stop: slPx,
+    lots,
+    lotsLeft: lots,
+    lev,
+    entryOid: fillOid,
+    tpOid,
+    slOid,
+    partialed: false,
+    openedAt: Date.now(),
+  });
+  saveBook(book);
+  push(
+    s,
+    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${lots} lots · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · ¾@${ICT_PARTIAL_R}R rest · SL ${slPx}`,
+    "up",
+  );
+}
+
+async function flatten(mode: LiveMode, seat: LiveSeat, why: string) {
+  await cancel(mode, seat.tpOid);
+  await cancel(mode, seat.slOid);
+  if (seat.lotsLeft > 0) {
+    try {
+      await place(mode, {
+        clientOid: oid("x"),
+        symbol: seat.inst,
+        side: seat.side === "long" ? "sell" : "buy",
+        type: "market",
+        size: seat.lotsLeft,
+        reduceOnly: true,
+        closeOrder: true,
+        marginMode: "ISOLATED",
+        lever: String(seat.lev),
+      });
+    } catch (e) {
+      log({ kind: "flatten-fail", symbol: seat.symbol, err: String(e), why });
+    }
+  }
+  log({ kind: "flatten", symbol: seat.symbol, why });
+}
+
+/** Call after paper tick. Paper book unchanged. */
+export async function syncKucoinLive(s: EngineState) {
+  const mode = liveMode();
+  const { key, secret, pass } = keys();
+  if (mode === "off") return;
+  if (mode === "on" && !(key && secret && pass)) {
+    log({ kind: "skip", why: "no-keys" });
+    return;
+  }
+  const book = loadBook();
+  const paperOpen = s.open.filter((p) => p.origin === "ict");
+  const paperIds = new Set(paperOpen.map((p) => p.id));
+
+  for (const p of paperOpen) {
+    if (book.seats.some((x) => x.paperId === p.id || x.symbol === p.symbol)) continue;
+    if (Date.now() - p.openedAt > 90_000) continue;
+    await enter(s, p, mode, book);
+    break;
+  }
+
+  for (const seat of [...book.seats]) {
+    const paper = paperOpen.find((p) => p.id === seat.paperId || p.symbol === seat.symbol);
+    if (!paper) {
+      await flatten(mode, seat, "paper-closed");
+      book.seats = book.seats.filter((x) => x.paperId !== seat.paperId);
+      saveBook(book);
+      push(s, `LIVE flatten ${seat.symbol} · paper closed`, "mute");
+      continue;
+    }
+    if (paper.partialed && !seat.partialed) {
+      seat.partialed = true;
+      seat.lotsLeft = Math.max(0, seat.lots - Math.floor(seat.lots * 0.75));
+      saveBook(book);
+      push(s, `LIVE ¾ assumed filled ${seat.symbol} (resting TP)`, "up");
+    }
+  }
+
+  if (book.seats.length > liveSeats()) {
+    /* hard cap — should not happen */
+  }
+  void paperIds;
+}

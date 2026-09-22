@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { ICT_ASSETS, type IctBook } from "../src/lib/engine/universe.ts";
 import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "../src/lib/market/kucoin-hot.ts";
 import { createEngine, tick, type EngineState } from "../src/lib/engine/session.ts";
+import { syncKucoinLive, liveMode } from "../src/lib/engine/kucoin-live.ts";
 import type { Candle, MarketSnapshot } from "../src/lib/engine/types.ts";
 
 const STATE = process.env.ICT_STATE_PATH || "ict-state.json";
@@ -189,6 +190,11 @@ async function main() {
   market.btcUsd = livePx.BTC || btc?.last || market.btcUsd;
   s.solUsd = market.solUsd;
   tick(s, market);
+  try {
+    await syncKucoinLive(s);
+  } catch (e) {
+    console.error("kucoin-live", e);
+  }
   writeFileSync(STATE, JSON.stringify(slim(s)));
   const klinesPath = STATE.replace(/ict-state\.json$/, "ict-klines.json");
   const klines: Record<string, { last: number; change24h: number; m15: Candle[]; m5: Candle[]; h1: Candle[] }> = {};
@@ -213,6 +219,7 @@ async function main() {
       open: open.map((p) => `${p.side} ${p.symbol}`),
       lastTape: s.tape[0]?.text ?? "",
       books: books.length,
+      live: liveMode(),
     }),
   );
 }
