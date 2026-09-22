@@ -925,8 +925,9 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
     for (let i = 0; i < bars.length; i++) {
       const bar = bars[i]!;
       const live = i === bars.length - 1 && last > 0 && Math.abs(last / Math.max(1e-9, bar.c) - 1) < 0.02;
-      const hi = live ? Math.max(bar.h, last) : bar.h;
-      const lo = live ? Math.min(bar.l, last) : bar.l;
+      const entryBar = opened > bar.t && opened < bar.t + dt;
+      const hi = entryBar ? (live ? Math.max(p.entryUsd, last) : Math.max(p.entryUsd, bar.c)) : live ? Math.max(bar.h, last) : bar.h;
+      const lo = entryBar ? (live ? Math.min(p.entryUsd, last) : Math.min(p.entryUsd, bar.c)) : live ? Math.min(bar.l, last) : bar.l;
       // INJ/ZEC class: wick 0.50–0.70R then death. Bank ¾ at 0.50R + BE before SL.
       if (trail && !p.partialed) {
         const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
@@ -1292,6 +1293,13 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         }
         if (clamped.capped) continue;
         if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
+        const fill = b.last || t.entryUsd;
+        const cur5 = (b.candles5 || [])[(b.candles5 || []).length - 1];
+        const stopDist0 = Math.abs(t.entryUsd - t.stop);
+        if (cur5 && stopDist0 > 0) {
+          const dump = t.side === "long" ? cur5.o - fill : fill - cur5.o;
+          if (dump > 0.35 * stopDist0) continue;
+        }
         const cs5 = b.candles5 || [];
         const si = cs5.findIndex((c) => Math.abs(c.t - t.openedAt) < 4 * 60_000);
         if (si >= 0) {
