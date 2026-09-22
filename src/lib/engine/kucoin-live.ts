@@ -110,8 +110,11 @@ const contractCache = new Map<string, Contract>();
 async function contractFor(sym: string): Promise<Contract | null> {
   const want = instOf(sym);
   if (contractCache.has(want)) return contractCache.get(want)!;
-  const rows = await kucoin<Record<string, unknown>[]>("GET", "/api/v1/contracts/active");
-  for (const r of rows || []) {
+  const res = await fetch(BASE + "/api/v1/contracts/active", {
+    headers: { Accept: "application/json", "User-Agent": "NightshiftDesk/live" },
+  });
+  const json = (await res.json()) as { data?: Record<string, unknown>[] };
+  for (const r of json.data || []) {
     const symbol = String(r.symbol || "");
     const c: Contract = {
       symbol,
@@ -352,7 +355,12 @@ export async function syncKucoinLive(s: EngineState) {
     if (p.origin !== "ict") continue;
     if (seen.has(p.id + p.symbol) || book.seats.some((x) => x.paperId === p.id || x.symbol === p.symbol)) continue;
     if (!queued.includes(p) && Date.now() - p.openedAt > 90_000) continue;
-    await enter(s, p, mode, book);
+    try {
+      await enter(s, p, mode, book);
+    } catch (e) {
+      log({ kind: "enter-throw", symbol: p.symbol, err: String(e) });
+      push(s, `LIVE dry FAIL ${p.symbol} · ${String(e).slice(0, 80)}`, "down");
+    }
     seen.add(p.id + p.symbol);
     break;
   }
