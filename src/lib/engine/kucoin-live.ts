@@ -91,9 +91,9 @@ async function kucoin<T>(method: string, path: string, body?: unknown): Promise<
     "KC-API-SIGN": sign(secret, ts, method, path, payload),
     "KC-API-TIMESTAMP": ts,
     "KC-API-PASSPHRASE":
-      version === "2"
-        ? createHmac("sha256", secret).update(pass).digest("base64")
-        : pass,
+      version === "1"
+        ? pass
+        : createHmac("sha256", secret).update(pass).digest("base64"),
     "KC-API-KEY-VERSION": version,
     "User-Agent": "NightshiftDesk/live",
   };
