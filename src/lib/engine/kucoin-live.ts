@@ -195,6 +195,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   const c = await contractFor(p.symbol);
   if (!c) {
     log({ kind: "skip", why: "no-contract", symbol: p.symbol });
+    push(s, `LIVE dry skip ${p.symbol} · no ${instOf(p.symbol)} contract`, "warn");
     return;
   }
   let eq = liveUsd();
@@ -349,7 +350,8 @@ export async function syncKucoinLive(s: EngineState) {
   }
   const book = loadBook();
   const paperOpen = s.open.filter((p) => p.origin === "ict");
-  const queued = ictLivePend.splice(0);
+  const queued = [...(s.ictLivePend || []), ...ictLivePend.splice(0)];
+  s.ictLivePend = [];
   const seen = new Set(book.seats.map((x) => x.paperId + x.symbol));
   for (const p of [...queued, ...paperOpen]) {
     if (p.origin !== "ict") continue;

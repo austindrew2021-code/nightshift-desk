@@ -106,6 +106,8 @@ export interface EngineState {
   zPlan: ZostaffStep[];
   zCursor: number;
   zDone: boolean;
+  /** This-tick opens for the KuCoin dry/live sidecar. Not a paper book. */
+  ictLivePend?: Position[];
 }
 
 function blankStats(): DeskStats {
@@ -1366,6 +1368,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           },
         ];
         queueLiveOpen(s.open[s.open.length - 1]!);
+        const opened = s.open[s.open.length - 1]!;
+        s.ictLivePend = [...(s.ictLivePend || []), opened];
         s.stats.taken += 1;
         s.stats.openCount = s.open.length;
         const openFee = Math.max(0, sizeUsd * 0.0006);

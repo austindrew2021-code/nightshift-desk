@@ -93,6 +93,7 @@ function slim(s: EngineState) {
       ictSeen: s.ictSeen.slice(-400),
       seenMints: [],
       zPlan: [],
+      ictLivePend: [],
     },
   };
 }
