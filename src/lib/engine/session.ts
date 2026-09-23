@@ -1163,9 +1163,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     const resumeNet = s.closed
       .filter((c) => c.origin === "ict" && c.closedAt >= resumeFrom && nyParts(c.closedAt).day === today)
       .reduce((a, c) => a + finite(c.pnlUsd), 0);
-    const halfR = oneR * 0.5;
-    if (stuck || !cooled || resumeNet <= -halfR) {
-      const second = stuck || (cooled && resumeNet <= -halfR);
+    if (stuck || !cooled || resumeNet <= -cap) {
+      const second = stuck || (cooled && resumeNet <= -cap);
       const tag = second ? "resume halt" : "session halt";
       const lastHalt = s.tape.find((t) => t.text?.startsWith(tag));
       if (!lastHalt || now - lastHalt.t > 2 * 3600_000) {
@@ -1174,21 +1173,20 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           kind: "note",
           symbol: "ICT",
           text: second
-            ? `resume halt · ${sess} · half-size stop · net $${dayNet.toFixed(0)} · vault safe · not Reset`
-            : `session halt · ${sess} · net $${dayNet.toFixed(0)} · cap -$${cap.toFixed(0)} · 90m then half · vault safe · not Reset`,
+            ? `resume halt · ${sess} · another cap down after the cool-off · net $${dayNet.toFixed(0)} · vault safe · not Reset`
+            : `session halt · ${sess} · net $${dayNet.toFixed(0)} · cap -$${cap.toFixed(0)} · 90m then full · vault safe · not Reset`,
           tone: "warn",
         });
       }
       return;
     }
-    riskScale = 0.5;
-    const lastResume = s.tape.find((t) => t.text?.startsWith("resume · half"));
+    const lastResume = s.tape.find((t) => t.text?.startsWith("resume · full"));
     if (!lastResume || now - lastResume.t > 6 * 3600_000) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `resume · half size · halt cooled 90m · 1 more stop ends the session · not Reset`,
+        text: `resume · full size · halt cooled 90m · morning loss stays · one stop does not end the session · not Reset`,
         tone: "info",
       });
     }
