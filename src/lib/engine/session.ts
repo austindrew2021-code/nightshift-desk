@@ -148,7 +148,7 @@ export function liveRiskPct(s: EngineState): number {
 }
 
 /** 20× on 50% is the default 10× notional. 1R follows liveRiskPct. Hard cap = that 1R. */
-export function ictRiskUsd(s: EngineState, stopPct = 0.01, levOverride?: number): { risk: number; notional: number } {
+export function ictRiskUsd(s: EngineState, stopPct = 0.01, levOverride?: number, scale = 1): { risk: number; notional: number } {
   const book = Math.max(s.startUsd * 0.25, tradableUsd(s) || s.startUsd);
   const sp = Math.max(1e-6, stopPct);
   const lev = levOverride || s.ictLev || ICT_LEVERAGE;
@@ -163,7 +163,8 @@ export function ictRiskUsd(s: EngineState, stopPct = 0.01, levOverride?: number)
     notional = hard / sp;
     risk = hard;
   }
-  return { risk: Math.max(1, risk), notional };
+  const k = Math.min(1, Math.max(0.25, scale));
+  return { risk: Math.max(1, risk * k), notional: notional * k };
 }
 
 function ictHaltPct(s: EngineState) {
@@ -939,7 +940,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
           const px = p.side === "long" ? p.entryUsd + risk * ICT_PARTIAL_R : p.entryUsd - risk * ICT_PARTIAL_R;
           const run = (p.side === "long" && finite(b?.change24h) >= 0.12) || (p.side === "short" && finite(b?.change24h) <= -0.12);
           ictTakePartial(s, p, px, run ? 0.25 : 0.75);
-          stopPx = p.entryUsd;
+          stopPx = p.side === "long" ? p.entryUsd + risk * 0.25 : p.entryUsd - risk * 0.25;
           tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
           p.stopUsd = stopPx;
           p.targetUsd = tgtPx;
@@ -1005,7 +1006,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
     if (trail && !p.partialed && lastMfe >= risk * ICT_PARTIAL_R) {
       const px = p.side === "long" ? p.entryUsd + risk * ICT_PARTIAL_R : p.entryUsd - risk * ICT_PARTIAL_R;
       ictTakePartial(s, p, px, 0.75);
-      stopPx = p.entryUsd;
+      stopPx = p.side === "long" ? p.entryUsd + risk * 0.25 : p.entryUsd - risk * 0.25;
       tgtPx = p.side === "long" ? p.entryUsd + risk * 5 : p.entryUsd - risk * 5;
       p.stopUsd = stopPx;
       p.targetUsd = tgtPx;
@@ -1147,18 +1148,50 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const oneR = capBase * liveRiskPct(s);
   const nyAm = nyParts(now).h >= 7;
   const sess = nyAm ? "NY AM" : "overnight";
+  let riskScale = 1;
   if (dayNet <= -cap || dayNet - oneR <= -cap) {
-    const lastHalt = s.tape.find((t) => t.text?.startsWith("daily halt") || t.text?.startsWith("session halt"));
-    if (!lastHalt || now - lastHalt.t > 2 * 3600_000) {
+    const today = nyParts(now).day;
+    const notes = s.tape.filter((t) => {
+      if (nyParts(t.t).day !== today) return false;
+      return t.text?.startsWith("daily halt") || t.text?.startsWith("session halt") || t.text?.startsWith("resume halt");
+    });
+    const stuck = notes.some((t) => t.text?.startsWith("resume halt"));
+    const first = notes.filter((t) => !t.text?.startsWith("resume halt")).at(-1);
+    const coolMs = 90 * 60_000;
+    const cooled = !!first && now - first.t >= coolMs;
+    const resumeFrom = (first?.t ?? now) + coolMs;
+    const resumeNet = s.closed
+      .filter((c) => c.origin === "ict" && c.closedAt >= resumeFrom && nyParts(c.closedAt).day === today)
+      .reduce((a, c) => a + finite(c.pnlUsd), 0);
+    const halfR = oneR * 0.5;
+    if (stuck || !cooled || resumeNet <= -halfR) {
+      const second = stuck || (cooled && resumeNet <= -halfR);
+      const tag = second ? "resume halt" : "session halt";
+      const lastHalt = s.tape.find((t) => t.text?.startsWith(tag));
+      if (!lastHalt || now - lastHalt.t > 2 * 3600_000) {
+        pushTape(s, {
+          t: now,
+          kind: "note",
+          symbol: "ICT",
+          text: second
+            ? `resume halt · ${sess} · half-size stop · net $${dayNet.toFixed(0)} · vault safe · not Reset`
+            : `session halt · ${sess} · net $${dayNet.toFixed(0)} · cap -$${cap.toFixed(0)} · 90m then half · vault safe · not Reset`,
+          tone: "warn",
+        });
+      }
+      return;
+    }
+    riskScale = 0.5;
+    const lastResume = s.tape.find((t) => t.text?.startsWith("resume · half"));
+    if (!lastResume || now - lastResume.t > 6 * 3600_000) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `session halt · ${sess} · net $${dayNet.toFixed(0)} · cap -$${cap.toFixed(0)} · vault safe · not Reset`,
-        tone: "warn",
+        text: `resume · half size · halt cooled 90m · 1 more stop ends the session · not Reset`,
+        tone: "info",
       });
     }
-    if (dayNet <= -cap || dayNet - oneR <= -cap) return;
   }
   let added = 0;
   const fresh: ClosedTrade[] = [];
@@ -1324,7 +1357,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const stopPx = clamped.stop;
         const stopDist = Math.abs(t.entryUsd - stopPx);
         const stopPct = stopDist / Math.max(1e-9, t.entryUsd);
-        const sized = ictRiskUsd(s, stopPct, lev);
+        const sized = ictRiskUsd(s, stopPct, lev, riskScale);
         const sizeUsd = sized.notional;
         const mark = b.last || t.entryUsd;
         const dir = t.side === "short" ? -1 : 1;
