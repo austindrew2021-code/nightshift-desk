@@ -927,7 +927,8 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
     }
     for (let i = 0; i < bars.length; i++) {
       const bar = bars[i]!;
-      const live = i === bars.length - 1 && last > 0 && Math.abs(last / Math.max(1e-9, bar.c) - 1) < 0.02;
+      const forming = i === bars.length - 1;
+      const live = forming && last > 0 && Math.abs(last / Math.max(1e-9, bar.c) - 1) < 0.02;
       const entryBar = opened > bar.t && opened < bar.t + dt;
       const hi = entryBar ? (live ? Math.max(p.entryUsd, last) : Math.max(p.entryUsd, bar.c)) : live ? Math.max(bar.h, last) : bar.h;
       const lo = entryBar ? (live ? Math.min(p.entryUsd, last) : Math.min(p.entryUsd, bar.c)) : live ? Math.min(bar.l, last) : bar.l;
@@ -958,7 +959,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         dead = true;
         break;
       }
-      p.markThru = bar.t;
+      if (!forming) p.markThru = bar.t;
       if (trail && p.partialed) {
         const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
         const wave = isWaveRide(p.side, mfe, risk, finite(b?.change24h));
