@@ -1367,9 +1367,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             liqCapped: clamped.capped,
           },
         ];
-        queueLiveOpen(s.open[s.open.length - 1]!);
         const opened = s.open[s.open.length - 1]!;
-        s.ictLivePend = [...(s.ictLivePend || []), opened];
+        queueLiveOpen(opened);
+        s.ictLivePend = [...(s.ictLivePend || []), { ...opened }];
         s.stats.taken += 1;
         s.stats.openCount = s.open.length;
         const openFee = Math.max(0, sizeUsd * 0.0006);
