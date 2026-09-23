@@ -215,9 +215,9 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     push(s, `LIVE skip ${p.symbol} · wallet $${eq.toFixed(2)} (need ≥$20 on futures)`, "warn");
     return;
   }
-  const notional = riskUsd / stopPct;
-  const lots = lotsFor(notional, p.entryUsd, c);
   const lev = Math.min(40, Math.max(20, Number(String(p.note.match(/(\d+)x/)?.[1] || 40))));
+  const notional = Math.min(riskUsd / stopPct, eq * lev * 0.85);
+  const lots = lotsFor(notional, p.entryUsd, c);
   const side = p.side === "long" ? "buy" : "sell";
   const stopPx = p.stopUsd || (p.side === "long" ? p.entryUsd * (1 - stopPct) : p.entryUsd * (1 + stopPct));
   const riskPx = Math.abs(p.entryUsd - stopPx);
