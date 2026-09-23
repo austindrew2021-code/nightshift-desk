@@ -1297,11 +1297,10 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         if (clamped.capped) continue;
         if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
         const fill = b.last || t.entryUsd;
-        const cur5 = (b.candles5 || [])[(b.candles5 || []).length - 1];
         const stopDist0 = Math.abs(t.entryUsd - t.stop);
-        if (cur5 && stopDist0 > 0) {
-          const dump = t.side === "long" ? cur5.o - fill : fill - cur5.o;
-          if (dump > 0.35 * stopDist0) continue;
+        if (stopDist0 > 0) {
+          const adverse = t.side === "long" ? t.entryUsd - fill : fill - t.entryUsd;
+          if (adverse > 0.35 * stopDist0) continue;
         }
         const cs5 = b.candles5 || [];
         const si = cs5.findIndex((c) => Math.abs(c.t - t.openedAt) < 4 * 60_000);
