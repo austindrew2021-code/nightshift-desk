@@ -1191,6 +1191,18 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       });
     }
   }
+  if (s.ictStyle === "cisd") {
+    const armed = s.tape.find((t) => t.text?.startsWith("15m CISD on"));
+    if (!armed || now - armed.t > 6 * 3600_000) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `15m CISD on · same A+ rules as 5m · stop must sit inside 40× · paper can hold both · not Reset`,
+        tone: "info",
+      });
+    }
+  }
   let added = 0;
   const fresh: ClosedTrade[] = [];
   const liveBooks = filtered.filter((b) => b.candles15.length >= 40);
@@ -1212,7 +1224,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       corr && corr.id !== b.id && s.ictStyle !== "cisd" ? scanSmt(b.candles15, corr.candles15, corr.symbol) : [];
     const s15 =
       s.ictStyle === "cisd"
-        ? []
+        ? b.candles15.length >= 80
+          ? scan5mCisd(b.candles15)
+              .filter((sig) => styleAllows(s.ictStyle, sig.setup))
+              .map((sig) => ({ ...sig, note: sig.note.replaceAll("5m", "15m") }))
+          : []
         : [...scanIct(b.candles15, { extra: 0 }), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
     if (s.ictStyle !== "cisd") {
       for (const sig of scanPlayback(b.candles15, b.candles1h)) {
@@ -1649,7 +1665,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ¾@${ICT_PARTIAL_R}R trail 5R${s.ictStyle === "cisd" ? " · no Silver · no 15m · no Playback" : ""}`,
+      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ¾@${ICT_PARTIAL_R}R trail 5R${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
       tone: "mute",
     });
   }
