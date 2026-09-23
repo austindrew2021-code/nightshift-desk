@@ -191,7 +191,10 @@ function push(s: EngineState, text: string, tone: "up" | "warn" | "mute" | "down
 }
 
 async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook) {
-  if (book.seats.length >= liveSeats()) return;
+  if (book.seats.length >= liveSeats()) {
+    push(s, `LIVE dry skip ${p.symbol} · seat already full`, "warn");
+    return;
+  }
   const c = await contractFor(p.symbol);
   if (!c) {
     log({ kind: "skip", why: "no-contract", symbol: p.symbol });
@@ -356,7 +359,7 @@ export async function syncKucoinLive(s: EngineState) {
   for (const p of [...queued, ...paperOpen]) {
     if (p.origin !== "ict") continue;
     if (seen.has(p.id + p.symbol) || book.seats.some((x) => x.paperId === p.id || x.symbol === p.symbol)) continue;
-    if (!queued.includes(p) && Date.now() - p.openedAt > 90_000) continue;
+    if (!queued.includes(p) && Date.now() - p.openedAt > 5 * 60_000) continue;
     try {
       await enter(s, p, mode, book);
     } catch (e) {
