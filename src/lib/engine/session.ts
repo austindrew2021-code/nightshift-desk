@@ -1202,13 +1202,13 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
-    const dryNote = s.tape.find((t) => t.text?.startsWith("dry only if still open"));
+    const dryNote = s.tape.find((t) => t.text?.startsWith("wick already at"));
     if (!dryNote) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `dry only if still open · a finished bar is not a fill · not Reset`,
+        text: `wick already at 0.5R is not an entry · same-second close is not a fill · not Reset`,
         tone: "info",
       });
     }
@@ -1363,7 +1363,13 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           const adverse = t.side === "long" ? t.entryUsd - fill : fill - t.entryUsd;
           if (adverse > 0.35 * stopDist0) continue;
           const favor = t.side === "long" ? fill - t.entryUsd : t.entryUsd - fill;
-          if (favor >= ICT_PARTIAL_R * stopDist0) continue;
+          const bar = (on15 ? b.candles15 : b.candles5)?.at(-1);
+          const extreme = bar ? (t.side === "long" ? bar.h : bar.l) : fill;
+          const wick = t.side === "long" ? extreme - t.entryUsd : t.entryUsd - extreme;
+          if (favor >= ICT_PARTIAL_R * stopDist0 || wick >= ICT_PARTIAL_R * stopDist0) {
+            s.ictSeen = [...s.ictSeen, key];
+            continue;
+          }
         }
         const cs5 = b.candles5 || [];
         const si = cs5.findIndex((c) => Math.abs(c.t - t.openedAt) < 4 * 60_000);
