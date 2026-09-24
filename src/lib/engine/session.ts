@@ -1202,6 +1202,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
+    const dryNote = s.tape.find((t) => t.text?.startsWith("dry only if still open"));
+    if (!dryNote) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `dry only if still open · a finished bar is not a fill · not Reset`,
+        tone: "info",
+      });
+    }
   }
   let added = 0;
   const fresh: ClosedTrade[] = [];
@@ -1352,6 +1362,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         if (stopDist0 > 0) {
           const adverse = t.side === "long" ? t.entryUsd - fill : fill - t.entryUsd;
           if (adverse > 0.35 * stopDist0) continue;
+          const favor = t.side === "long" ? fill - t.entryUsd : t.entryUsd - fill;
+          if (favor >= ICT_PARTIAL_R * stopDist0) continue;
         }
         const cs5 = b.candles5 || [];
         const si = cs5.findIndex((c) => Math.abs(c.t - t.openedAt) < 4 * 60_000);
@@ -1435,6 +1447,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           tone: "up",
         });
         added += 1;
+        continue;
+      }
+      // Already closed. Booking it pays the paper book for a move we could not send.
+      if (s.ictStyle === "cisd") {
+        s.ictSeen = [...s.ictSeen, key];
         continue;
       }
       if (t.closedAt < liveFromClosed) continue;
