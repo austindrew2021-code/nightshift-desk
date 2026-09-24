@@ -1,15 +1,39 @@
 /**
  * Headless ICT tick for GitHub Actions. Phone is a viewer of ict-state.json.
  */
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from "node:fs";
 import { ICT_ASSETS, type IctBook } from "../src/lib/engine/universe.ts";
 import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "../src/lib/market/kucoin-hot.ts";
-import { createEngine, tick, type EngineState } from "../src/lib/engine/session.ts";
+import { createEngine, tick, buryResurrected, type EngineState } from "../src/lib/engine/session.ts";
 import { syncKucoinLive, liveMode } from "../src/lib/engine/kucoin-live.ts";
-import type { Candle, MarketSnapshot } from "../src/lib/engine/types.ts";
+import type { Candle, ClosedTrade, MarketSnapshot } from "../src/lib/engine/types.ts";
 
 const STATE = process.env.ICT_STATE_PATH || "ict-state.json";
+const LEDGER = process.env.ICT_CLOSED_PATH || STATE.replace(/ict-state\.json$/, "ict-closed.jsonl");
 const START = Number(process.env.ICT_START_USD || 100);
+
+function readLedger(): ClosedTrade[] {
+  if (!existsSync(LEDGER)) return [];
+  const out: ClosedTrade[] = [];
+  for (const line of readFileSync(LEDGER, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line) as ClosedTrade);
+    } catch {
+      /* skip a torn line */
+    }
+  }
+  return out;
+}
+
+function rememberCloses(closed: ClosedTrade[]) {
+  const have = new Set(readLedger().map((c) => c.id));
+  for (const c of closed) {
+    if (c.origin !== "ict" || !c.id || have.has(c.id)) continue;
+    appendFileSync(LEDGER, JSON.stringify(c) + "\n");
+    have.add(c.id);
+  }
+}
 
 async function getJson(url: string, timeout = 8000): Promise<unknown> {
   const ctrl = new AbortController();
@@ -190,13 +214,32 @@ async function main() {
   market.solUsd = livePx.SOL || sol?.last || market.solUsd;
   market.btcUsd = livePx.BTC || btc?.last || market.btcUsd;
   s.solUsd = market.solUsd;
-  tick(s, market);
-  try {
-    await syncKucoinLive(s);
-  } catch (e) {
-    console.error("kucoin-live", e);
+  const lock = `${STATE}.lock`;
+  if (existsSync(lock)) {
+    const age = Date.now() - Number(readFileSync(lock, "utf8") || 0);
+    if (age >= 0 && age < 120_000) {
+      console.log(JSON.stringify({ t: Date.now(), skip: "tick already running" }));
+      return;
+    }
   }
-  writeFileSync(STATE, JSON.stringify(slim(s)));
+  writeFileSync(lock, String(Date.now()));
+  try {
+    buryResurrected(s, readLedger());
+    tick(s, market);
+    rememberCloses(s.closed);
+    try {
+      await syncKucoinLive(s);
+    } catch (e) {
+      console.error("kucoin-live", e);
+    }
+    writeFileSync(STATE, JSON.stringify(slim(s)));
+  } finally {
+    try {
+      unlinkSync(lock);
+    } catch {
+      /* lock already cleared */
+    }
+  }
   const klinesPath = STATE.replace(/ict-state\.json$/, "ict-klines.json");
   const klines: Record<string, { last: number; change24h: number; m15: Candle[]; m5: Candle[]; h1: Candle[] }> = {};
   for (const b of books) {

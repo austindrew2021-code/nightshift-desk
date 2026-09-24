@@ -1251,6 +1251,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
+    const stay = s.tape.find((t) => t.text?.startsWith("a scratch stays a scratch"));
+    if (!stay) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `a scratch stays a scratch · the prior bar already at 0.5R is not an entry · not Reset`,
+        tone: "info",
+      });
+    }
   }
   let added = 0;
   const fresh: ClosedTrade[] = [];
@@ -1402,10 +1412,13 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           const adverse = t.side === "long" ? t.entryUsd - fill : fill - t.entryUsd;
           if (adverse > 0.35 * stopDist0) continue;
           const favor = t.side === "long" ? fill - t.entryUsd : t.entryUsd - fill;
-          const bar = (on15 ? b.candles15 : b.candles5)?.at(-1);
-          const extreme = bar ? (t.side === "long" ? bar.h : bar.l) : fill;
-          const wick = t.side === "long" ? extreme - t.entryUsd : t.entryUsd - extreme;
-          if (favor >= ICT_PARTIAL_R * stopDist0 || wick >= ICT_PARTIAL_R * stopDist0) {
+          const frame = (on15 ? b.candles15 : b.candles5) ?? [];
+          const already = frame.slice(-2).some((w) => {
+            const extreme = t.side === "long" ? w.h : w.l;
+            const span = t.side === "long" ? extreme - t.entryUsd : t.entryUsd - extreme;
+            return span >= ICT_PARTIAL_R * stopDist0;
+          });
+          if (favor >= ICT_PARTIAL_R * stopDist0 || already) {
             s.ictSeen = [...s.ictSeen, key];
             continue;
           }
@@ -1653,6 +1666,61 @@ function repairIctCash(s: EngineState) {
     text: `ICT cash repaired · was ${was.toFixed(0)} · now $${next.toFixed(0)}`,
     tone: "warn",
   });
+}
+
+/** The first close for an entry wins. A later copy of the book cannot reopen it and pay it. */
+export function buryResurrected(s: EngineState, kept: ClosedTrade[]): void {
+  const groups = new Map<string, ClosedTrade[]>();
+  for (const c of kept) {
+    if (c.origin !== "ict" || !c.id) continue;
+    const key = `${c.symbol}|${c.side}|${c.openedAt}`;
+    const g = groups.get(key) ?? [];
+    if (!g.some((x) => x.id === c.id)) g.push(c);
+    groups.set(key, g);
+  }
+  for (const [key, rows] of groups) {
+    const [symbol, side, openedRaw] = key.split("|");
+    const openedAt = Number(openedRaw);
+    s.open = s.open.filter(
+      (p) => !(p.origin === "ict" && p.symbol === symbol && p.side === side && Math.abs(p.openedAt - openedAt) < 90_000),
+    );
+    const same = s.closed.filter(
+      (x) => x.origin === "ict" && x.symbol === symbol && x.side === side && Math.abs(x.openedAt - openedAt) < 90_000,
+    );
+    const stamp = (xs: ClosedTrade[]) =>
+      xs
+        .map((x) => `${x.id}:${finite(x.pnlUsd).toFixed(2)}`)
+        .sort()
+        .join(",");
+    if (stamp(same) === stamp(rows)) continue;
+    for (const x of same) {
+      s.cashUsd = finite(s.cashUsd) - finite(x.pnlUsd);
+      if (x.pnlUsd > 0.05) s.stats.wins = Math.max(0, s.stats.wins - 1);
+      else {
+        s.stats.losses = Math.max(0, s.stats.losses - 1);
+        s.dayLoss = Math.max(0, finite(s.dayLoss) - Math.abs(x.pnlUsd));
+      }
+    }
+    s.closed = s.closed.filter(
+      (x) => !(x.origin === "ict" && x.symbol === symbol && x.side === side && Math.abs(x.openedAt - openedAt) < 90_000),
+    );
+    for (const c of rows) {
+      s.cashUsd = finite(s.cashUsd) + finite(c.pnlUsd);
+      if (c.pnlUsd > 0.05) s.stats.wins += 1;
+      else {
+        s.stats.losses += 1;
+        s.dayLoss = finite(s.dayLoss) + Math.abs(c.pnlUsd);
+      }
+    }
+    s.closed = [...rows, ...s.closed].slice(0, 80);
+    pushTape(s, {
+      t: s.simT || Date.now(),
+      kind: "note",
+      symbol: "ICT",
+      text: `restored ${symbol} · a scratch cannot be paid later · not Reset`,
+      tone: "warn",
+    });
+  }
 }
 
 export function tick(s: EngineState, market: MarketSnapshot | null): EngineState {
