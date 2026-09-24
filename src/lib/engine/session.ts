@@ -1192,13 +1192,13 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     }
   }
   if (s.ictStyle === "cisd") {
-    const armed = s.tape.find((t) => t.text?.startsWith("15m CISD on"));
+    const armed = s.tape.find((t) => t.text?.startsWith("15m CISD live"));
     if (!armed || now - armed.t > 6 * 3600_000) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `15m CISD on · same A+ rules as 5m · stop must sit inside 40× · paper can hold both · not Reset`,
+        text: `15m CISD live · bar close is accepted for 30m · same A+ rules · not Reset`,
         tone: "info",
       });
     }
@@ -1286,9 +1286,12 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     for (const t of sim) {
       const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
       const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
+      const on15 = t.note.includes("15m");
+      const fromOpen = on15 ? now - 30 * 60_000 : liveFromOpen;
+      const fromClosed = on15 ? now - 35 * 60_000 : liveFromClosed;
       if (stillOpen) {
-        if (t.openedAt < liveFromOpen) continue;
-      } else if (t.openedAt < liveFromClosed || t.closedAt < liveFromClosed) {
+        if (t.openedAt < fromOpen) continue;
+      } else if (t.openedAt < fromClosed || t.closedAt < fromClosed) {
         continue;
       }
       const key = `${t.symbol}-${t.side}-${t.openedAt}`;
