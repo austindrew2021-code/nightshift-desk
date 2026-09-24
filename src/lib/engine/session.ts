@@ -1212,6 +1212,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
+    const deadNote = s.tape.find((t) => t.text?.startsWith("dead before the fill"));
+    if (!deadNote) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `dead before the fill is not a trade · two bars already against · not Reset`,
+        tone: "info",
+      });
+    }
   }
   let added = 0;
   const fresh: ClosedTrade[] = [];
@@ -1367,6 +1377,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           const extreme = bar ? (t.side === "long" ? bar.h : bar.l) : fill;
           const wick = t.side === "long" ? extreme - t.entryUsd : t.entryUsd - extreme;
           if (favor >= ICT_PARTIAL_R * stopDist0 || wick >= ICT_PARTIAL_R * stopDist0) {
+            s.ictSeen = [...s.ictSeen, key];
+            continue;
+          }
+        }
+        const deadSeries = (b.candles5 && b.candles5.length > 8 ? b.candles5 : b.candles15) ?? [];
+        const prior = deadSeries.filter((bar) => bar.t > t.openedAt + 30_000).slice(0, -1);
+        if (prior.length >= 2) {
+          const lastTwo = prior.slice(-2);
+          const against = lastTwo.every((bar) => (t.side === "long" ? bar.c < t.entryUsd : bar.c > t.entryUsd));
+          if (against) {
             s.ictSeen = [...s.ictSeen, key];
             continue;
           }
