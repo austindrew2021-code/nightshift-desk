@@ -129,6 +129,8 @@ export interface Position {
   realSol?: number;
   partialed?: boolean;
   markThru?: number;
+  /** Wall clock when the order was accepted. Wicks before this are not a fill. */
+  liveAt?: number;
 }
 
 export interface ClosedTrade {

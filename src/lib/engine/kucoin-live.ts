@@ -359,7 +359,10 @@ export async function syncKucoinLive(s: EngineState) {
   for (const p of [...queued, ...paperOpen]) {
     if (p.origin !== "ict") continue;
     if (!paperOpen.some((o) => o.id === p.id)) {
-      push(s, `LIVE dry skip ${p.symbol} · closed before the order`, "warn");
+      if (!seen.has(`skip:${p.id}`)) {
+        push(s, `LIVE dry skip ${p.symbol} · closed before the order`, "warn");
+        seen.add(`skip:${p.id}`);
+      }
       continue;
     }
     if (seen.has(p.id + p.symbol) || book.seats.some((x) => x.paperId === p.id || x.symbol === p.symbol)) continue;

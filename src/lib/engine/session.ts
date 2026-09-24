@@ -931,8 +931,17 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       const forming = i === bars.length - 1;
       const live = forming && last > 0 && Math.abs(last / Math.max(1e-9, bar.c) - 1) < 0.02;
       const entryBar = opened > bar.t && opened < bar.t + dt;
-      const hi = entryBar ? (live ? Math.max(p.entryUsd, last) : Math.max(p.entryUsd, bar.c)) : live ? Math.max(bar.h, last) : bar.h;
-      const lo = entryBar ? (live ? Math.min(p.entryUsd, last) : Math.min(p.entryUsd, bar.c)) : live ? Math.min(bar.l, last) : bar.l;
+      let hi = entryBar ? (live ? Math.max(p.entryUsd, last) : Math.max(p.entryUsd, bar.c)) : live ? Math.max(bar.h, last) : bar.h;
+      let lo = entryBar ? (live ? Math.min(p.entryUsd, last) : Math.min(p.entryUsd, bar.c)) : live ? Math.min(bar.l, last) : bar.l;
+      const born = p.liveAt || 0;
+      if (born > 0 && bar.t + dt <= born) {
+        if (!forming) p.markThru = bar.t;
+        continue;
+      }
+      if (born > 0 && bar.t <= born && born < bar.t + dt) {
+        hi = last;
+        lo = last;
+      }
       // INJ/ZEC class: wick 0.50–0.70R then death. Bank ¾ at 0.50R + BE before SL.
       if (trail && !p.partialed) {
         const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
@@ -1232,6 +1241,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
+    const wickBefore = s.tape.find((t) => t.text?.startsWith("wick before the fill"));
+    if (!wickBefore) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `wick before the fill is not the fill · not Reset`,
+        tone: "info",
+      });
+    }
   }
   let added = 0;
   const fresh: ClosedTrade[] = [];
@@ -1463,6 +1482,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             targetUsd,
             liqUsd: clamped.liq,
             liqCapped: clamped.capped,
+            liveAt: now,
           },
         ];
         const opened = s.open[s.open.length - 1]!;
