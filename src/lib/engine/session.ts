@@ -1222,6 +1222,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
+    const lateNote = s.tape.find((t) => t.text?.startsWith("no order if it dies"));
+    if (!lateNote) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `no order if it dies in the same second · not Reset`,
+        tone: "info",
+      });
+    }
   }
   let added = 0;
   const fresh: ClosedTrade[] = [];

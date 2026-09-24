@@ -358,6 +358,10 @@ export async function syncKucoinLive(s: EngineState) {
   const seen = new Set(book.seats.map((x) => x.paperId + x.symbol));
   for (const p of [...queued, ...paperOpen]) {
     if (p.origin !== "ict") continue;
+    if (!paperOpen.some((o) => o.id === p.id)) {
+      push(s, `LIVE dry skip ${p.symbol} · closed before the order`, "warn");
+      continue;
+    }
     if (seen.has(p.id + p.symbol) || book.seats.some((x) => x.paperId === p.id || x.symbol === p.symbol)) continue;
     if (!queued.includes(p) && Date.now() - p.openedAt > 5 * 60_000) continue;
     try {
