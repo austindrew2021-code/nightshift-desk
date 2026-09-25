@@ -218,7 +218,8 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     push(s, `LIVE skip ${p.symbol} · wallet $${eq.toFixed(2)} (need ≥$20 on futures)`, "warn");
     return;
   }
-  const lev = Math.min(40, Math.max(20, Number(String(p.note.match(/(\d+)x/)?.[1] || 40))));
+  const asked = Math.min(40, Math.max(1, Number(String(p.note.match(/(\d+)x/)?.[1] || 40))));
+  const lev = Math.min(asked, c.maxLeverage || asked);
   const notional = Math.min(riskUsd / stopPct, eq * lev * 0.85);
   const lots = lotsFor(notional, p.entryUsd, c);
   const side = p.side === "long" ? "buy" : "sell";
@@ -238,7 +239,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     symbol: c.symbol,
     side,
     type: "market",
-    lever: String(lev),
+    leverage: String(lev),
     size: lots,
     marginMode: "ISOLATED",
     reduceOnly: false,
@@ -265,7 +266,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     postOnly: true,
     reduceOnly: true,
     marginMode: "ISOLATED",
-    lever: String(lev),
+    leverage: String(lev),
   };
   const slBody: Record<string, unknown> = {
     clientOid: oid("sl"),
@@ -279,7 +280,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     reduceOnly: true,
     closeOrder: true,
     marginMode: "ISOLATED",
-    lever: String(lev),
+    leverage: String(lev),
   };
 
   let tpOid = "";
