@@ -266,7 +266,6 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     postOnly: true,
     reduceOnly: true,
     marginMode: "ISOLATED",
-    leverage: String(lev),
   };
   const slBody: Record<string, unknown> = {
     clientOid: oid("sl"),
@@ -280,7 +279,6 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     reduceOnly: true,
     closeOrder: true,
     marginMode: "ISOLATED",
-    leverage: String(lev),
   };
 
   let tpOid = "";
@@ -334,7 +332,6 @@ async function flatten(mode: LiveMode, seat: LiveSeat, why: string) {
         reduceOnly: true,
         closeOrder: true,
         marginMode: "ISOLATED",
-        lever: String(seat.lev),
       });
     } catch (e) {
       log({ kind: "flatten-fail", symbol: seat.symbol, err: String(e), why });
