@@ -137,9 +137,11 @@ function instOf(sym: string): string {
   return `${u}USDTM`;
 }
 
-function roundTick(px: number, tick: number) {
-  if (!(tick > 0)) return px;
-  return Math.round(px / tick) * tick;
+function pxStr(px: number, tick: number): string {
+  if (!(tick > 0)) return String(px);
+  const n = Math.round(px / tick) * tick;
+  const d = Math.min(8, Math.max(0, Math.round(-Math.log10(tick))));
+  return n.toFixed(d);
 }
 
 function lotsFor(notional: number, px: number, c: Contract) {
@@ -192,7 +194,7 @@ function push(s: EngineState, text: string, tone: "up" | "warn" | "mute" | "down
 
 async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook) {
   if (book.seats.length >= liveSeats()) {
-    push(s, `LIVE dry skip ${p.symbol} · seat already full`, "warn");
+    push(s, `LIVE skip ${p.symbol} · seat already full`, "warn");
     return;
   }
   const c = await contractFor(p.symbol);
@@ -225,12 +227,16 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   const side = p.side === "long" ? "buy" : "sell";
   const stopPx = p.stopUsd || (p.side === "long" ? p.entryUsd * (1 - stopPct) : p.entryUsd * (1 + stopPct));
   const riskPx = Math.abs(p.entryUsd - stopPx);
-  const tpPx = roundTick(
+  const tpPx = pxStr(
     p.side === "long" ? p.entryUsd + riskPx * ICT_PARTIAL_R : p.entryUsd - riskPx * ICT_PARTIAL_R,
     c.tickSize,
   );
-  const slPx = roundTick(
-    p.side === "long" ? Math.max(stopPx, p.entryUsd * (1 - ictLiqPct(lev) + 0.002)) : Math.min(stopPx, p.entryUsd * (1 + ictLiqPct(lev) - 0.002)),
+  const slRaw = p.side === "long"
+    ? Math.max(stopPx, p.entryUsd * (1 - ictLiqPct(lev) + 0.002))
+    : Math.min(stopPx, p.entryUsd * (1 + ictLiqPct(lev) - 0.002));
+  const slPx = pxStr(slRaw, c.tickSize);
+  const capPx = pxStr(
+    p.side === "long" ? p.entryUsd + riskPx * 0.2 : p.entryUsd - riskPx * 0.2,
     c.tickSize,
   );
 
@@ -238,7 +244,9 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     clientOid: oid("e"),
     symbol: c.symbol,
     side,
-    type: "market",
+    type: "limit",
+    price: capPx,
+    timeInForce: "IOC",
     leverage: String(lev),
     size: lots,
     marginMode: "ISOLATED",
@@ -255,7 +263,24 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     return;
   }
 
-  const tpLots = Math.max(c.lotSize, Math.floor(lots * 0.75 / c.lotSize) * c.lotSize);
+  let filled = lots;
+  if (mode === "on" && fillOid) {
+    await new Promise((r) => setTimeout(r, 400));
+    try {
+      const o = await kucoin<{ dealSize?: number; status?: string }>("GET", `/api/v1/orders/${fillOid}`);
+      filled = Math.floor(Number(o?.dealSize || 0) / c.lotSize) * c.lotSize;
+      log({ kind: "entry-state", symbol: p.symbol, dealSize: filled, status: o?.status, cap: capPx });
+    } catch (e) {
+      log({ kind: "entry-state-fail", err: String(e) });
+      filled = lots;
+    }
+    if (!(filled > 0)) {
+      push(s, `LIVE skip ${p.symbol} · price past ${capPx} · no chase`, "warn");
+      return;
+    }
+  }
+
+  const tpLots = Math.floor(filled * 0.75 / c.lotSize) * c.lotSize;
   const tpBody: Record<string, unknown> = {
     clientOid: oid("tp"),
     symbol: c.symbol,
@@ -275,7 +300,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     stop: p.side === "long" ? "down" : "up",
     stopPrice: String(slPx),
     stopPriceType: "TP",
-    size: lots,
+    size: filled,
     reduceOnly: true,
     closeOrder: true,
     marginMode: "ISOLATED",
@@ -283,10 +308,12 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
 
   let tpOid = "";
   let slOid = "";
-  try {
-    tpOid = String((await place(mode, tpBody)).orderId || "");
-  } catch (e) {
-    log({ kind: "tp-fail", err: String(e) });
+  if (tpLots >= c.lotSize) {
+    try {
+      tpOid = String((await place(mode, tpBody)).orderId || "");
+    } catch (e) {
+      log({ kind: "tp-fail", err: String(e) });
+    }
   }
   try {
     slOid = String((await place(mode, slBody)).orderId || "");
@@ -300,9 +327,9 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     inst: c.symbol,
     side: p.side,
     entry: p.entryUsd,
-    stop: slPx,
-    lots,
-    lotsLeft: lots,
+    stop: Number(slPx),
+    lots: filled,
+    lotsLeft: filled,
     lev,
     entryOid: fillOid,
     tpOid,
@@ -313,7 +340,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   saveBook(book);
   push(
     s,
-    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${lots} lots · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · ¾@${ICT_PARTIAL_R}R rest · SL ${slPx}`,
+    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · cap ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · ¾@${ICT_PARTIAL_R}R rest · SL ${slPx}`,
     "up",
   );
 }
