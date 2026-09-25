@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from "node:fs";
 import { ICT_ASSETS, type IctBook } from "../src/lib/engine/universe.ts";
 import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "../src/lib/market/kucoin-hot.ts";
-import { createEngine, tick, buryResurrected, type EngineState } from "../src/lib/engine/session.ts";
+import { createEngine, tick, buryResurrected, ingestIct, type EngineState } from "../src/lib/engine/session.ts";
 import { syncKucoinLive, liveMode } from "../src/lib/engine/kucoin-live.ts";
 import type { Candle, ClosedTrade, MarketSnapshot } from "../src/lib/engine/types.ts";
 
@@ -163,32 +163,10 @@ function load(): EngineState {
   return s;
 }
 
-async function main() {
-  const s = load();
-  const hot = await fetchKucoinHotAssets();
-  const seen = new Set(ICT_ASSETS.map((a) => a.id));
-  const assets = [...ICT_ASSETS];
-  for (const p of [...s.open, ...s.closed]) {
-    if (p.origin !== "ict" || !p.symbol || seen.has(p.symbol)) continue;
-    seen.add(p.symbol);
-    assets.push({ id: p.symbol, symbol: p.symbol, name: p.symbol, venue: "kucoin", instId: `${p.symbol}-USDT` });
-  }
-  for (const a of hot) {
-    if (seen.has(a.id)) continue;
-    seen.add(a.id);
-    assets.push(a);
-  }
-  const books: IctBook[] = [];
-  for (let i = 0; i < assets.length; i += 6) {
-    const chunk = assets.slice(i, i + 6);
-    const got = await Promise.allSettled(chunk.map(book));
-    for (const r of got) {
-      if (r.status === "fulfilled" && r.value.candles15.length > 20) books.push(r.value);
-    }
-  }
+function snapshot(books: IctBook[]): MarketSnapshot {
   const sol = books.find((b) => b.id === "SOL");
   const btc = books.find((b) => b.id === "BTC");
-  const market: MarketSnapshot = {
+  return {
     fetchedAt: Date.now(),
     solUsd: sol?.last || 100,
     btcUsd: btc?.last || 0,
@@ -207,13 +185,38 @@ async function main() {
     books,
     source: "kucoin",
   };
-  const livePx = await fetchKucoinAllLast();
-  for (const b of books) {
-    if (livePx[b.id]! > 0) applyLiveLast(b, livePx[b.id]!);
+}
+
+/** First valid coin sends before the rest of the list is downloaded. */
+async function sendEarly(s: EngineState, books: IctBook[]) {
+  if (!books.length) return;
+  if (s.open.some((p) => p.origin === "ict")) return;
+  const before = (s.ictLivePend || []).length;
+  ingestIct(s, snapshot(books));
+  if ((s.ictLivePend || []).length === before) return;
+  try {
+    await syncKucoinLive(s);
+  } catch (e) {
+    console.error("kucoin-live-early", e);
   }
-  market.solUsd = livePx.SOL || sol?.last || market.solUsd;
-  market.btcUsd = livePx.BTC || btc?.last || market.btcUsd;
-  s.solUsd = market.solUsd;
+  writeFileSync(STATE, JSON.stringify(slim(s)));
+}
+
+async function main() {
+  const s = load();
+  const hot = await fetchKucoinHotAssets();
+  const seen = new Set(ICT_ASSETS.map((a) => a.id));
+  const assets = [...ICT_ASSETS];
+  for (const p of [...s.open, ...s.closed]) {
+    if (p.origin !== "ict" || !p.symbol || seen.has(p.symbol)) continue;
+    seen.add(p.symbol);
+    assets.push({ id: p.symbol, symbol: p.symbol, name: p.symbol, venue: "kucoin", instId: `${p.symbol}-USDT` });
+  }
+  for (const a of hot) {
+    if (seen.has(a.id)) continue;
+    seen.add(a.id);
+    assets.push(a);
+  }
   const lock = `${STATE}.lock`;
   if (existsSync(lock)) {
     const age = Date.now() - Number(readFileSync(lock, "utf8") || 0);
@@ -223,8 +226,49 @@ async function main() {
     }
   }
   writeFileSync(lock, String(Date.now()));
+  const books: IctBook[] = [];
   try {
     buryResurrected(s, readLedger());
+    for (let i = 0; i < assets.length; i += 6) {
+      const chunk = assets.slice(i, i + 6);
+      const got = await Promise.allSettled(chunk.map(book));
+      const fresh: IctBook[] = [];
+      for (const r of got) {
+        if (r.status === "fulfilled" && r.value.candles15.length > 20) {
+          books.push(r.value);
+          fresh.push(r.value);
+        }
+      }
+      await sendEarly(s, fresh);
+    }
+    const sol = books.find((b) => b.id === "SOL");
+    const btc = books.find((b) => b.id === "BTC");
+    const market: MarketSnapshot = {
+      fetchedAt: Date.now(),
+      solUsd: sol?.last || 100,
+      btcUsd: btc?.last || 0,
+      solChange24h: sol?.change24h || 0,
+      btcChange24h: btc?.change24h || 0,
+      fundingSol: 0,
+      oiSolUsd: 0,
+      longShortSol: 1,
+      fearGreed: 50,
+      fearLabel: "Neutral",
+      candles15: sol?.candles15 ?? [],
+      candles1h: sol?.candles1h ?? [],
+      candles5: sol?.candles5 ?? [],
+      launches: [],
+      livePump: false,
+      books,
+      source: "kucoin",
+    };
+    const livePx = await fetchKucoinAllLast();
+    for (const b of books) {
+      if (livePx[b.id]! > 0) applyLiveLast(b, livePx[b.id]!);
+    }
+    market.solUsd = livePx.SOL || sol?.last || market.solUsd;
+    market.btcUsd = livePx.BTC || btc?.last || market.btcUsd;
+    s.solUsd = market.solUsd;
     tick(s, market);
     rememberCloses(s.closed);
     try {
