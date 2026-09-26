@@ -43,6 +43,10 @@ export function isSilverPm(t: number): boolean {
 export function isNyPm(t: number): boolean {
   return inWindow(t, 13.5, 16);
 }
+export function isFillWindow(t: number): boolean {
+  const h = nyHour(t);
+  return h < 2 || (h >= 5 && h < 7) || (h >= 16 && h < 20);
+}
 export function inKill(t: number): boolean {
   return isLondon(t) || isNyAm(t) || isSilver(t) || isSilverPm(t) || isNyPm(t);
 }
@@ -1031,7 +1035,7 @@ export function scan5mCisd(cs: Candle[]): IctSignal[] {
 
   for (let i = 32; i < cs.length; i++) {
     const c = cs[i]!;
-    if (!inKill(c.t) && !(isAsia(c.t) && nyHour(c.t) >= 20)) continue;
+    if (!inKill(c.t) && !(isAsia(c.t) && nyHour(c.t) >= 20) && !isFillWindow(c.t)) continue;
     const day = nyParts(c.t).day;
     const days = buildDayMap(cs, i);
     const pd = prevDayOf(days, day);
@@ -1075,9 +1079,12 @@ function pickKill(raw: IctSignal[]): IctSignal[] {
   const kzOf = (t: number) => {
     const h = nyHour(t);
     if (h >= 2 && h < 5) return "ldn";
+    if (h >= 5 && h < 7) return "pre";
     if (h >= 7 && h < 11) return "am";
     if (h >= 13.5 && h < 16) return "pm";
-    if (h >= 20 || h < 2) return "asia";
+    if (h >= 16 && h < 20) return "late";
+    if (h >= 20) return "asia";
+    if (h < 2) return "deep";
     return "x";
   };
   const by = new Map<string, IctSignal[]>();
