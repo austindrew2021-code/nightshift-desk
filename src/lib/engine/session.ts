@@ -37,7 +37,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { fadingAcceptedBreak, inKill, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows, exitTells } from "./ict";
+import { fadingAcceptedBreak, inKill, isFillWindow, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows, exitTells } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import { ICT_ASSETS, type IctBook } from "./universe";
 import { queueLiveOpen } from "./live-pend";
@@ -1285,7 +1285,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       s.ictStyle === "cisd"
         ? b.candles15.length >= 80
           ? scan5mCisd(b.candles15)
-              .filter((sig) => styleAllows(s.ictStyle, sig.setup))
+              .filter((sig) => styleAllows(s.ictStyle, sig.setup) && !isFillWindow(sig.t))
               .map((sig) => ({ ...sig, note: sig.note.replaceAll("5m", "15m") }))
           : []
         : [...scanIct(b.candles15, { extra: 0 }), ...extra].filter((x) => styleAllows(s.ictStyle, x.setup));
