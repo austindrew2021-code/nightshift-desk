@@ -277,16 +277,24 @@ async function main() {
   try {
     buryResurrected(s, readLedger());
     if (!s.open.some((p) => p.origin === "ict")) {
-      for (let i = 0; i < assets.length; i += 8) {
-        const chunk = assets.slice(i, i + 8);
-        const got = await Promise.allSettled(chunk.map(fastBook));
-        const fresh: IctBook[] = [];
-        for (const r of got) {
-          if (r.status === "fulfilled" && (r.value.candles5?.length ?? 0) >= 48) fresh.push(r.value);
+      const queue = [...assets];
+      let sending: Promise<void> = Promise.resolve();
+      const worker = async () => {
+        while (queue.length && !s.open.some((p) => p.origin === "ict")) {
+          const a = queue.shift();
+          if (!a) return;
+          try {
+            const b = await fastBook(a);
+            if ((b.candles5?.length ?? 0) < 48) continue;
+            if (s.open.some((p) => p.origin === "ict")) return;
+            sending = sending.then(() => sendEarly(s, [b]));
+            await sending;
+          } catch {
+            /* one coin can fail; the rest still send */
+          }
         }
-        await sendEarly(s, fresh);
-        if (s.open.some((p) => p.origin === "ict")) break;
-      }
+      };
+      await Promise.all(Array.from({ length: 12 }, () => worker()));
     }
     for (let i = 0; i < assets.length; i += 6) {
       const chunk = assets.slice(i, i + 6);
