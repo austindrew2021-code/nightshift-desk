@@ -164,6 +164,21 @@ async function place(mode: LiveMode, body: Record<string, unknown>) {
   return kucoin<{ orderId?: string }>("POST", "/api/v1/orders", body);
 }
 
+async function placeStop(mode: LiveMode, body: Record<string, unknown>): Promise<string> {
+  let last = "";
+  for (let i = 0; i < 3; i++) {
+    try {
+      const id = String((await place(mode, { ...body, clientOid: oid("sl") })).orderId || "");
+      if (id) return id;
+    } catch (e) {
+      last = String(e);
+      log({ kind: "sl-fail", try: i + 1, err: last });
+    }
+    if (i < 2) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+  }
+  return "";
+}
+
 async function cancel(mode: LiveMode, id?: string) {
   if (!id || id.startsWith("dry-")) return;
   if (mode !== "on") return;
@@ -306,19 +321,34 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     marginMode: "ISOLATED",
   };
 
-  let tpOid = "";
   let slOid = "";
+  slOid = await placeStop(mode, slBody);
+  if (!slOid) {
+    log({ kind: "sl-naked", symbol: p.symbol });
+    try {
+      await place(mode, {
+        clientOid: oid("x"),
+        symbol: c.symbol,
+        side: p.side === "long" ? "sell" : "buy",
+        type: "market",
+        size: filled,
+        reduceOnly: true,
+        closeOrder: true,
+        marginMode: "ISOLATED",
+      });
+    } catch (e) {
+      log({ kind: "sl-flatten-fail", symbol: p.symbol, err: String(e) });
+    }
+    push(s, `LIVE flatten ${p.symbol} · stop did not stick`, "down");
+    return;
+  }
+  let tpOid = "";
   if (tpLots >= c.lotSize) {
     try {
       tpOid = String((await place(mode, tpBody)).orderId || "");
     } catch (e) {
       log({ kind: "tp-fail", err: String(e) });
     }
-  }
-  try {
-    slOid = String((await place(mode, slBody)).orderId || "");
-  } catch (e) {
-    log({ kind: "sl-fail", err: String(e) });
   }
 
   book.seats.push({
@@ -367,6 +397,40 @@ async function flatten(mode: LiveMode, seat: LiveSeat, why: string) {
   log({ kind: "flatten", symbol: seat.symbol, why });
 }
 
+/** A position the process does not know about has no stop. Close it. */
+async function flattenUnknown(mode: LiveMode, book: LiveBook, s: EngineState) {
+  let rows: { symbol?: string; currentQty?: string | number; isOpen?: boolean }[] = [];
+  try {
+    const data = await kucoin<typeof rows | { items?: typeof rows }>("GET", "/api/v1/positions");
+    rows = Array.isArray(data) ? data : data?.items || [];
+  } catch (e) {
+    log({ kind: "pos-fail", err: String(e) });
+    return;
+  }
+  const known = new Set(book.seats.map((x) => x.inst));
+  for (const p of rows) {
+    const qty = Number(p.currentQty || 0);
+    const inst = String(p.symbol || "");
+    if (!inst || !(Math.abs(qty) > 0) || known.has(inst)) continue;
+    try {
+      await place(mode, {
+        clientOid: oid("x"),
+        symbol: inst,
+        side: qty > 0 ? "sell" : "buy",
+        type: "market",
+        size: Math.abs(qty),
+        reduceOnly: true,
+        closeOrder: true,
+        marginMode: "ISOLATED",
+      });
+      log({ kind: "orphan-flat", symbol: inst, qty });
+      push(s, `LIVE flatten ${inst} · position had no stop`, "down");
+    } catch (e) {
+      log({ kind: "orphan-fail", symbol: inst, err: String(e) });
+    }
+  }
+}
+
 /** Call after paper tick. Paper book unchanged. */
 export async function syncKucoinLive(s: EngineState) {
   const mode = liveMode();
@@ -377,6 +441,7 @@ export async function syncKucoinLive(s: EngineState) {
     return;
   }
   const book = loadBook();
+  if (mode === "on") await flattenUnknown(mode, book, s);
   const paperOpen = s.open.filter((p) => p.origin === "ict");
   const queued = [...(s.ictLivePend || []), ...ictLivePend.splice(0)];
   s.ictLivePend = [];
