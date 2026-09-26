@@ -5,7 +5,7 @@
 import { createHmac } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import type { EngineState, Position, Side } from "./types";
-import { ICT_HARD_RISK_PCT, ICT_PARTIAL_R, ictLiqPct } from "./types";
+import { ICT_HARD_RISK_PCT, ictLiqPct } from "./types";
 import { ictLivePend } from "./live-pend";
 
 const BASE = "https://api-futures.kucoin.com";
@@ -243,7 +243,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   const stopPx = p.stopUsd || (p.side === "long" ? p.entryUsd * (1 - stopPct) : p.entryUsd * (1 + stopPct));
   const riskPx = Math.abs(p.entryUsd - stopPx);
   const tpPx = pxStr(
-    p.side === "long" ? p.entryUsd + riskPx * ICT_PARTIAL_R : p.entryUsd - riskPx * ICT_PARTIAL_R,
+    p.side === "long" ? p.entryUsd + riskPx * 1 : p.entryUsd - riskPx * 1,
     c.tickSize,
   );
   const slRaw = p.side === "long"
@@ -295,7 +295,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     }
   }
 
-  const tpLots = Math.floor(filled * 0.75 / c.lotSize) * c.lotSize;
+  const tpLots = Math.floor(filled / c.lotSize) * c.lotSize;
   const tpBody: Record<string, unknown> = {
     clientOid: oid("tp"),
     symbol: c.symbol,
@@ -370,7 +370,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   saveBook(book);
   push(
     s,
-    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · cap ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · ¾@${ICT_PARTIAL_R}R rest · SL ${slPx}`,
+    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · cap ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · full @ 1R · flat 1h · SL ${slPx}`,
     "up",
   );
 }
