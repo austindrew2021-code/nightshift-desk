@@ -207,15 +207,27 @@ function push(s: EngineState, text: string, tone: "up" | "warn" | "mute" | "down
   ].slice(0, 80);
 }
 
+function releasePaper(s: EngineState, p: Position, why: string) {
+  const fee = Math.max(0, Number(p.sizeUsd) * 0.0006);
+  s.cashUsd = Number(s.cashUsd) + fee;
+  s.stats.feesUsd = Math.max(0, Number(s.stats.feesUsd) - fee);
+  s.open = s.open.filter((x) => x.id !== p.id);
+  s.ictLivePend = (s.ictLivePend || []).filter((x) => x.id !== p.id);
+  s.stats.openCount = s.open.length;
+  push(s, `not a fill ${p.symbol} · ${why} · seat free · not a halt`, "warn");
+}
+
 async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook) {
   if (book.seats.length >= liveSeats()) {
     push(s, `LIVE skip ${p.symbol} · seat already full`, "warn");
+    if (mode === "on") releasePaper(s, p, "seat full");
     return;
   }
   const c = await contractFor(p.symbol);
   if (!c) {
     log({ kind: "skip", why: "no-contract", symbol: p.symbol });
     push(s, `LIVE dry skip ${p.symbol} · no ${instOf(p.symbol)} contract`, "warn");
+    if (mode === "on") releasePaper(s, p, "no contract");
     return;
   }
   let eq = liveUsd();
@@ -225,6 +237,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     } catch (e) {
       log({ kind: "equity-fail", err: String(e) });
       push(s, `LIVE equity fail · ${String(e).slice(0, 80)}`, "down");
+      releasePaper(s, p, "equity fail");
       return;
     }
   }
@@ -233,6 +246,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   if (eq < 20 || riskUsd < 2) {
     log({ kind: "skip", why: "no-funds", eq, riskUsd });
     push(s, `LIVE skip ${p.symbol} · wallet $${eq.toFixed(2)} (need ≥$20 on futures)`, "warn");
+    if (mode === "on") releasePaper(s, p, "wallet");
     return;
   }
   const asked = Math.min(40, Math.max(1, Number(String(p.note.match(/(\d+)x/)?.[1] || 40))));
@@ -275,22 +289,40 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   } catch (e) {
     log({ kind: "entry-fail", symbol: p.symbol, err: String(e) });
     push(s, `LIVE entry FAIL ${p.symbol} · ${String(e).slice(0, 80)}`, "down");
+    if (mode === "on") releasePaper(s, p, "order rejected");
     return;
   }
 
   let filled = lots;
   if (mode === "on" && fillOid) {
-    await new Promise((r) => setTimeout(r, 400));
-    try {
-      const o = await kucoin<{ dealSize?: number; status?: string }>("GET", `/api/v1/orders/${fillOid}`);
-      filled = Math.floor(Number(o?.dealSize || 0) / c.lotSize) * c.lotSize;
-      log({ kind: "entry-state", symbol: p.symbol, dealSize: filled, status: o?.status, cap: capPx });
-    } catch (e) {
-      log({ kind: "entry-state-fail", err: String(e) });
-      filled = lots;
+    let known = false;
+    for (let i = 0; i < 2 && !known; i++) {
+      await new Promise((r) => setTimeout(r, 400));
+      try {
+        const o = await kucoin<{ dealSize?: number; status?: string }>("GET", `/api/v1/orders/${fillOid}`);
+        filled = Math.floor(Number(o?.dealSize || 0) / c.lotSize) * c.lotSize;
+        known = true;
+        log({ kind: "entry-state", symbol: p.symbol, dealSize: filled, status: o?.status, cap: capPx });
+      } catch (e) {
+        log({ kind: "entry-state-fail", try: i + 1, err: String(e) });
+      }
     }
-    if (!(filled > 0)) {
+    if (!known) {
+      try {
+        const data = await kucoin<{ symbol?: string; currentQty?: string | number }[] | { items?: { symbol?: string; currentQty?: string | number }[] }>("GET", "/api/v1/positions");
+        const rows = Array.isArray(data) ? data : data?.items || [];
+        const qty = Number(rows.find((r) => r.symbol === c.symbol)?.currentQty || 0);
+        if (Math.abs(qty) > 0) {
+          filled = lots;
+          known = true;
+        }
+      } catch (e) {
+        log({ kind: "entry-pos-fail", err: String(e) });
+      }
+    }
+    if (!known || !(filled > 0)) {
       push(s, `LIVE skip ${p.symbol} · price past ${capPx} · no chase`, "warn");
+      releasePaper(s, p, "not filled");
       return;
     }
   }
@@ -340,6 +372,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
       log({ kind: "sl-flatten-fail", symbol: p.symbol, err: String(e) });
     }
     push(s, `LIVE flatten ${p.symbol} · stop did not stick`, "down");
+    if (mode === "on") releasePaper(s, p, "flattened, no stop");
     return;
   }
   let tpOid = "";
