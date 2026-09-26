@@ -1068,6 +1068,13 @@ export function scan5mCisd(cs: Candle[]): IctSignal[] {
     if (!sig) continue;
     // Judas 7–10 NY: 5m BSL shorts are the fake open. London / PM shorts stay (BR).
     if (sig.side === "short" && nyHour(c.t) >= 7 && nyHour(c.t) < 10) continue;
+    // A close already 0.6R through the entry, toward the stop, is a failed level.
+    const riskPx = Math.abs(sig.entry - sig.stop);
+    const bar = cs[sig.i] ?? c;
+    if (riskPx > 0) {
+      const wrong = sig.side === "long" ? sig.entry - bar.c : bar.c - sig.entry;
+      if (wrong / riskPx > 0.6) continue;
+    }
     if (out.some((x) => Math.abs(x.i - sig.i) < 6 && x.side === sig.side)) continue;
     out.push(sig);
   }
