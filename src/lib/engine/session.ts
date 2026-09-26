@@ -1280,9 +1280,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   }
   let added = 0;
   const fresh: ClosedTrade[] = [];
-  const liveBooks = filtered.filter((b) => b.candles15.length >= 40);
+  const liveBooks = filtered.filter((b) =>
+    s.ictStyle === "cisd" ? (b.candles5?.length ?? 0) >= 48 : b.candles15.length >= 40,
+  );
   s.stats.scanned = Math.max(s.stats.scanned, liveBooks.length);
-  const ref = liveBooks.find((b) => b.id === "BTC") ?? liveBooks[0];
+  const ref = liveBooks.find((b) => b.id === "BTC" && b.candles15.length >= 40) ?? liveBooks.find((b) => b.candles15.length >= 40);
   if (ref) {
     const prev = s.ictRegime;
     const rg = readRegime(ref.candles15, prev, ref.candles1h);

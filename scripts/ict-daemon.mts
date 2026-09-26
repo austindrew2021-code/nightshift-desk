@@ -70,8 +70,12 @@ async function main() {
     const code = await run("npx", ["tsx", "scripts/ict-worker.mts"]);
     if (code !== 0) console.error("tick failed", code);
     else await pushLive();
-    const wait = Math.max(2000, every - (Date.now() - t0));
-    await new Promise((r) => setTimeout(r, wait));
+    const now = Date.now();
+    const period = 5 * 60 * 1000;
+    const since = now % period;
+    const untilBar = since < 8_000 ? every : period - since + 2_000;
+    const heartbeat = Math.max(2_000, every - (now - t0));
+    await new Promise((r) => setTimeout(r, Math.min(heartbeat, untilBar)));
   }
 }
 

@@ -69,6 +69,52 @@ function kucoinCandles(data: unknown): Candle[] {
   return parsed.slice(-200);
 }
 
+function futInst(sym: string): string {
+  const u = sym.toUpperCase();
+  if (u === "BTC" || u === "XBT") return "XBTUSDTM";
+  return `${u}USDTM`;
+}
+
+function futCandles(data: unknown): Candle[] {
+  const rows = (data as { data?: unknown })?.data;
+  if (!Array.isArray(rows)) return [];
+  const parsed: Candle[] = [];
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    const t = Number(row[0]);
+    const o = Number(row[1]);
+    const h = Number(row[2]);
+    const l = Number(row[3]);
+    const c = Number(row[4]);
+    const v = Number(row[5]);
+    if (!t || !o) continue;
+    parsed.push({ t: t > 1e12 ? t : t * 1000, o, h, l, c, v });
+  }
+  parsed.sort((a, b) => a.t - b.t);
+  return parsed.slice(-200);
+}
+
+/** One futures request. The order uses this. Spot 15m and 1h are for the chart and can wait. */
+async function fastBook(a: (typeof ICT_ASSETS)[number]): Promise<IctBook> {
+  const raw = await getJson(
+    `https://api-futures.kucoin.com/api/v1/kline/query?symbol=${encodeURIComponent(futInst(a.id))}&granularity=5`,
+    4000,
+  );
+  const c5 = futCandles(raw).filter((c) => c.t + 5 * 60 * 1000 <= Date.now() + 1500);
+  const last = c5.length ? c5[c5.length - 1]!.c : 0;
+  return {
+    id: a.id,
+    symbol: a.symbol,
+    name: a.name,
+    last,
+    change24h: 0,
+    candles15: [],
+    candles5: c5,
+    candles1h: [],
+    source: "kucoin",
+  };
+}
+
 async function book(a: (typeof ICT_ASSETS)[number]): Promise<IctBook> {
   const [stats, m15, m5, h1] = await Promise.all([
     getJson(`https://api.kucoin.com/api/v1/market/stats?symbol=${encodeURIComponent(a.instId)}`),
@@ -227,8 +273,21 @@ async function main() {
   }
   writeFileSync(lock, String(Date.now()));
   const books: IctBook[] = [];
+  let livePx: Record<string, number> = {};
   try {
     buryResurrected(s, readLedger());
+    if (!s.open.some((p) => p.origin === "ict")) {
+      for (let i = 0; i < assets.length; i += 8) {
+        const chunk = assets.slice(i, i + 8);
+        const got = await Promise.allSettled(chunk.map(fastBook));
+        const fresh: IctBook[] = [];
+        for (const r of got) {
+          if (r.status === "fulfilled" && (r.value.candles5?.length ?? 0) >= 48) fresh.push(r.value);
+        }
+        await sendEarly(s, fresh);
+        if (s.open.some((p) => p.origin === "ict")) break;
+      }
+    }
     for (let i = 0; i < assets.length; i += 6) {
       const chunk = assets.slice(i, i + 6);
       const got = await Promise.allSettled(chunk.map(book));
@@ -262,7 +321,8 @@ async function main() {
       books,
       source: "kucoin",
     };
-    const livePx = await fetchKucoinAllLast();
+    const livePxNow = await fetchKucoinAllLast();
+    livePx = livePxNow;
     for (const b of books) {
       if (livePx[b.id]! > 0) applyLiveLast(b, livePx[b.id]!);
     }
