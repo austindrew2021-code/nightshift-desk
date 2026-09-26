@@ -73,7 +73,7 @@ async function main() {
     const now = Date.now();
     const period = 5 * 60 * 1000;
     const since = now % period;
-    const untilBar = since < 8_000 ? every : period - since + 2_000;
+    const untilBar = since < 8_000 ? every : period - since + 400;
     const heartbeat = Math.max(2_000, every - (now - t0));
     await new Promise((r) => setTimeout(r, Math.min(heartbeat, untilBar)));
   }

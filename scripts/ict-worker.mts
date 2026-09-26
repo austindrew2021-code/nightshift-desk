@@ -248,6 +248,38 @@ async function sendEarly(s: EngineState, books: IctBook[]) {
   writeFileSync(STATE, JSON.stringify(slim(s)));
 }
 
+/** One pass for this 5m close. If KuCoin has not published the candle yet, the caller tries again. */
+async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number][], caught: { t: number }) {
+  const period = 5 * 60 * 1000;
+  const closedOpen = Math.floor(Date.now() / period) * period - period;
+  if (caught.t === closedOpen) return;
+  if (s.open.some((p) => p.origin === "ict")) {
+    caught.t = closedOpen;
+    return;
+  }
+  const queue = [...assets];
+  let sending: Promise<void> = Promise.resolve();
+  let saw = false;
+  const worker = async () => {
+    while (queue.length && !s.open.some((p) => p.origin === "ict")) {
+      const a = queue.shift();
+      if (!a) return;
+      try {
+        const b = await fastBook(a);
+        if ((b.candles5?.length ?? 0) < 48) continue;
+        if (b.candles5.some((c) => c.t === closedOpen)) saw = true;
+        if (s.open.some((p) => p.origin === "ict")) return;
+        sending = sending.then(() => sendEarly(s, [b]));
+        await sending;
+      } catch {
+        /* one coin can fail; the rest still send */
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 12 }, () => worker()));
+  if (saw) caught.t = closedOpen;
+}
+
 async function main() {
   const s = load();
   const hot = await fetchKucoinHotAssets();
@@ -276,27 +308,10 @@ async function main() {
   let livePx: Record<string, number> = {};
   try {
     buryResurrected(s, readLedger());
-    if (!s.open.some((p) => p.origin === "ict")) {
-      const queue = [...assets];
-      let sending: Promise<void> = Promise.resolve();
-      const worker = async () => {
-        while (queue.length && !s.open.some((p) => p.origin === "ict")) {
-          const a = queue.shift();
-          if (!a) return;
-          try {
-            const b = await fastBook(a);
-            if ((b.candles5?.length ?? 0) < 48) continue;
-            if (s.open.some((p) => p.origin === "ict")) return;
-            sending = sending.then(() => sendEarly(s, [b]));
-            await sending;
-          } catch {
-            /* one coin can fail; the rest still send */
-          }
-        }
-      };
-      await Promise.all(Array.from({ length: 12 }, () => worker()));
-    }
+    const caught = { t: 0 };
+    await scanFreshClose(s, assets, caught);
     for (let i = 0; i < assets.length; i += 6) {
+      await scanFreshClose(s, assets, caught);
       const chunk = assets.slice(i, i + 6);
       const got = await Promise.allSettled(chunk.map(book));
       const fresh: IctBook[] = [];
