@@ -1250,6 +1250,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
+    const priorWick = s.tape.find((t) => t.text?.startsWith("only the signal candle"));
+    if (!priorWick) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `only the signal candle can be already at 0.5R · the bar before it does not count · not Reset`,
+        tone: "info",
+      });
+    }
     const freshWin = s.tape.find((t) => t.text?.startsWith("order only in the first minute"));
     if (!freshWin) {
       pushTape(s, {
@@ -1444,11 +1454,10 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           if (adverse > 0.35 * stopDist0) continue;
           const favor = t.side === "long" ? fill - t.entryUsd : t.entryUsd - fill;
           const frame = (on15 ? b.candles15 : b.candles5) ?? [];
-          const already = frame.slice(-2).some((w) => {
-            const extreme = t.side === "long" ? w.h : w.l;
-            const span = t.side === "long" ? extreme - t.entryUsd : t.entryUsd - extreme;
-            return span >= ICT_PARTIAL_R * stopDist0;
-          });
+          const signalBar = frame.find((w) => Math.abs(w.t - t.openedAt) < 60_000);
+          const already = signalBar
+            ? (t.side === "long" ? signalBar.h - t.entryUsd : t.entryUsd - signalBar.l) >= ICT_PARTIAL_R * stopDist0
+            : false;
           if (favor >= ICT_PARTIAL_R * stopDist0 || already) {
             s.ictSeen = [...s.ictSeen, key];
             continue;
