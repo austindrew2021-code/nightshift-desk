@@ -1250,6 +1250,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
+    const closeFill = s.tape.find((t) => t.text?.startsWith("the close is the fill"));
+    if (!closeFill) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `the close is the fill when the candle already traded the entry · same 0.2R cap · not Reset`,
+        tone: "info",
+      });
+    }
     const awake = s.tape.find((t) => t.text?.startsWith("scanner is awake before the close"));
     if (!awake) {
       pushTape(s, {
@@ -1394,9 +1404,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
     });
     const MEME = new Set(["FARTCOIN", "BONK", "WIF", "PEPE", "FLOKI", "PENGU", "MARSCOIN"]);
     for (const t of sim) {
-      const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
-      const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
+      const last5 = b.candles5?.[b.candles5.length - 1]?.t ?? 0;
+      const last15 = b.candles15[b.candles15.length - 1]?.t ?? 0;
       const on15 = t.note.includes("15m");
+      const lastT = on15 ? last15 || last5 : last5 || last15;
+      const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
       const fromOpen = on15 ? liveFromOpen15 : liveFromOpen;
       const fromClosed = on15 ? now - 35 * 60_000 : liveFromClosed;
       if (stillOpen) {

@@ -1965,6 +1965,9 @@ export function simulateIct(
     let curTgt = trail ? twoR(s.side, s.entry, workStop, s.target, tgtR) : s.target;
     const risk = Math.abs(s.entry - workStop) || 1;
     let hit1 = false;
+    const signalBar = cs[s.i];
+    const lastBar = s.i === cs.length - 1;
+    if (lastBar && signalBar && signalBar.l <= s.entry && signalBar.h >= s.entry) filled = true;
     for (let i = s.i + 1; i < cs.length; i++) {
       const c = cs[i]!;
       if (!filled) {
