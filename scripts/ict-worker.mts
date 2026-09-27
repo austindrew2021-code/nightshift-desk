@@ -280,6 +280,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
     if (!ready) return;
   }
   const queue = [...assets];
+  const missing: (typeof ICT_ASSETS)[number][] = [];
   let sending: Promise<void> = Promise.resolve();
   let saw = false;
   const worker = async () => {
@@ -290,6 +291,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
         const b = await fastBook(a);
         if ((b.candles5?.length ?? 0) < 48) continue;
         if (b.candles5.some((c) => c.t === closedOpen)) saw = true;
+        else missing.push(a);
         if (s.open.some((p) => p.origin === "ict")) return;
         sending = sending.then(() => sendEarly(s, [b]));
         await sending;
@@ -299,6 +301,26 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
     }
   };
   await Promise.all(Array.from({ length: 12 }, () => worker()));
+  if (missing.length && saw && !s.open.some((p) => p.origin === "ict")) {
+    await new Promise((r) => setTimeout(r, 500));
+    const again = [...missing];
+    const retry = async () => {
+      while (again.length && !s.open.some((p) => p.origin === "ict")) {
+        const a = again.shift();
+        if (!a) return;
+        try {
+          const b = await fastBook(a);
+          if (!b.candles5?.some((c) => c.t === closedOpen)) continue;
+          saw = true;
+          sending = sending.then(() => sendEarly(s, [b]));
+          await sending;
+        } catch {
+          /* this coin stays out for this close */
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: 12 }, () => retry()));
+  }
   if (saw) caught.t = closedOpen;
 }
 
