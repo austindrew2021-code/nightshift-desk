@@ -144,7 +144,12 @@ function pxStr(px: number, tick: number): string {
   return n.toFixed(d);
 }
 
-/** Stop and 1R sell. Neither uses closeOrder, so KuCoin does not cancel the sell. */
+/** Cancel the leftover order only when the exchange says this symbol is flat. A missing symbol is not flat. */
+export function positionIsFlat(qty: Map<string, number> | null, inst: string, ageMs: number): boolean {
+  if (!qty || ageMs < 8_000) return false;
+  if (!qty.has(inst)) return false;
+  return Math.abs(qty.get(inst) || 0) === 0;
+}
 export function ictBracket(side: Side, tpPx: string, slPx: string, size: number) {
   const exitSide = side === "long" ? "sell" : "buy";
   const base = {
@@ -521,7 +526,7 @@ export async function syncKucoinLive(s: EngineState) {
   }
 
   for (const seat of [...book.seats]) {
-    if (qty && Date.now() - seat.openedAt > 3_000 && Math.abs(qty.get(seat.inst) || 0) === 0) {
+    if (positionIsFlat(qty, seat.inst, Date.now() - seat.openedAt)) {
       await cancel(mode, seat.tpOid);
       await cancel(mode, seat.slOid);
       book.seats = book.seats.filter((x) => x.paperId !== seat.paperId);
