@@ -248,7 +248,24 @@ async function sendEarly(s: EngineState, books: IctBook[]) {
   writeFileSync(STATE, JSON.stringify(slim(s)));
 }
 
-/** One pass for this 5m close. If KuCoin has not published the candle yet, the caller tries again. */
+/** KuCoin often prints the closed 5m candle a few seconds after the minute. Wait for that print, then send. */
+async function waitUntilBar(closedOpen: number): Promise<boolean> {
+  const deadline = Date.now() + 8_000;
+  const probe = ICT_ASSETS.find((a) => a.id === "BTC") ?? ICT_ASSETS[0];
+  if (!probe) return false;
+  while (Date.now() < deadline) {
+    try {
+      const b = await fastBook(probe);
+      if (b.candles5?.some((c) => c.t === closedOpen)) return true;
+    } catch {
+      /* one miss, then try again */
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return false;
+}
+
+/** One pass for this 5m close. If KuCoin has not published the candle yet, wait a few seconds and try once. */
 async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number][], caught: { t: number }) {
   const period = 5 * 60 * 1000;
   const closedOpen = Math.floor(Date.now() / period) * period - period;
@@ -256,6 +273,11 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   if (s.open.some((p) => p.origin === "ict")) {
     caught.t = closedOpen;
     return;
+  }
+  const age = Date.now() - (closedOpen + period);
+  if (age < 12_000) {
+    const ready = await waitUntilBar(closedOpen);
+    if (!ready) return;
   }
   const queue = [...assets];
   let sending: Promise<void> = Promise.resolve();

@@ -1165,7 +1165,10 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const eth = books.find((b) => b.id === "ETH");
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
-  const liveFromOpen = now - 12 * 60_000;
+  // A 5m signal is stamped at the candle open, so 5m + 75s is about a minute after the close.
+  // A send after that is the AAVE case: the price has already left the 0.2R cap.
+  const liveFromOpen = now - 5 * 60_000 - 75_000;
+  const liveFromOpen15 = now - 15 * 60_000 - 75_000;
   const liveFromClosed = now - 15 * 60_000;
   const capBase = Math.max(s.startUsd, tradableUsd(s));
   const cap = capBase * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT);
@@ -1244,6 +1247,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         kind: "note",
         symbol: "ICT",
         text: `dead before the fill is not a trade · two bars already against · not Reset`,
+        tone: "info",
+      });
+    }
+    const freshWin = s.tape.find((t) => t.text?.startsWith("order only in the first minute"));
+    if (!freshWin) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `order only in the first minute after the close · a later send is already gone · not Reset`,
         tone: "info",
       });
     }
@@ -1364,7 +1377,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       const lastT = b.candles15[b.candles15.length - 1]?.t ?? 0;
       const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
       const on15 = t.note.includes("15m");
-      const fromOpen = on15 ? now - 30 * 60_000 : liveFromOpen;
+      const fromOpen = on15 ? liveFromOpen15 : liveFromOpen;
       const fromClosed = on15 ? now - 35 * 60_000 : liveFromClosed;
       if (stillOpen) {
         if (t.openedAt < fromOpen) continue;
