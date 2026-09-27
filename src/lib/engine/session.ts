@@ -1250,6 +1250,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
+    const awake = s.tape.find((t) => t.text?.startsWith("scanner is awake before the close"));
+    if (!awake) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `scanner is awake before the close · 15m goes in the same pass · same trades, sooner · not Reset`,
+        tone: "info",
+      });
+    }
     const priorWick = s.tape.find((t) => t.text?.startsWith("only the signal candle"));
     if (!priorWick) {
       pushTape(s, {

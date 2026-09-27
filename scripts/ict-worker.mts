@@ -2,7 +2,7 @@
  * Headless ICT tick for GitHub Actions. Phone is a viewer of ict-state.json.
  */
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from "node:fs";
-import { ICT_ASSETS, type IctBook } from "../src/lib/engine/universe.ts";
+import { ICT_ASSETS, type IctAssetDef, type IctBook } from "../src/lib/engine/universe.ts";
 import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "../src/lib/market/kucoin-hot.ts";
 import { createEngine, tick, buryResurrected, ingestIct, type EngineState } from "../src/lib/engine/session.ts";
 import { syncKucoinLive, liveMode } from "../src/lib/engine/kucoin-live.ts";
@@ -110,6 +110,27 @@ async function fastBook(a: (typeof ICT_ASSETS)[number]): Promise<IctBook> {
     change24h: 0,
     candles15: [],
     candles5: c5,
+    candles1h: [],
+    source: "kucoin",
+  };
+}
+
+/** 15m candle, fetched only after the 5m orders are already on their way. */
+async function fastBook15(a: (typeof ICT_ASSETS)[number]): Promise<IctBook> {
+  const raw = await getJson(
+    `https://api-futures.kucoin.com/api/v1/kline/query?symbol=${encodeURIComponent(futInst(a.id))}&granularity=15`,
+    4000,
+  );
+  const c15 = futCandles(raw).filter((c) => c.t + 15 * 60 * 1000 <= Date.now() + 1500);
+  const last = c15.length ? c15[c15.length - 1]!.c : 0;
+  return {
+    id: a.id,
+    symbol: a.symbol,
+    name: a.name,
+    last,
+    change24h: 0,
+    candles15: c15,
+    candles5: [],
     candles1h: [],
     source: "kucoin",
   };
@@ -321,12 +342,42 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
     };
     await Promise.all(Array.from({ length: 12 }, () => retry()));
   }
+  const closeTs = closedOpen + period;
+  const is15 = closeTs % (15 * 60 * 1000) === 0;
+  if (is15 && !s.open.some((p) => p.origin === "ict")) {
+    const q15 = [...assets];
+    const wave = async () => {
+      while (q15.length && !s.open.some((p) => p.origin === "ict")) {
+        const a = q15.shift();
+        if (!a) return;
+        try {
+          const b = await fastBook15(a);
+          if ((b.candles15?.length ?? 0) < 48) continue;
+          if (s.open.some((p) => p.origin === "ict")) return;
+          sending = sending.then(() => sendEarly(s, [b]));
+          await sending;
+        } catch {
+          /* a 15m miss does not block the rest */
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: 12 }, () => wave()));
+  }
   if (saw) caught.t = closedOpen;
 }
 
 async function main() {
+  const period = 5 * 60 * 1000;
+  const hotP: Promise<IctAssetDef[]> = fetchKucoinHotAssets().catch(() => []);
+  const untilClose = period - (Date.now() % period);
+  if (untilClose <= 25_000 && untilClose > 500) {
+    await new Promise((r) => setTimeout(r, untilClose + 300));
+  }
   const s = load();
-  const hot = await fetchKucoinHotAssets();
+  const hotReady = await Promise.race([
+    hotP,
+    new Promise<IctAssetDef[]>((r) => setTimeout(() => r([]), 50)),
+  ]);
   const seen = new Set(ICT_ASSETS.map((a) => a.id));
   const assets = [...ICT_ASSETS];
   for (const p of [...s.open, ...s.closed]) {
@@ -334,7 +385,7 @@ async function main() {
     seen.add(p.symbol);
     assets.push({ id: p.symbol, symbol: p.symbol, name: p.symbol, venue: "kucoin", instId: `${p.symbol}-USDT` });
   }
-  for (const a of hot) {
+  for (const a of hotReady) {
     if (seen.has(a.id)) continue;
     seen.add(a.id);
     assets.push(a);
@@ -354,6 +405,12 @@ async function main() {
     buryResurrected(s, readLedger());
     const caught = { t: 0 };
     await scanFreshClose(s, assets, caught);
+    const hotRest = await hotP;
+    for (const a of hotRest) {
+      if (seen.has(a.id)) continue;
+      seen.add(a.id);
+      assets.push(a);
+    }
     for (let i = 0; i < assets.length; i += 6) {
       await scanFreshClose(s, assets, caught);
       const chunk = assets.slice(i, i + 6);

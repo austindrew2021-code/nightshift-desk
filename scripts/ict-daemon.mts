@@ -68,14 +68,19 @@ async function main() {
   for (;;) {
     const t0 = Date.now();
     const code = await run("npx", ["tsx", "scripts/ict-worker.mts"]);
-    if (code !== 0) console.error("tick failed", code);
-    else await pushLive();
     const now = Date.now();
     const period = 5 * 60 * 1000;
-    const since = now % period;
-    const untilBar = since < 8_000 ? every : period - since + 400;
+    const untilClose = period - (now % period);
+    if (code !== 0) console.error("tick failed", code);
+    else if (untilClose > 40_000) await pushLive();
+    const lead = 20_000;
+    const budget = 45_000;
     const heartbeat = Math.max(2_000, every - (now - t0));
-    await new Promise((r) => setTimeout(r, Math.min(heartbeat, untilBar)));
+    let sleepMs = heartbeat;
+    if (untilClose <= lead) sleepMs = 0;
+    else if (untilClose <= lead + budget) sleepMs = untilClose - lead;
+    else sleepMs = Math.min(heartbeat, untilClose - lead - budget);
+    await new Promise((r) => setTimeout(r, Math.max(0, sleepMs)));
   }
 }
 
