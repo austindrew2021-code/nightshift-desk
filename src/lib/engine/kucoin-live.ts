@@ -144,6 +144,22 @@ function pxStr(px: number, tick: number): string {
   return n.toFixed(d);
 }
 
+/** Stop and 1R sell. Neither uses closeOrder, so KuCoin does not cancel the sell. */
+export function ictBracket(side: Side, tpPx: string, slPx: string, size: number) {
+  const exitSide = side === "long" ? "sell" : "buy";
+  const base = {
+    side: exitSide,
+    type: "market" as const,
+    stopPriceType: "TP",
+    size,
+    reduceOnly: true,
+    marginMode: "ISOLATED",
+  };
+  return {
+    sl: { ...base, stop: side === "long" ? "down" : "up", stopPrice: slPx },
+    tp: { ...base, stop: side === "long" ? "up" : "down", stopPrice: tpPx },
+  };
+}
 function lotsFor(notional: number, px: number, c: Contract) {
   const raw = notional / Math.max(1e-12, px * c.multiplier);
   const n = Math.floor(raw / c.lotSize) * c.lotSize;
@@ -328,29 +344,17 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   }
 
   const tpLots = Math.floor(filled / c.lotSize) * c.lotSize;
-  const tpBody: Record<string, unknown> = {
-    clientOid: oid("tp"),
-    symbol: c.symbol,
-    side: p.side === "long" ? "sell" : "buy",
-    type: "limit",
-    price: String(tpPx),
-    size: tpLots,
-    postOnly: true,
-    reduceOnly: true,
-    marginMode: "ISOLATED",
-  };
+  const bracket = ictBracket(p.side, String(tpPx), String(slPx), filled);
   const slBody: Record<string, unknown> = {
     clientOid: oid("sl"),
     symbol: c.symbol,
-    side: p.side === "long" ? "sell" : "buy",
-    type: "market",
-    stop: p.side === "long" ? "down" : "up",
-    stopPrice: String(slPx),
-    stopPriceType: "TP",
-    size: filled,
-    reduceOnly: true,
-    closeOrder: true,
-    marginMode: "ISOLATED",
+    ...bracket.sl,
+  };
+  const tpBody: Record<string, unknown> = {
+    clientOid: oid("tp"),
+    symbol: c.symbol,
+    ...bracket.tp,
+    size: tpLots,
   };
 
   let slOid = "";
@@ -403,9 +407,24 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   saveBook(book);
   push(
     s,
-    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · cap ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · full @ 1R · flat 1h · SL ${slPx}`,
+    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · cap ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · full @ 1R stop ${tpPx} · SL ${slPx}`,
     "up",
   );
+}
+
+/** Open contracts by symbol. Null means the read failed, so stops stay up. */
+async function positionQty(mode: LiveMode): Promise<Map<string, number> | null> {
+  if (mode !== "on") return new Map();
+  try {
+    const data = await kucoin<{ symbol?: string; currentQty?: string | number }[] | { items?: { symbol?: string; currentQty?: string | number }[] }>("GET", "/api/v1/positions");
+    const rows = Array.isArray(data) ? data : data?.items || [];
+    const out = new Map<string, number>();
+    for (const r of rows) out.set(String(r.symbol || ""), Number(r.currentQty || 0));
+    return out;
+  } catch (e) {
+    log({ kind: "pos-qty-fail", err: String(e) });
+    return null;
+  }
 }
 
 async function flatten(mode: LiveMode, seat: LiveSeat, why: string) {
@@ -475,6 +494,7 @@ export async function syncKucoinLive(s: EngineState) {
   }
   const book = loadBook();
   if (mode === "on") await flattenUnknown(mode, book, s);
+  const qty = await positionQty(mode);
   const paperOpen = s.open.filter((p) => p.origin === "ict");
   const queued = [...(s.ictLivePend || []), ...ictLivePend.splice(0)];
   s.ictLivePend = [];
@@ -501,6 +521,14 @@ export async function syncKucoinLive(s: EngineState) {
   }
 
   for (const seat of [...book.seats]) {
+    if (qty && Date.now() - seat.openedAt > 3_000 && Math.abs(qty.get(seat.inst) || 0) === 0) {
+      await cancel(mode, seat.tpOid);
+      await cancel(mode, seat.slOid);
+      book.seats = book.seats.filter((x) => x.paperId !== seat.paperId);
+      saveBook(book);
+      push(s, `LIVE ${seat.symbol} flat · canceled the other order`, "up");
+      continue;
+    }
     const paper = paperOpen.find((p) => p.id === seat.paperId || p.symbol === seat.symbol);
     if (!paper) {
       if (Date.now() - seat.openedAt < 25_000) continue;
