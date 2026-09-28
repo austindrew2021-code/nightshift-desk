@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ictBracket, positionIsFlat } from "./kucoin-live.ts";
+import { ictBracket, orderPastMark, positionIsFlat } from "./kucoin-live.ts";
 
 test("long 1R sell sits above and the stop sits below, neither locks the position", () => {
   const { sl, tp } = ictBracket("long", "10.924", "10.746", 64);
@@ -28,6 +28,11 @@ test("a missing symbol is not a flat position", () => {
   assert.equal(positionIsFlat(new Map([["AVAXUSDTM", 0]]), "AVAXUSDTM", 3_000), false);
   const short = new Map([["AVAXUSDTM", -64]]);
   assert.equal(positionIsFlat(short, "AVAXUSDTM", 20_000), false);
+});
+test("ONE at the 4am price is not sent once the futures price has left", () => {
+  assert.equal(orderPastMark("long", 0.00258991, 0.00248, 0.000052, 30), true);
+  assert.equal(orderPastMark("short", 0.24595, 0.245, 0.00495, 30), false);
+  assert.equal(orderPastMark("long", 10.835, 10.83, 0.089, 40), false);
 });
 test("short brackets are the mirror", () => {
   const { sl, tp } = ictBracket("short", "0.15", "0.16", 10);

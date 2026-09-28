@@ -144,7 +144,14 @@ function pxStr(px: number, tick: number): string {
   return n.toFixed(d);
 }
 
-/** Cancel the leftover order only when the exchange says this symbol is flat. A missing symbol is not flat. */
+/** Skip a limit the exchange would reject: the live mark is already too far through the entry. */
+export function orderPastMark(side: Side, entry: number, mark: number, riskPx: number, lev: number): boolean {
+  if (!(mark > 0) || !(entry > 0) || !(riskPx > 0)) return false;
+  const adverse = side === "long" ? entry - mark : mark - entry;
+  if (adverse > riskPx * 0.35) return true;
+  const band = (entry * 0.85) / Math.max(2, lev);
+  return adverse > 0 && Math.abs(mark - entry) > band;
+}
 export function positionIsFlat(qty: Map<string, number> | null, inst: string, ageMs: number): boolean {
   if (!qty || ageMs < 8_000) return false;
   if (!qty.has(inst)) return false;
@@ -177,6 +184,18 @@ async function usdtEquity(): Promise<number> {
     "/api/v1/account-overview?currency=USDT",
   );
   return Number(d?.availableBalance || d?.accountEquity || 0);
+}
+
+async function markPrice(symbol: string): Promise<number> {
+  try {
+    const res = await fetch(`${BASE}/api/v1/ticker?symbol=${encodeURIComponent(symbol)}`, {
+      headers: { Accept: "application/json", "User-Agent": "NightshiftDesk/live" },
+    });
+    const json = (await res.json()) as { data?: { price?: string } };
+    return Number(json?.data?.price || 0);
+  } catch {
+    return 0;
+  }
 }
 
 async function place(mode: LiveMode, body: Record<string, unknown>) {
@@ -289,6 +308,15 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     p.side === "long" ? p.entryUsd + riskPx * 0.2 : p.entryUsd - riskPx * 0.2,
     c.tickSize,
   );
+  if (mode === "on") {
+    const mark = await markPrice(c.symbol);
+    if (orderPastMark(p.side, p.entryUsd, mark, riskPx, lev)) {
+      log({ kind: "skip", why: "past-mark", symbol: p.symbol, mark, entry: p.entryUsd, cap: capPx });
+      push(s, `LIVE skip ${p.symbol} · live ${mark} is past the entry · no chase`, "warn");
+      releasePaper(s, p, "past the live price");
+      return;
+    }
+  }
 
   const entryBody: Record<string, unknown> = {
     clientOid: oid("e"),
