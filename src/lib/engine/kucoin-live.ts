@@ -247,6 +247,38 @@ async function cancel(mode: LiveMode, id?: string) {
   }
 }
 
+/** A leftover entry from a restart has no stop behind it. Stop orders are left alone. */
+async function cancelStrayEntries(mode: LiveMode) {
+  if (mode !== "on") return;
+  try {
+    const data = await kucoin<{ items?: { id?: string; clientOid?: string; reduceOnly?: boolean }[] } | { id?: string; clientOid?: string; reduceOnly?: boolean }[]>(
+      "GET",
+      "/api/v1/orders?status=active",
+    );
+    const rows = Array.isArray(data) ? data : data?.items || [];
+    for (const o of rows) {
+      const id = String(o.id || "");
+      if (!id || o.reduceOnly) continue;
+      if (!String(o.clientOid || "").startsWith("e-")) continue;
+      await cancel(mode, id);
+      log({ kind: "stray-entry-cancel", id });
+    }
+  } catch (e) {
+    log({ kind: "stray-entry-fail", err: String(e) });
+  }
+}
+
+async function absPosQty(inst: string): Promise<number> {
+  try {
+    const data = await kucoin<{ symbol?: string; currentQty?: string | number }[] | { items?: { symbol?: string; currentQty?: string | number }[] }>("GET", "/api/v1/positions");
+    const rows = Array.isArray(data) ? data : data?.items || [];
+    return Math.abs(Number(rows.find((r) => r.symbol === inst)?.currentQty || 0));
+  } catch (e) {
+    log({ kind: "entry-pos-fail", err: String(e) });
+    return 0;
+  }
+}
+
 function oid(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -384,25 +416,13 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
       }
     }
     if (!(filled > 0)) {
-      try {
-        const data = await kucoin<{ symbol?: string; currentQty?: string | number }[] | { items?: { symbol?: string; currentQty?: string | number }[] }>("GET", "/api/v1/positions");
-        const rows = Array.isArray(data) ? data : data?.items || [];
-        const qty = Number(rows.find((r) => r.symbol === c.symbol)?.currentQty || 0);
-        if (Math.abs(qty) > 0) filled = lots;
-      } catch (e) {
-        log({ kind: "entry-pos-fail", err: String(e) });
-      }
+      const qty = await absPosQty(c.symbol);
+      if (qty > 0) filled = Math.floor(qty / c.lotSize) * c.lotSize;
     }
     if (!(filled > 0)) {
       await cancel(mode, fillOid);
-      try {
-        const data = await kucoin<{ symbol?: string; currentQty?: string | number }[] | { items?: { symbol?: string; currentQty?: string | number }[] }>("GET", "/api/v1/positions");
-        const rows = Array.isArray(data) ? data : data?.items || [];
-        const qty = Number(rows.find((r) => r.symbol === c.symbol)?.currentQty || 0);
-        if (Math.abs(qty) > 0) filled = lots;
-      } catch {
-        /* cancel already attempted */
-      }
+      const qty = await absPosQty(c.symbol);
+      if (qty > 0) filled = Math.floor(qty / c.lotSize) * c.lotSize;
     }
     if (!(filled > 0)) {
       push(s, `LIVE skip ${p.symbol} · price past ${capPx} · no chase`, "warn");
@@ -562,7 +582,10 @@ export async function syncKucoinLive(s: EngineState) {
     return;
   }
   const book = loadBook();
-  if (mode === "on") await flattenUnknown(mode, book, s);
+  if (mode === "on") {
+    await cancelStrayEntries(mode);
+    await flattenUnknown(mode, book, s);
+  }
   const qty = await positionQty(mode);
   const paperOpen = s.open.filter((p) => p.origin === "ict");
   const queued = [...(s.ictLivePend || []), ...ictLivePend.splice(0)];
