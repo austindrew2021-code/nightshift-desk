@@ -5,7 +5,7 @@
 import { createHmac } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import type { EngineState, Position, Side } from "./types";
-import { ICT_HARD_RISK_PCT, ictLiqPct } from "./types";
+import { ICT_HARD_RISK_PCT } from "./types";
 import { ictLivePend } from "./live-pend";
 
 const BASE = "https://api-futures.kucoin.com";
@@ -103,7 +103,7 @@ async function kucoin<T>(method: string, path: string, body?: unknown): Promise<
   return json.data as T;
 }
 
-type Contract = { symbol: string; multiplier: number; lotSize: number; tickSize: number; maxLeverage: number };
+type Contract = { symbol: string; multiplier: number; lotSize: number; tickSize: number; maxLeverage: number; maintainMargin: number };
 
 const contractCache = new Map<string, Contract>();
 
@@ -122,10 +122,26 @@ async function contractFor(sym: string): Promise<Contract | null> {
       lotSize: Number(r.lotSize) || 1,
       tickSize: Number(r.tickSize) || 0.0001,
       maxLeverage: Number(r.maxLeverage) || 20,
+      maintainMargin: Number(r.maintainMargin) > 0 ? Number(r.maintainMargin) : 0.005,
     };
     contractCache.set(symbol, c);
   }
   return contractCache.get(want) || null;
+}
+
+
+/** Real isolated liquidation distance. KuCoin maintenance, not the 0.5% model. */
+export function realLiqPct(lev: number, mmr: number): number {
+  return Math.max(0.004, 1 / Math.max(2, lev) - Math.max(0, mmr));
+}
+
+/** Highest leverage that keeps the wick stop inside that coin's real liquidation. 0 = skip. */
+export function levInsideStop(stopPct: number, mmr: number, maxLev: number, pref = 40): number {
+  const room = Math.max(0.004, stopPct) + Math.max(0, mmr) + 0.002;
+  if (!(room > 0) || room >= 1) return 0;
+  const fit = Math.floor(1 / room);
+  const lev = Math.min(pref, Math.max(1, Math.floor(maxLev)), fit);
+  return lev >= 5 ? lev : 0;
 }
 
 function instOf(sym: string): string {
@@ -292,7 +308,14 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     return;
   }
   const asked = Math.min(40, Math.max(1, Number(String(p.note.match(/(\d+)x/)?.[1] || 40))));
-  const lev = Math.min(asked, c.maxLeverage || asked);
+  const mmr = c.maintainMargin > 0 ? c.maintainMargin : 0.005;
+  const lev = levInsideStop(stopPct, mmr, Math.min(asked, c.maxLeverage || asked), asked);
+  if (!lev) {
+    log({ kind: "skip", why: "liq-past-stop", symbol: p.symbol, stopPct, mmr });
+    push(s, `LIVE skip ${p.symbol} · stop is past the real liquidation`, "warn");
+    if (mode === "on") releasePaper(s, p, "stop past liquidation");
+    return;
+  }
   const notional = Math.min(riskUsd / stopPct, eq * lev * 0.85);
   const lots = lotsFor(notional, p.entryUsd, c);
   const side = p.side === "long" ? "buy" : "sell";
@@ -302,9 +325,10 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     p.side === "long" ? p.entryUsd + riskPx * 1 : p.entryUsd - riskPx * 1,
     c.tickSize,
   );
+  const liqPct = realLiqPct(lev, mmr);
   const slRaw = p.side === "long"
-    ? Math.max(stopPx, p.entryUsd * (1 - ictLiqPct(lev) + 0.002))
-    : Math.min(stopPx, p.entryUsd * (1 + ictLiqPct(lev) - 0.002));
+    ? Math.max(stopPx, p.entryUsd * (1 - liqPct + 0.002))
+    : Math.min(stopPx, p.entryUsd * (1 + liqPct - 0.002));
   const slPx = pxStr(slRaw, c.tickSize);
   const capPx = pxStr(
     p.side === "long" ? p.entryUsd + riskPx * 0.2 : p.entryUsd - riskPx * 0.2,
@@ -442,7 +466,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   saveBook(book);
   push(
     s,
-    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · cap ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · full @ 1R stop ${tpPx} · SL ${slPx}`,
+    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · cap ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · ${lev}x · full @ 1R stop ${tpPx} · SL ${slPx}`,
     "up",
   );
 }

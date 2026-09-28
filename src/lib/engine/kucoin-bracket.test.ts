@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ictBracket, orderPastMark, positionIsFlat } from "./kucoin-live.ts";
+import { ictBracket, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
 
 test("long 1R sell sits above and the stop sits below, neither locks the position", () => {
   const { sl, tp } = ictBracket("long", "10.924", "10.746", 64);
@@ -43,4 +43,13 @@ test("short brackets are the mirror", () => {
   assert.equal(tp.stop, "down");
   assert.equal(tp.stopPrice, "0.15");
   assert.equal(tp.side, "buy");
+});
+test("KAS maintenance drops 40x so the wick stop is inside the real liquidation", () => {
+  const stopPct = (0.045919 - 0.045074) / 0.045919;
+  const mmr = 0.012;
+  const lev = levInsideStop(stopPct, mmr, 50, 40);
+  assert.equal(lev, 30);
+  const liq = 0.045919 * (1 - realLiqPct(lev, mmr));
+  assert.ok(liq < 0.045074);
+  assert.equal(levInsideStop(0.018, 0.004, 125, 40), 40);
 });
