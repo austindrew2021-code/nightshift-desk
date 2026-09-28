@@ -33,6 +33,8 @@ test("ONE at the 4am price is not sent once the futures price has left", () => {
   assert.equal(orderPastMark("long", 0.00258991, 0.00248, 0.000052, 30), true);
   assert.equal(orderPastMark("short", 0.24595, 0.245, 0.00495, 30), false);
   assert.equal(orderPastMark("long", 10.835, 10.83, 0.089, 40), false);
+  assert.equal(orderPastMark("long", 0.00258991, 0, 0.000052, 30), false);
+  assert.equal(orderPastMark("short", 0.24595, 0.2464, 0.00495, 30), false);
 });
 test("short brackets are the mirror", () => {
   const { sl, tp } = ictBracket("short", "0.15", "0.16", 10);

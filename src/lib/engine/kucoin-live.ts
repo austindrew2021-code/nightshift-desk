@@ -190,9 +190,11 @@ async function markPrice(symbol: string): Promise<number> {
   try {
     const res = await fetch(`${BASE}/api/v1/ticker?symbol=${encodeURIComponent(symbol)}`, {
       headers: { Accept: "application/json", "User-Agent": "NightshiftDesk/live" },
+      signal: AbortSignal.timeout(2_000),
     });
     const json = (await res.json()) as { data?: { price?: string } };
-    return Number(json?.data?.price || 0);
+    const px = Number(json?.data?.price || 0);
+    return px > 0 ? px : 0;
   } catch {
     return 0;
   }
