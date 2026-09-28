@@ -1165,10 +1165,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const eth = books.find((b) => b.id === "ETH");
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
-  // A 5m signal is stamped at the candle open, so 5m + 75s is about a minute after the close.
-  // A send after that is the AAVE case: the price has already left the 0.2R cap.
-  const liveFromOpen = now - 5 * 60_000 - 75_000;
-  const liveFromOpen15 = now - 15 * 60_000 - 75_000;
+  // The candle is stamped at its open. 5m + 3m is three minutes after the close.
+  // A send in that window still has to be at the entry. The wick, the 0.35R
+  // adverse check, and the live mark reject one that has already left.
+  const liveFromOpen = now - 5 * 60_000 - 180_000;
+  const liveFromOpen15 = now - 15 * 60_000 - 180_000;
   const liveFromClosed = now - 15 * 60_000;
   const capBase = Math.max(s.startUsd, tradableUsd(s));
   const cap = capBase * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT);
@@ -1280,13 +1281,13 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
-    const freshWin = s.tape.find((t) => t.text?.startsWith("order only in the first minute"));
+    const freshWin = s.tape.find((t) => t.text?.startsWith("close stays valid for 3 minutes"));
     if (!freshWin) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `order only in the first minute after the close · a later send is already gone · not Reset`,
+        text: `close stays valid for 3 minutes if price is still at the entry · a price that left is still skipped · not Reset`,
         tone: "info",
       });
     }

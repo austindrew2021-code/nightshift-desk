@@ -291,10 +291,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   const period = 5 * 60 * 1000;
   const closedOpen = Math.floor(Date.now() / period) * period - period;
   if (caught.t === closedOpen) return;
-  if (s.open.some((p) => p.origin === "ict")) {
-    caught.t = closedOpen;
-    return;
-  }
+  if (s.open.some((p) => p.origin === "ict")) return;
   const age = Date.now() - (closedOpen + period);
   if (age < 12_000) {
     const ready = await waitUntilBar(closedOpen);
