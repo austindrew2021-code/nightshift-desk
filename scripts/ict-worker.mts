@@ -286,7 +286,7 @@ async function waitUntilBar(closedOpen: number): Promise<boolean> {
   return false;
 }
 
-/** One pass for this 5m close. If KuCoin has not published the candle yet, wait a few seconds and try once. */
+/** One pass for this 5m close. A missing alt candle is retried for 15s, not once. */
 async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number][], caught: { t: number }) {
   const period = 5 * 60 * 1000;
   const closedOpen = Math.floor(Date.now() / period) * period - period;
@@ -308,36 +308,43 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
       try {
         const b = await fastBook(a);
         if ((b.candles5?.length ?? 0) < 48) continue;
-        if (b.candles5.some((c) => c.t === closedOpen)) saw = true;
-        else missing.push(a);
-        if (s.open.some((p) => p.origin === "ict")) return;
-        sending = sending.then(() => sendEarly(s, [b]));
-        await sending;
+        if (b.candles5.some((c) => c.t === closedOpen)) {
+          saw = true;
+          sending = sending.then(() => sendEarly(s, [b]));
+        } else missing.push(a);
       } catch {
-        /* one coin can fail; the rest still send */
+        missing.push(a);
       }
     }
   };
   await Promise.all(Array.from({ length: 12 }, () => worker()));
-  if (missing.length && saw && !s.open.some((p) => p.origin === "ict")) {
-    await new Promise((r) => setTimeout(r, 500));
-    const again = [...missing];
+  await sending;
+  const giveUp = Date.now() + 15_000;
+  let pending = missing;
+  while (pending.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const again = pending;
+    pending = [];
     const retry = async () => {
       while (again.length && !s.open.some((p) => p.origin === "ict")) {
         const a = again.shift();
         if (!a) return;
         try {
           const b = await fastBook(a);
-          if (!b.candles5?.some((c) => c.t === closedOpen)) continue;
+          if (!b.candles5?.some((c) => c.t === closedOpen)) {
+            pending.push(a);
+            continue;
+          }
           saw = true;
           sending = sending.then(() => sendEarly(s, [b]));
           await sending;
         } catch {
-          /* this coin stays out for this close */
+          pending.push(a);
         }
       }
     };
     await Promise.all(Array.from({ length: 12 }, () => retry()));
+    await sending;
   }
   const closeTs = closedOpen + period;
   const is15 = closeTs % (15 * 60 * 1000) === 0;

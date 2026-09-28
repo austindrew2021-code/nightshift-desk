@@ -350,7 +350,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     side,
     type: "limit",
     price: capPx,
-    timeInForce: "IOC",
+    timeInForce: "GTC",
     leverage: String(lev),
     size: lots,
     marginMode: "ISOLATED",
@@ -370,36 +370,46 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
 
   let filled = lots;
   if (mode === "on" && fillOid) {
-    let known = false;
-    for (let i = 0; i < 2 && !known; i++) {
-      await new Promise((r) => setTimeout(r, 400));
+    filled = 0;
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline && !(filled > 0)) {
+      await new Promise((r) => setTimeout(r, 1000));
       try {
         const o = await kucoin<{ dealSize?: number; status?: string }>("GET", `/api/v1/orders/${fillOid}`);
         filled = Math.floor(Number(o?.dealSize || 0) / c.lotSize) * c.lotSize;
-        known = true;
         log({ kind: "entry-state", symbol: p.symbol, dealSize: filled, status: o?.status, cap: capPx });
+        if (o?.status === "done") break;
       } catch (e) {
-        log({ kind: "entry-state-fail", try: i + 1, err: String(e) });
+        log({ kind: "entry-state-fail", err: String(e) });
       }
     }
-    if (!known) {
+    if (!(filled > 0)) {
       try {
         const data = await kucoin<{ symbol?: string; currentQty?: string | number }[] | { items?: { symbol?: string; currentQty?: string | number }[] }>("GET", "/api/v1/positions");
         const rows = Array.isArray(data) ? data : data?.items || [];
         const qty = Number(rows.find((r) => r.symbol === c.symbol)?.currentQty || 0);
-        if (Math.abs(qty) > 0) {
-          filled = lots;
-          known = true;
-        }
+        if (Math.abs(qty) > 0) filled = lots;
       } catch (e) {
         log({ kind: "entry-pos-fail", err: String(e) });
       }
     }
-    if (!known || !(filled > 0)) {
+    if (!(filled > 0)) {
+      await cancel(mode, fillOid);
+      try {
+        const data = await kucoin<{ symbol?: string; currentQty?: string | number }[] | { items?: { symbol?: string; currentQty?: string | number }[] }>("GET", "/api/v1/positions");
+        const rows = Array.isArray(data) ? data : data?.items || [];
+        const qty = Number(rows.find((r) => r.symbol === c.symbol)?.currentQty || 0);
+        if (Math.abs(qty) > 0) filled = lots;
+      } catch {
+        /* cancel already attempted */
+      }
+    }
+    if (!(filled > 0)) {
       push(s, `LIVE skip ${p.symbol} · price past ${capPx} · no chase`, "warn");
       releasePaper(s, p, "not filled");
       return;
     }
+    if (filled < lots) await cancel(mode, fillOid);
   }
 
   const tpLots = Math.floor(filled / c.lotSize) * c.lotSize;
