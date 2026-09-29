@@ -167,6 +167,7 @@ export function ictRiskUsd(s: EngineState, stopPct = 0.01, levOverride?: number,
   return { risk: Math.max(1, risk * k), notional: notional * k };
 }
 
+/** Two losing closes in a row: no new entry for 2 hours. An open trade still runs. */
 function lossPauseUntil(s: EngineState): number {
   const closed = s.closed
     .filter((c) => c.origin === "ict")
@@ -179,7 +180,7 @@ function lossPauseUntil(s: EngineState): number {
     if (finite(c.pnlUsd) < 0) {
       streak++;
       if (streak >= 2) {
-        until = c.closedAt + 4 * 3600_000;
+        until = c.closedAt + 2 * 3600_000;
         streak = 0;
       }
     } else streak = 0;
