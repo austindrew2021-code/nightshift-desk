@@ -978,7 +978,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
               t: Date.now(),
               kind: "note",
               symbol: p.symbol,
-              text: `stop to entry ${p.symbol} · 0.5R tagged · full 1R still on`,
+              text: `stop to entry ${p.symbol} · 0.5R tagged · full 1.25R still on`,
               tone: "info",
             });
           }
@@ -998,9 +998,10 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         p.targetUsd = tgtPx;
         p.targetR = far;
       } else if (trail && !p.partialed) {
-        tgtPx = p.side === "long" ? p.entryUsd + risk : p.entryUsd - risk;
+        const tgtR = s.ictStyle === "cisd" ? 1.25 : 1;
+        tgtPx = p.side === "long" ? p.entryUsd + risk * tgtR : p.entryUsd - risk * tgtR;
         p.targetUsd = tgtPx;
-        p.targetR = 1;
+        p.targetR = tgtR;
       }
       if (p.side === "long" && hi >= tgtPx) {
         s.open = s.open.filter((x) => x.id !== p.id);
@@ -1039,14 +1040,14 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
     const hold1 = s.ictStyle === "cisd";
     if (hold1 && !p.partialed) {
       const closed = series.filter((bar) => bar.t > opened + 30_000).slice(0, -1);
-      if (closed.length >= 12) {
+      if (closed.length >= 18) {
         s.open = s.open.filter((x) => x.id !== p.id);
         closePos(s, p, last, "time");
         pushTape(s, {
           t: Date.now(),
           kind: "note",
           symbol: p.symbol,
-          text: `hour ${p.symbol} · 1R not tagged · flat`,
+          text: `90m ${p.symbol} · 1.25R not tagged · flat`,
           tone: "info",
         });
         continue;
@@ -1180,8 +1181,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
   // The candle is stamped at its open. 5m + 3m is three minutes after the close.
-  // A send in that window still has to be at the entry. The wick, the 0.35R
-  // adverse check, and the live mark reject one that has already left.
+  // The limit goes at the entry, not 0.2R through it. The wick, the 0.35R
+  // adverse check, and a live price already at 0.5R still reject one that left.
   const liveFromOpen = now - 5 * 60_000 - 180_000;
   const liveFromOpen15 = now - 15 * 60_000 - 180_000;
   const liveFromClosed = now - 15 * 60_000;
@@ -1218,23 +1219,23 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
-    const closeFill = s.tape.find((t) => t.text?.startsWith("the close is the fill"));
+    const closeFill = s.tape.find((t) => t.text?.startsWith("limit sits at the entry"));
     if (!closeFill) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `the close is the fill when the candle already traded the entry · same 0.2R cap · not Reset`,
+        text: `limit sits at the entry · a bar that never trades it is not a fill · not Reset`,
         tone: "info",
       });
     }
-    const capStay = s.tape.find((t) => t.text?.startsWith("a valid close still gets the cap"));
+    const capStay = s.tape.find((t) => t.text?.startsWith("do not pay 0.2R"));
     if (!capStay) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `a valid close still gets the cap · the next candle running is not a skip · not Reset`,
+        text: `do not pay 0.2R through the signal · the next bar has to trade the entry · not Reset`,
         tone: "info",
       });
     }
@@ -1520,8 +1521,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const holdOpen = s.ictStyle === "cisd";
         const targetUsd = holdOpen
           ? t.side === "long"
-            ? t.entryUsd + stopDist
-            : t.entryUsd - stopDist
+            ? t.entryUsd + stopDist * 1.25
+            : t.entryUsd - stopDist * 1.25
           : trail
             ? t.side === "long"
               ? t.entryUsd + stopDist * 5
@@ -1544,14 +1545,14 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             sizeSol: sizeUsd / Math.max(1e-6, s.solUsd),
             sizeUsd,
             stopPct,
-            targetR: holdOpen ? 1 : trail ? 5 : Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
+            targetR: holdOpen ? 1.25 : trail ? 5 : Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
             markUsd: mark,
             pnlSol: pnlUsd / Math.max(1e-6, s.solUsd),
             pnlUsd,
             peakUsd: mark,
             agent: "timing",
             note: holdOpen
-              ? `${t.note} · full @ 1R · flat 1h · ${lev}x${liqNote}`
+              ? `${t.note} · full @ 1.25R · flat 90m · ${lev}x${liqNote}`
               : trail
                 ? `${t.note} · ¾@${ICT_PARTIAL_R}R trail 5R · ${lev}x${liqNote}`
                 : `${t.note} · ${lev}x${liqNote}`,
@@ -1874,7 +1875,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 1R · stop to entry after 0.5R · flat 1h" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
+      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 1.25R · limit at entry · stop to entry after 0.5R · flat 90m" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
       tone: "mute",
     });
   }

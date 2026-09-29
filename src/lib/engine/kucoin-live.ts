@@ -367,8 +367,9 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   const side = p.side === "long" ? "buy" : "sell";
   const stopPx = p.stopUsd || (p.side === "long" ? p.entryUsd * (1 - stopPct) : p.entryUsd * (1 + stopPct));
   const riskPx = Math.abs(p.entryUsd - stopPx);
+  const tgtR = p.targetR > 1 ? p.targetR : 1;
   const tpPx = pxStr(
-    p.side === "long" ? p.entryUsd + riskPx * 1 : p.entryUsd - riskPx * 1,
+    p.side === "long" ? p.entryUsd + riskPx * tgtR : p.entryUsd - riskPx * tgtR,
     c.tickSize,
   );
   const liqPct = realLiqPct(lev, mmr);
@@ -376,10 +377,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     ? Math.max(stopPx, p.entryUsd * (1 - liqPct + 0.002))
     : Math.min(stopPx, p.entryUsd * (1 + liqPct - 0.002));
   const slPx = pxStr(slRaw, c.tickSize);
-  const capPx = pxStr(
-    p.side === "long" ? p.entryUsd + riskPx * 0.2 : p.entryUsd - riskPx * 0.2,
-    c.tickSize,
-  );
+  const capPx = pxStr(p.entryUsd, c.tickSize);
   if (mode === "on") {
     const mark = await markPrice(c.symbol);
     if (orderPastMark(p.side, p.entryUsd, mark, riskPx, lev)) {
@@ -428,7 +426,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     const nextClose = (p.openedAt || Date.now()) + 2 * tfMs;
     const deadline = Math.min(nextClose, Date.now() + tfMs);
     if (deadline - Date.now() > 30_000) {
-      push(s, `resting ${p.symbol} through this bar · limit stays at the cap · no chase`, "mute");
+      push(s, `resting ${p.symbol} through this bar · limit stays at the entry · no chase`, "mute");
     }
     while (Date.now() < deadline && !(filled > 0)) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -451,7 +449,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
       if (qty > 0) filled = Math.floor(qty / c.lotSize) * c.lotSize;
     }
     if (!(filled > 0)) {
-      push(s, `LIVE skip ${p.symbol} · price past ${capPx} · no chase`, "warn");
+      push(s, `LIVE skip ${p.symbol} · this bar never traded ${capPx} · no chase`, "warn");
       releasePaper(s, p, "not filled");
       return;
     }
@@ -522,7 +520,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   saveBook(book);
   push(
     s,
-    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · cap ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · ${lev}x · full @ 1R stop ${tpPx} · SL ${slPx}`,
+    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · entry ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · ${lev}x · full @ ${tgtR}R stop ${tpPx} · SL ${slPx}`,
     "up",
   );
 }
@@ -696,7 +694,7 @@ export async function syncKucoinLive(s: EngineState) {
           seat.slOid = id;
           seat.stop = Number(slPx);
           saveBook(book);
-          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · 1R still on`, "up");
+          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · 1.25R still on`, "up");
         }
       }
     }
