@@ -417,7 +417,12 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   let filled = lots;
   if (mode === "on" && fillOid) {
     filled = 0;
-    const deadline = Date.now() + 30_000;
+    const tfMs = p.note.includes("15m") ? 15 * 60_000 : 5 * 60_000;
+    const nextClose = (p.openedAt || Date.now()) + 2 * tfMs;
+    const deadline = Math.min(nextClose, Date.now() + tfMs);
+    if (deadline - Date.now() > 30_000) {
+      push(s, `resting ${p.symbol} through this bar · limit stays at the cap · no chase`, "mute");
+    }
     while (Date.now() < deadline && !(filled > 0)) {
       await new Promise((r) => setTimeout(r, 1000));
       try {
