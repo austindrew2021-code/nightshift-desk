@@ -72,14 +72,13 @@ async function main() {
     const period = 5 * 60 * 1000;
     const untilClose = period - (now % period);
     if (code !== 0) console.error("tick failed", code);
-    else if (untilClose > 40_000) await pushLive();
+    else if (untilClose > 90_000) await pushLive();
     const lead = 20_000;
-    const budget = 45_000;
     const heartbeat = Math.max(2_000, every - (now - t0));
     let sleepMs = heartbeat;
     if (untilClose <= lead) sleepMs = 0;
-    else if (untilClose <= lead + budget) sleepMs = untilClose - lead;
-    else sleepMs = Math.min(heartbeat, untilClose - lead - budget);
+    else if (untilClose <= 90_000) sleepMs = untilClose - lead;
+    else sleepMs = Math.min(heartbeat, untilClose - 90_000);
     await new Promise((r) => setTimeout(r, Math.max(0, sleepMs)));
   }
 }

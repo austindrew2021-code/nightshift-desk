@@ -293,10 +293,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   if (caught.t === closedOpen) return;
   if (s.open.some((p) => p.origin === "ict")) return;
   const age = Date.now() - (closedOpen + period);
-  if (age < 12_000) {
-    const ready = await waitUntilBar(closedOpen);
-    if (!ready) return;
-  }
+  if (age < 12_000) await waitUntilBar(closedOpen);
   const queue = [...assets];
   const missing: (typeof ICT_ASSETS)[number][] = [];
   let sending: Promise<void> = Promise.resolve();
@@ -405,10 +402,16 @@ async function main() {
   writeFileSync(lock, String(Date.now()));
   const books: IctBook[] = [];
   let livePx: Record<string, number> = {};
+  let fastOnly = false;
   try {
     buryResurrected(s, readLedger());
     const caught = { t: 0 };
     await scanFreshClose(s, assets, caught);
+    const sinceClose = Date.now() % (5 * 60 * 1000);
+    fastOnly = sinceClose < 45_000 && !s.open.some((p) => p.origin === "ict");
+    if (fastOnly) {
+      console.log(JSON.stringify({ t: Date.now(), fast: true, sinceClose }));
+    } else {
     const hotRest = await hotP;
     for (const a of hotRest) {
       if (seen.has(a.id)) continue;
@@ -465,6 +468,7 @@ async function main() {
       console.error("kucoin-live", e);
     }
     writeFileSync(STATE, JSON.stringify(slim(s)));
+    }
   } finally {
     try {
       unlinkSync(lock);
@@ -472,6 +476,7 @@ async function main() {
       /* lock already cleared */
     }
   }
+  if (!fastOnly) {
   const klinesPath = STATE.replace(/ict-state\.json$/, "ict-klines.json");
   const klines: Record<string, { last: number; change24h: number; m15: Candle[]; m5: Candle[]; h1: Candle[] }> = {};
   for (const b of books) {
@@ -486,6 +491,7 @@ async function main() {
   writeFileSync(klinesPath, JSON.stringify({ t: Date.now(), klines }));
   const lastPath = STATE.replace(/ict-state\.json$/, "ict-last.json");
   writeFileSync(lastPath, JSON.stringify({ t: Date.now(), src: "kucoin-fut", px: livePx }));
+  }
   const open = s.open.filter((p) => p.origin === "ict");
   console.log(
     JSON.stringify({
