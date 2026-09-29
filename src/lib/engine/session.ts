@@ -1396,6 +1396,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       const fromOpen = on15 ? liveFromOpen15 : liveFromOpen;
       const fromClosed = on15 ? now - 35 * 60_000 : liveFromClosed;
       if (enterable) {
+        const tfMs = on15 ? 15 * 60_000 : 5 * 60_000;
+        if (now < t.openedAt + tfMs) continue;
         if (t.openedAt < fromOpen) continue;
       } else if (t.openedAt < fromClosed || t.closedAt < fromClosed) {
         continue;
