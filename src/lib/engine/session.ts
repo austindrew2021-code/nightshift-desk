@@ -973,6 +973,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
           const next = p.side === "long" ? Math.max(stopPx, be) : Math.min(stopPx, be);
           if (next !== stopPx) {
             stopPx = next;
+            p.stopUsd = stopPx;
             pushTape(s, {
               t: Date.now(),
               kind: "note",
