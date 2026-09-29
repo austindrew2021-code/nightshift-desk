@@ -335,7 +335,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
         push(
           s,
           `banked $${(wallet - WORK_CAP).toFixed(0)} · trading $${WORK_CAP} · 18% of the working balance`,
-          "info",
+          "up",
         );
       }
     } catch (e) {
