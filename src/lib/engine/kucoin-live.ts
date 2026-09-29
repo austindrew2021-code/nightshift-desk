@@ -386,13 +386,6 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
       releasePaper(s, p, "past the live price");
       return;
     }
-    const fav = p.side === "long" ? (mark - p.entryUsd) / riskPx : (p.entryUsd - mark) / riskPx;
-    if (fav >= 0.5) {
-      log({ kind: "skip", why: "past-0.5", symbol: p.symbol, mark, entry: p.entryUsd });
-      push(s, `LIVE skip ${p.symbol} · live price already at 0.5R · no chase`, "warn");
-      releasePaper(s, p, "already 0.5R");
-      return;
-    }
   }
 
   const entryBody: Record<string, unknown> = {

@@ -1180,9 +1180,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const eth = books.find((b) => b.id === "ETH");
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
-  // The candle is stamped at its open. 5m + 3m is three minutes after the close.
-  // The limit goes at the entry, not 0.2R through it. The wick, the 0.35R
-  // adverse check, and a live price already at 0.5R still reject one that left.
+  // The limit goes at the entry, not 0.2R through it. A signal candle that
+  // already wicked 0.5R is still not an entry. A live price that has run is a
+  // resting limit, not a chase, and it is cancelled if this bar never trades it.
   const liveFromOpen = now - 5 * 60_000 - 180_000;
   const liveFromOpen15 = now - 15 * 60_000 - 180_000;
   const liveFromClosed = now - 15 * 60_000;
