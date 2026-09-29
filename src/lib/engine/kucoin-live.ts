@@ -1,6 +1,8 @@
 /**
  * KuCoin USDT-M isolated live probe. Off unless ICT_LIVE=1 and keys exist.
- * Paper book is untouched. 1 seat, 18% of the futures wallet.
+ * Paper book is untouched. 1 seat, 18% of the working balance.
+ * The working balance compounds until $200, then the rest is banked
+ * and is not sized into the next trade, so a fill stays possible.
  */
 import { createHmac } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
@@ -33,6 +35,9 @@ function keys() {
 function liveUsd() {
   return Math.max(20, Math.min(200, Number(process.env.KUCOIN_LIVE_USD || 50)));
 }
+
+/** Above this, extra futures equity is banked and not risked. Keeps a 1% stop near a $3,600 fill. */
+const WORK_CAP = 200;
 
 function liveSeats() {
   return 1;
@@ -325,7 +330,14 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     try {
       const wallet = await usdtEquity();
       if (!(wallet > 0)) throw new Error("wallet 0");
-      eq = wallet;
+      eq = Math.min(wallet, WORK_CAP);
+      if (wallet > WORK_CAP + 1) {
+        push(
+          s,
+          `banked $${(wallet - WORK_CAP).toFixed(0)} · trading $${WORK_CAP} · 18% of the working balance`,
+          "info",
+        );
+      }
     } catch (e) {
       log({ kind: "equity-fail", err: String(e) });
       push(s, `LIVE equity fail · ${String(e).slice(0, 80)}`, "down");
