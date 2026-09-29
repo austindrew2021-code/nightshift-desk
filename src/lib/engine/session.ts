@@ -1278,6 +1278,16 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
+    const capStay = s.tape.find((t) => t.text?.startsWith("a valid close still gets the cap"));
+    if (!capStay) {
+      pushTape(s, {
+        t: now,
+        kind: "note",
+        symbol: "ICT",
+        text: `a valid close still gets the cap · the next candle running is not a skip · not Reset`,
+        tone: "info",
+      });
+    }
     const awake = s.tape.find((t) => t.text?.startsWith("scanner is awake before the close"));
     if (!awake) {
       pushTape(s, {
@@ -1426,10 +1436,15 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       const last15 = b.candles15[b.candles15.length - 1]?.t ?? 0;
       const on15 = t.note.includes("15m");
       const lastT = on15 ? last15 || last5 : last5 || last15;
-      const stillOpen = t.reason === "time" && t.closedAt >= lastT - 60_000;
+      const forming = t.closedAt >= lastT - 60_000;
+      const stillOpen = t.reason === "time" && forming;
+      // The sim "closes" a trade the moment the live candle runs. That is the
+      // move we still want. Only a closed candle can retire the signal.
+      const ranThisBar = s.ictStyle === "cisd" && forming && t.reason !== "time";
+      const enterable = stillOpen || ranThisBar;
       const fromOpen = on15 ? liveFromOpen15 : liveFromOpen;
       const fromClosed = on15 ? now - 35 * 60_000 : liveFromClosed;
-      if (stillOpen) {
+      if (enterable) {
         if (t.openedAt < fromOpen) continue;
       } else if (t.openedAt < fromClosed || t.closedAt < fromClosed) {
         continue;
@@ -1454,7 +1469,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         ? bodies.reduce((a, c) => a + c.c, 0) / bodies.length
         : b.last || t.entryUsd;
       if (mid > 0 && Math.abs(t.entryUsd / mid - 1) > 0.02) continue;
-      if (stillOpen && volDried(b.candles5)) continue;
+      if (enterable && volDried(b.candles5)) continue;
       const cooled = s.closed.some(
         (c) =>
           c.origin === "ict" &&
@@ -1467,7 +1482,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       const rangeFade = t.setup === "daily" || t.setup === "weekly" || t.setup === "sweep";
       if (rangeFade && sameSideOpen.length >= 1) continue;
       if (!rangeFade && sameSideOpen.length >= 2) continue;
-      if (stillOpen) {
+      if (enterable) {
         if (!APLUS_LIVE.has(t.setup)) continue;
         if (
           s.open.some((p) => p.id === t.id || (p.origin === "ict" && p.symbol === t.symbol)) ||
@@ -1492,13 +1507,12 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         if (stopDist0 > 0) {
           const adverse = t.side === "long" ? t.entryUsd - fill : fill - t.entryUsd;
           if (adverse > 0.35 * stopDist0) continue;
-          const favor = t.side === "long" ? fill - t.entryUsd : t.entryUsd - fill;
           const frame = (on15 ? b.candles15 : b.candles5) ?? [];
           const signalBar = frame.find((w) => Math.abs(w.t - t.openedAt) < 60_000);
           const already = signalBar
             ? (t.side === "long" ? signalBar.h - t.entryUsd : t.entryUsd - signalBar.l) >= ICT_PARTIAL_R * stopDist0
             : false;
-          if (favor >= ICT_PARTIAL_R * stopDist0 || already) {
+          if (already) {
             s.ictSeen = [...s.ictSeen, key];
             continue;
           }
