@@ -970,6 +970,23 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         break;
       }
       if (!forming) p.markThru = bar.t;
+      if (!forming && s.ictStyle === "cisd") {
+        const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
+        if (mfe >= risk * ICT_PARTIAL_R) {
+          const be = p.entryUsd;
+          const next = p.side === "long" ? Math.max(stopPx, be) : Math.min(stopPx, be);
+          if (next !== stopPx) {
+            stopPx = next;
+            pushTape(s, {
+              t: Date.now(),
+              kind: "note",
+              symbol: p.symbol,
+              text: `stop to entry ${p.symbol} · 0.5R tagged · full 1R still on`,
+              tone: "info",
+            });
+          }
+        }
+      }
       if (trail && p.partialed) {
         const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
         const wave = isWaveRide(p.side, mfe, risk, finite(b?.change24h));
@@ -1879,7 +1896,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 1R · flat 1h" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
+      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 1R · stop to entry after 0.5R · flat 1h" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
       tone: "mute",
     });
   }

@@ -636,5 +636,43 @@ export async function syncKucoinLive(s: EngineState) {
       saveBook(book);
       push(s, `LIVE ¾ assumed filled ${seat.symbol} (resting TP)`, "up");
     }
+    const be = paper.entryUsd;
+    const paperAtEntry = paper.side === "long"
+      ? (paper.stopUsd ?? 0) >= be * (1 - 0.0015)
+      : (paper.stopUsd ?? 0) > 0 && (paper.stopUsd ?? 0) <= be * (1 + 0.0015);
+    const liveAtEntry = paper.side === "long" ? seat.stop >= be * (1 - 0.0015) : seat.stop > 0 && seat.stop <= be * (1 + 0.0015);
+    if (paperAtEntry && !liveAtEntry && seat.lotsLeft > 0) {
+      const c = await contractFor(seat.symbol);
+      if (c) {
+        const oldOid = seat.slOid;
+        const oldStop = seat.stop;
+        await cancel(mode, oldOid);
+        const slPx = pxStr(be, c.tickSize);
+        const slBody: Record<string, unknown> = {
+          clientOid: oid("sl"),
+          symbol: seat.inst,
+          ...ictBracket(seat.side, slPx, slPx, seat.lotsLeft).sl,
+        };
+        let id = await placeStop(mode, slBody);
+        if (!id) {
+          const back = pxStr(oldStop, c.tickSize);
+          id = await placeStop(mode, {
+            clientOid: oid("sl"),
+            symbol: seat.inst,
+            ...ictBracket(seat.side, back, back, seat.lotsLeft).sl,
+          });
+          if (id) {
+            seat.slOid = id;
+            saveBook(book);
+          }
+          push(s, `LIVE stop stay ${seat.symbol} · entry stop did not stick`, "warn");
+        } else {
+          seat.slOid = id;
+          seat.stop = Number(slPx);
+          saveBook(book);
+          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · 1R still on`, "up");
+        }
+      }
+    }
   }
 }
