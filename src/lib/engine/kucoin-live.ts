@@ -1,6 +1,6 @@
 /**
  * KuCoin USDT-M isolated live probe. Off unless ICT_LIVE=1 and keys exist.
- * Paper book is untouched. 1 seat, 18% of min(wallet, KUCOIN_LIVE_USD).
+ * Paper book is untouched. 1 seat, 18% of the futures wallet.
  */
 import { createHmac } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
@@ -199,7 +199,7 @@ async function usdtEquity(): Promise<number> {
     "GET",
     "/api/v1/account-overview?currency=USDT",
   );
-  return Number(d?.availableBalance || d?.accountEquity || 0);
+  return Number(d?.accountEquity || d?.availableBalance || 0);
 }
 
 async function markPrice(symbol: string): Promise<number> {
@@ -323,7 +323,9 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   let eq = liveUsd();
   if (mode === "on") {
     try {
-      eq = Math.min(liveUsd(), await usdtEquity());
+      const wallet = await usdtEquity();
+      if (!(wallet > 0)) throw new Error("wallet 0");
+      eq = wallet;
     } catch (e) {
       log({ kind: "equity-fail", err: String(e) });
       push(s, `LIVE equity fail · ${String(e).slice(0, 80)}`, "down");
