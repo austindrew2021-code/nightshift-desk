@@ -1179,9 +1179,10 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const eth = books.find((b) => b.id === "ETH");
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
-  // The candle is stamped at its open. 5m stays valid for 8 minutes after the close.
-  // A send still dies at 0.5R. The wick and the 0.35R adverse check stay.
-  const liveFromOpen = now - 5 * 60_000 - 8 * 60_000;
+  // The candle is stamped at its open. 5m + 3m is three minutes after the close.
+  // A send in that window still has to be at the entry. The wick, the 0.35R
+  // adverse check, and the live mark reject one that has already left.
+  const liveFromOpen = now - 5 * 60_000 - 180_000;
   const liveFromOpen15 = now - 15 * 60_000 - 180_000;
   const liveFromClosed = now - 15 * 60_000;
   let riskScale = 1;
@@ -1214,16 +1215,6 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         kind: "note",
         symbol: "ICT",
         text: `dead before the fill is not a trade · two bars already against · not Reset`,
-        tone: "info",
-      });
-    }
-    const crossFill = s.tape.find((t) => t.text?.startsWith("a price through the cap"));
-    if (!crossFill) {
-      pushTape(s, {
-        t: now,
-        kind: "note",
-        symbol: "ICT",
-        text: `a price through the cap still fills under 0.5R · 0.5R is still a skip · not Reset`,
         tone: "info",
       });
     }

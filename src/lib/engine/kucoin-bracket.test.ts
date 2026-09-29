@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ictBracket, levInsideStop, orderPastMark, positionIsFlat, realLiqPct, entryLimitPx } from "./kucoin-live.ts";
+import { ictBracket, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
 
 test("long 1R sell sits above and the stop sits below, neither locks the position", () => {
   const { sl, tp } = ictBracket("long", "10.924", "10.746", 64);
@@ -35,18 +35,6 @@ test("ONE at the 4am price is not sent once the futures price has left", () => {
   assert.equal(orderPastMark("long", 10.835, 10.83, 0.089, 40), false);
   assert.equal(orderPastMark("long", 0.00258991, 0, 0.000052, 30), false);
   assert.equal(orderPastMark("short", 0.24595, 0.2464, 0.00495, 30), false);
-});
-test("a valid long still fills after the cap and dies at 0.5R", () => {
-  const under = entryLimitPx("long", 100, 100.1, 1, 0.01);
-  assert.equal(under?.chase, false);
-  assert.equal(under?.px, 100.2);
-  const through = entryLimitPx("long", 100, 100.3, 1, 0.01);
-  assert.equal(through?.chase, true);
-  assert.ok(through && through.px >= 100.3);
-  assert.equal(entryLimitPx("long", 100, 100.5, 1, 0.01), null);
-  const fade = entryLimitPx("short", 100, 99.7, 1, 0.01);
-  assert.equal(fade?.chase, true);
-  assert.ok(fade && fade.px <= 99.7);
 });
 test("short brackets are the mirror", () => {
   const { sl, tp } = ictBracket("short", "0.15", "0.16", 10);

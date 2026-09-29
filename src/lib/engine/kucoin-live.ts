@@ -165,24 +165,7 @@ function pxStr(px: number, tick: number): string {
   return n.toFixed(d);
 }
 
-/** Limit at the 0.2R cap. Through the cap but under 0.5R, cross the mark. At 0.5R the move is gone. */
-export function entryLimitPx(
-  side: Side,
-  entry: number,
-  mark: number,
-  riskPx: number,
-  tick: number,
-): { px: number; chase: boolean } | null {
-  const cap = side === "long" ? entry + riskPx * 0.2 : entry - riskPx * 0.2;
-  if (!(mark > 0) || !(riskPx > 0) || !(entry > 0)) return { px: cap, chase: false };
-  const fav = side === "long" ? (mark - entry) / riskPx : (entry - mark) / riskPx;
-  if (fav >= 0.5) return null;
-  if (fav > 0.2) {
-    const slip = tick > 0 ? tick : 0;
-    return { px: side === "long" ? mark + slip : mark - slip, chase: true };
-  }
-  return { px: cap, chase: false };
-}
+/** Skip a limit the exchange would reject: the live mark is already too far through the entry. */
 export function orderPastMark(side: Side, entry: number, mark: number, riskPx: number, lev: number): boolean {
   if (!(mark > 0) || !(entry > 0) || !(riskPx > 0)) return false;
   const adverse = side === "long" ? entry - mark : mark - entry;
@@ -393,29 +376,26 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     ? Math.max(stopPx, p.entryUsd * (1 - liqPct + 0.002))
     : Math.min(stopPx, p.entryUsd * (1 + liqPct - 0.002));
   const slPx = pxStr(slRaw, c.tickSize);
-  const capRaw = p.side === "long" ? p.entryUsd + riskPx * 0.2 : p.entryUsd - riskPx * 0.2;
-  let limitRaw = capRaw;
-  let chased = false;
+  const capPx = pxStr(
+    p.side === "long" ? p.entryUsd + riskPx * 0.2 : p.entryUsd - riskPx * 0.2,
+    c.tickSize,
+  );
   if (mode === "on") {
     const mark = await markPrice(c.symbol);
     if (orderPastMark(p.side, p.entryUsd, mark, riskPx, lev)) {
-      log({ kind: "skip", why: "past-mark", symbol: p.symbol, mark, entry: p.entryUsd, cap: capRaw });
+      log({ kind: "skip", why: "past-mark", symbol: p.symbol, mark, entry: p.entryUsd, cap: capPx });
       push(s, `LIVE skip ${p.symbol} · live ${mark} is past the entry · no chase`, "warn");
       releasePaper(s, p, "past the live price");
       return;
     }
-    const decided = entryLimitPx(p.side, p.entryUsd, mark, riskPx, c.tickSize);
-    if (!decided) {
+    const fav = p.side === "long" ? (mark - p.entryUsd) / riskPx : (p.entryUsd - mark) / riskPx;
+    if (fav >= 0.5) {
       log({ kind: "skip", why: "past-0.5", symbol: p.symbol, mark, entry: p.entryUsd });
       push(s, `LIVE skip ${p.symbol} · live price already at 0.5R · no chase`, "warn");
       releasePaper(s, p, "already 0.5R");
       return;
     }
-    limitRaw = decided.px;
-    chased = decided.chase;
-    if (chased) push(s, `cross ${p.symbol} · through the cap · still under 0.5R`, "up");
   }
-  const capPx = pxStr(limitRaw, c.tickSize);
 
   const entryBody: Record<string, unknown> = {
     clientOid: oid("e"),
@@ -448,7 +428,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     const nextClose = (p.openedAt || Date.now()) + 2 * tfMs;
     const deadline = Math.min(nextClose, Date.now() + tfMs);
     if (deadline - Date.now() > 30_000) {
-      push(s, `resting ${p.symbol} through this bar · limit at the cap · cross once if it leaves under 0.5R`, "mute");
+      push(s, `resting ${p.symbol} through this bar · limit stays at the cap · no chase`, "mute");
     }
     while (Date.now() < deadline && !(filled > 0)) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -470,36 +450,8 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
       const qty = await absPosQty(c.symbol);
       if (qty > 0) filled = Math.floor(qty / c.lotSize) * c.lotSize;
     }
-    if (!(filled > 0) && !chased) {
-      const mark = await markPrice(c.symbol);
-      const decided = !orderPastMark(p.side, p.entryUsd, mark, riskPx, lev)
-        ? entryLimitPx(p.side, p.entryUsd, mark, riskPx, c.tickSize)
-        : null;
-      if (decided?.chase) {
-        const crossPx = pxStr(decided.px, c.tickSize);
-        push(s, `cross ${p.symbol} · cap missed · still under 0.5R`, "up");
-        try {
-          const r = await place(mode, { ...entryBody, clientOid: oid("e"), price: crossPx });
-          fillOid = String(r.orderId || "");
-          const until = Date.now() + 15_000;
-          while (Date.now() < until && !(filled > 0) && fillOid) {
-            await new Promise((res) => setTimeout(res, 1000));
-            const o = await kucoin<{ dealSize?: number; status?: string }>("GET", `/api/v1/orders/${fillOid}`);
-            filled = Math.floor(Number(o?.dealSize || 0) / c.lotSize) * c.lotSize;
-            if (o?.status === "done") break;
-          }
-        } catch (e) {
-          log({ kind: "cross-fail", symbol: p.symbol, err: String(e) });
-        }
-        if (!(filled > 0) && fillOid) {
-          await cancel(mode, fillOid);
-          const qty = await absPosQty(c.symbol);
-          if (qty > 0) filled = Math.floor(qty / c.lotSize) * c.lotSize;
-        }
-      }
-    }
     if (!(filled > 0)) {
-      push(s, `LIVE skip ${p.symbol} · price past 0.5R or the cap · no chase`, "warn");
+      push(s, `LIVE skip ${p.symbol} · price past ${capPx} · no chase`, "warn");
       releasePaper(s, p, "not filled");
       return;
     }
