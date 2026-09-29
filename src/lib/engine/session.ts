@@ -37,7 +37,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { fadingAcceptedBreak, inKill, isFillWindow, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows, exitTells } from "./ict";
+import { fadingAcceptedBreak, inKill, isFillWindow, isWaveRide, lockRFromMfe, nyHour, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows, exitTells } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import { ICT_ASSETS, type IctBook } from "./universe";
 import { queueLiveOpen } from "./live-pend";
@@ -167,29 +167,24 @@ export function ictRiskUsd(s: EngineState, stopPct = 0.01, levOverride?: number,
   return { risk: Math.max(1, risk * k), notional: notional * k };
 }
 
-function ictHaltPct(s: EngineState) {
-  const r = liveRiskPct(s);
-  if (r >= 0.28) return 0.32;
-  if (r >= 0.16) return 0.22;
-  return 0.28;
-}
-
-/** Net ICT PnL for this NY session. Overnight (00–07) halt must not sit out NY AM. */
-function ictSessionNet(s: EngineState, now = Date.now()): number {
-  const cur = nyParts(now);
-  const nyAm = cur.h >= 7;
-  return s.closed
-    .filter((c) => {
-      if (c.origin !== "ict") return false;
-      const p = nyParts(c.closedAt);
-      if (p.day !== cur.day) return false;
-      return (p.h >= 7) === nyAm;
-    })
-    .reduce((a, c) => a + finite(c.pnlUsd), 0);
-}
-
-function ictDayNet(s: EngineState, now = Date.now()): number {
-  return ictSessionNet(s, now);
+function lossPauseUntil(s: EngineState): number {
+  const closed = s.closed
+    .filter((c) => c.origin === "ict")
+    .slice()
+    .sort((a, b) => a.closedAt - b.closedAt);
+  let streak = 0;
+  let until = 0;
+  for (const c of closed) {
+    if (c.closedAt < until) continue;
+    if (finite(c.pnlUsd) < 0) {
+      streak++;
+      if (streak >= 2) {
+        until = c.closedAt + 4 * 3600_000;
+        streak = 0;
+      }
+    } else streak = 0;
+  }
+  return until;
 }
 
 function maybeBank(s: EngineState) {
@@ -1188,55 +1183,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const liveFromOpen = now - 5 * 60_000 - 180_000;
   const liveFromOpen15 = now - 15 * 60_000 - 180_000;
   const liveFromClosed = now - 15 * 60_000;
-  const capBase = Math.max(s.startUsd, tradableUsd(s));
-  const cap = capBase * (s.mode === "ict" ? ictHaltPct(s) : DAILY_LOSS_PCT);
-  const dayNet = s.mode === "ict" ? ictDayNet(s, now) : -finite(s.dayLoss);
-  const oneR = capBase * liveRiskPct(s);
-  const nyAm = nyParts(now).h >= 7;
-  const sess = nyAm ? "NY AM" : "overnight";
   let riskScale = 1;
-  if (dayNet <= -cap || dayNet - oneR <= -cap) {
-    const today = nyParts(now).day;
-    const notes = s.tape.filter((t) => {
-      if (nyParts(t.t).day !== today) return false;
-      return t.text?.startsWith("daily halt") || t.text?.startsWith("session halt") || t.text?.startsWith("resume halt");
-    });
-    const stuck = notes.some((t) => t.text?.startsWith("resume halt"));
-    const first = notes.filter((t) => !t.text?.startsWith("resume halt")).at(-1);
-    const coolMs = 90 * 60_000;
-    const cooled = !!first && now - first.t >= coolMs;
-    const resumeFrom = (first?.t ?? now) + coolMs;
-    const resumeNet = s.closed
-      .filter((c) => c.origin === "ict" && c.closedAt >= resumeFrom && nyParts(c.closedAt).day === today)
-      .reduce((a, c) => a + finite(c.pnlUsd), 0);
-    if (stuck || !cooled || resumeNet <= -cap) {
-      const second = stuck || (cooled && resumeNet <= -cap);
-      const tag = second ? "resume halt" : "session halt";
-      const lastHalt = s.tape.find((t) => t.text?.startsWith(tag));
-      if (!lastHalt || now - lastHalt.t > 2 * 3600_000) {
-        pushTape(s, {
-          t: now,
-          kind: "note",
-          symbol: "ICT",
-          text: second
-            ? `resume halt · ${sess} · another cap down after the cool-off · net $${dayNet.toFixed(0)} · vault safe · not Reset`
-            : `session halt · ${sess} · net $${dayNet.toFixed(0)} · cap -$${cap.toFixed(0)} · 90m then full · vault safe · not Reset`,
-          tone: "warn",
-        });
-      }
-      return;
-    }
-    const lastResume = s.tape.find((t) => t.text?.startsWith("resume · full"));
-    if (!lastResume || now - lastResume.t > 6 * 3600_000) {
-      pushTape(s, {
-        t: now,
-        kind: "note",
-        symbol: "ICT",
-        text: `resume · full size · halt cooled 90m · morning loss stays · one stop does not end the session · not Reset`,
-        tone: "info",
-      });
-    }
-  }
+  const pauseUntil = lossPauseUntil(s);
   if (s.ictStyle === "cisd") {
     const armed = s.tape.find((t) => t.text?.startsWith("15m CISD live"));
     if (!armed || now - armed.t > 6 * 3600_000) {
@@ -1482,6 +1430,20 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       const rangeFade = t.setup === "daily" || t.setup === "weekly" || t.setup === "sweep";
       if (rangeFade && sameSideOpen.length >= 1) continue;
       if (!rangeFade && sameSideOpen.length >= 2) continue;
+      if (enterable && now < pauseUntil) {
+        const last = s.tape.find((t) => t.text?.startsWith("loss pause"));
+        if (!last || now - last.t > 30 * 60_000) {
+          const mins = Math.max(1, Math.round((pauseUntil - now) / 60_000));
+          pushTape(s, {
+            t: now,
+            kind: "note",
+            symbol: "ICT",
+            text: `loss pause · 2 losses · back in ${mins}m · not a halt · not Reset`,
+            tone: "warn",
+          });
+        }
+        continue;
+      }
       if (enterable) {
         if (!APLUS_LIVE.has(t.setup)) continue;
         if (
