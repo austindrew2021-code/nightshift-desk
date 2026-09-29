@@ -39,7 +39,7 @@ import {
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
 import { fadingAcceptedBreak, inKill, isFillWindow, isWaveRide, lockRFromMfe, nyHour, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows, exitTells } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
-import { ICT_ASSETS, type IctBook } from "./universe";
+import { type IctBook } from "./universe";
 import { queueLiveOpen } from "./live-pend";
 import {
   ZOSTAFF_LAST_TICK,
@@ -1413,7 +1413,6 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       )
         continue;
       if (MEME.has(t.symbol)) continue;
-      if (!ICT_ASSETS.some((a) => a.id === t.symbol) && !t.note.includes("OTE")) continue;
       const bodies = (b.candles5 || b.candles15 || []).slice(-5, -1);
       const mid = bodies.length
         ? bodies.reduce((a, c) => a + c.c, 0) / bodies.length
