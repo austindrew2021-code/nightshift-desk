@@ -1440,7 +1440,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       const stillOpen = t.reason === "time" && forming;
       // The sim "closes" a trade the moment the live candle runs. That is the
       // move we still want. Only a closed candle can retire the signal.
-      const ranThisBar = s.ictStyle === "cisd" && forming && t.reason !== "time";
+      const ranThisBar = s.ictStyle === "cisd" && forming && t.reason === "target";
       const enterable = stillOpen || ranThisBar;
       const fromOpen = on15 ? liveFromOpen15 : liveFromOpen;
       const fromClosed = on15 ? now - 35 * 60_000 : liveFromClosed;
