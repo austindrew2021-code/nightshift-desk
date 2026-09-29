@@ -1377,6 +1377,38 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       origin: "ict" as const,
       pnlSol: t.pnlUsd / Math.max(1e-6, s.solUsd),
     }));
+    // A CISD that just closed is not in the sim until a later bar trades the entry.
+    // By then the wick is gone. Rest the limit for this next bar, and cancel it if untouched.
+    if (s.ictStyle === "cisd") {
+      for (const sig of [...s5, ...s15]) {
+        const on15 = sig.note.includes("15m");
+        const tf = on15 ? 15 * 60_000 : 5 * 60_000;
+        if (now < sig.t + tf || now >= sig.t + 2 * tf) continue;
+        if (sig.t < (on15 ? now - 18 * 60_000 : now - 8 * 60_000)) continue;
+        if (sim.some((t) => t.symbol === b.symbol && t.side === sig.side && Math.abs(t.openedAt - sig.t) < 60_000)) continue;
+        sim.push({
+          id: `ict-${b.symbol}-${sig.setup}-${sig.i}`,
+          symbol: b.symbol,
+          name: b.name,
+          setup: sig.setup,
+          side: sig.side,
+          openedAt: sig.t,
+          closedAt: now,
+          entryUsd: sig.entry,
+          exitUsd: sig.entry,
+          sizeSol: 0,
+          pnlSol: 0,
+          pnlUsd: 0,
+          rMultiple: 0,
+          reason: "time",
+          score: 0.7,
+          note: sig.note,
+          origin: "ict",
+          stop: sig.stop,
+          target: sig.target,
+        });
+      }
+    }
     sim.sort((a, b) => {
       const rank = (x: string) => (x === "scalp" || x === "judas" ? 0 : x === "sweep" ? 1 : 2);
       return rank(a.setup) - rank(b.setup);
