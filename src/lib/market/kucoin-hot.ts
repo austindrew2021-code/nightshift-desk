@@ -7,8 +7,7 @@ const SKIP = new Set([
   "USDT", "USDC", "USD", "DAI", "KCS", "XBT", "BTC", "XAUT", "PAXG", "XAG",
   "SOXL", "SKHYNIX", "SNDK", "SPCX",
 ]);
-const HOT_CAP = 200;
-const MIN_VOL = 500_000;
+const HOT_N = 10;
 
 let browserLastCache: { t: number; px: Record<string, number> } = { t: 0, px: {} };
 
@@ -173,7 +172,7 @@ export function applyLiveLast(b: IctBook, last: number, now = Date.now()) {
   paint(b.candles1h, 60 * 60_000);
 }
 
-/** Crypto USDT-M that can take the order: 20x or more, and $500k of turnover. Stocks stay out. */
+/** KuCoin USDT-M names that are actually hot: 50×+ and real volume. Not spot lottery ticks. */
 export async function fetchKucoinHotAssets(): Promise<IctAssetDef[]> {
   try {
     const res = await fetch("https://api-futures.kucoin.com/api/v1/contracts/active", {
@@ -185,15 +184,12 @@ export async function fetchKucoinHotAssets(): Promise<IctAssetDef[]> {
     const scored: { vol: number; a: IctAssetDef }[] = [];
     for (const r of rows) {
       if (r.status !== "Open" || r.quoteCurrency !== "USDT") continue;
-      if (String(r.marketType ?? "CRYPTO") !== "CRYPTO") continue;
-      let base = String(r.baseCurrency ?? "").toUpperCase();
-      if (base === "XBT") base = "BTC";
-      if (base.startsWith("1000") && CORE.has(base.slice(4))) continue;
+      const base = String(r.baseCurrency ?? "").toUpperCase();
       if (!base || CORE.has(base) || SKIP.has(base)) continue;
       const im = Number(r.initialMargin) || 1;
       const lev = im > 0 ? 1 / im : 0;
       const vol = Number(r.turnoverOf24h) || 0;
-      if (lev < 20 || vol < MIN_VOL) continue;
+      if (lev < 20 || vol < 4_000_000) continue;
       scored.push({
         vol,
         a: { id: base, symbol: base, name: base, venue: "kucoin", instId: `${base}-USDT` },
@@ -206,7 +202,7 @@ export async function fetchKucoinHotAssets(): Promise<IctAssetDef[]> {
       if (seen.has(s.a.id)) continue;
       seen.add(s.a.id);
       out.push(s.a);
-      if (out.length >= HOT_CAP) break;
+      if (out.length >= HOT_N) break;
     }
     return out;
   } catch {

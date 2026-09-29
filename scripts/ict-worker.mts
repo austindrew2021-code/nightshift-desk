@@ -377,7 +377,7 @@ async function main() {
   const s = load();
   const hotReady = await Promise.race([
     hotP,
-    new Promise<IctAssetDef[]>((r) => setTimeout(() => r([]), 2_000)),
+    new Promise<IctAssetDef[]>((r) => setTimeout(() => r([]), 50)),
   ]);
   const seen = new Set(ICT_ASSETS.map((a) => a.id));
   const assets = [...ICT_ASSETS];
@@ -418,14 +418,13 @@ async function main() {
       seen.add(a.id);
       assets.push(a);
     }
-    const listed = new Set(ICT_ASSETS.map((a) => a.id));
     for (let i = 0; i < assets.length; i += 6) {
       await scanFreshClose(s, assets, caught);
       const chunk = assets.slice(i, i + 6);
-      const got = await Promise.allSettled(chunk.map((a) => (listed.has(a.id) ? book(a) : fastBook(a))));
+      const got = await Promise.allSettled(chunk.map(book));
       const fresh: IctBook[] = [];
       for (const r of got) {
-        if (r.status === "fulfilled" && ((r.value.candles15?.length ?? 0) > 20 || (r.value.candles5?.length ?? 0) > 48)) {
+        if (r.status === "fulfilled" && r.value.candles15.length > 20) {
           books.push(r.value);
           fresh.push(r.value);
         }
