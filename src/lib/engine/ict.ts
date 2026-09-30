@@ -16,6 +16,11 @@ export function nyHour(t: number): number {
   return p.h + p.m / 60;
 }
 
+/** Plain A only. A+, A OTE, and A Unicorn stay eligible after a full stop. */
+export function isPlainA(note: string): boolean {
+  return note.includes(" · A · ") || note.endsWith(" · A");
+}
+
 export function inWindow(t: number, startH: number, endH: number): boolean {
   const h = nyHour(t);
   return h >= startH && h < endH;
