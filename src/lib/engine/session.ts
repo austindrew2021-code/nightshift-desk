@@ -1180,11 +1180,11 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const eth = books.find((b) => b.id === "ETH");
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
-  // The limit goes at the entry, not 0.2R through it. A signal candle that
-  // already wicked 0.5R is still not an entry. A live price that has run is a
-  // resting limit, not a chase, and it is cancelled if this bar never trades it.
-  const liveFromOpen = now - 5 * 60_000 - 180_000;
-  const liveFromOpen15 = now - 15 * 60_000 - 180_000;
+  // The limit goes at the entry, not through it. A signal candle that already
+  // wicked 0.5R is still not an entry. The order may be sent any time until the
+  // next bar closes, which is the same window the test counts as a fill.
+  const liveFromOpen = now - 2 * 5 * 60_000;
+  const liveFromOpen15 = now - 2 * 15 * 60_000;
   const liveFromClosed = now - 15 * 60_000;
   let riskScale = 1;
   const pauseUntil = lossPauseUntil(s);
@@ -1259,13 +1259,13 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         tone: "info",
       });
     }
-    const freshWin = s.tape.find((t) => t.text?.startsWith("close stays valid for 3 minutes"));
+    const freshWin = s.tape.find((t) => t.text?.startsWith("close stays valid for the next bar"));
     if (!freshWin) {
       pushTape(s, {
         t: now,
         kind: "note",
         symbol: "ICT",
-        text: `close stays valid for 3 minutes if price is still at the entry · a price that left is still skipped · not Reset`,
+        text: `close stays valid for the next bar if price is still at the entry · a price that left is still skipped · not Reset`,
         tone: "info",
       });
     }
@@ -1384,7 +1384,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const on15 = sig.note.includes("15m");
         const tf = on15 ? 15 * 60_000 : 5 * 60_000;
         if (now < sig.t + tf || now >= sig.t + 2 * tf) continue;
-        if (sig.t < (on15 ? now - 18 * 60_000 : now - 8 * 60_000)) continue;
+        if (sig.t < (on15 ? now - 30 * 60_000 : now - 10 * 60_000)) continue;
         if (sim.some((t) => t.symbol === b.symbol && t.side === sig.side && Math.abs(t.openedAt - sig.t) < 60_000)) continue;
         sim.push({
           id: `ict-${b.symbol}-${sig.setup}-${sig.i}`,
