@@ -58,6 +58,10 @@ type LiveSeat = {
   slOid?: string;
   partialed: boolean;
   openedAt: number;
+  /** Limit is on the book. The next tick attaches the stop once it fills. */
+  pending?: boolean;
+  deadline?: number;
+  tp?: number;
 };
 
 type LiveBook = { seats: LiveSeat[] };
@@ -252,8 +256,8 @@ async function cancel(mode: LiveMode, id?: string) {
   }
 }
 
-/** A leftover entry from a restart has no stop behind it. Stop orders are left alone. */
-async function cancelStrayEntries(mode: LiveMode) {
+/** A leftover entry from a restart has no stop behind it. A pending seat is still that order, so it stays. */
+async function cancelStrayEntries(mode: LiveMode, keep: Set<string>) {
   if (mode !== "on") return;
   try {
     const data = await kucoin<{ items?: { id?: string; clientOid?: string; reduceOnly?: boolean }[] } | { id?: string; clientOid?: string; reduceOnly?: boolean }[]>(
@@ -263,7 +267,7 @@ async function cancelStrayEntries(mode: LiveMode) {
     const rows = Array.isArray(data) ? data : data?.items || [];
     for (const o of rows) {
       const id = String(o.id || "");
-      if (!id || o.reduceOnly) continue;
+      if (!id || o.reduceOnly || keep.has(id)) continue;
       if (!String(o.clientOid || "").startsWith("e-")) continue;
       await cancel(mode, id);
       log({ kind: "stray-entry-cancel", id });
@@ -415,39 +419,47 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
 
   let filled = lots;
   if (mode === "on" && fillOid) {
-    filled = 0;
-    const tfMs = p.note.includes("15m") ? 15 * 60_000 : 5 * 60_000;
-    const nextClose = (p.openedAt || Date.now()) + 2 * tfMs;
-    const deadline = Math.min(nextClose, Date.now() + tfMs);
-    if (deadline - Date.now() > 30_000) {
+    let filledNow = 0;
+    try {
+      const o = await kucoin<{ dealSize?: number; status?: string }>("GET", `/api/v1/orders/${fillOid}`);
+      filledNow = Math.floor(Number(o?.dealSize || 0) / c.lotSize) * c.lotSize;
+    } catch (e) {
+      log({ kind: "entry-state-fail", err: String(e) });
+    }
+    if (!(filledNow > 0)) {
+      const qty = await absPosQty(c.symbol);
+      if (qty > 0) filledNow = Math.floor(qty / c.lotSize) * c.lotSize;
+    }
+    if (filledNow > 0) {
+      filled = filledNow;
+      if (filled < lots) await cancel(mode, fillOid);
+    } else {
+      const tfMs = p.note.includes("15m") ? 15 * 60_000 : 5 * 60_000;
+      const nextClose = (p.openedAt || Date.now()) + 2 * tfMs;
+      const deadline = Math.min(nextClose, Date.now() + tfMs);
+      book.seats.push({
+        paperId: p.id,
+        symbol: p.symbol,
+        inst: c.symbol,
+        side: p.side,
+        entry: p.entryUsd,
+        stop: Number(slPx),
+        tp: Number(tpPx),
+        lots,
+        lotsLeft: 0,
+        lev,
+        entryOid: fillOid,
+        tpOid: "",
+        slOid: "",
+        partialed: false,
+        openedAt: Date.now(),
+        pending: true,
+        deadline,
+      });
+      saveBook(book);
       push(s, `resting ${p.symbol} through this bar · limit stays at the entry · no chase`, "mute");
-    }
-    while (Date.now() < deadline && !(filled > 0)) {
-      await new Promise((r) => setTimeout(r, 1000));
-      try {
-        const o = await kucoin<{ dealSize?: number; status?: string }>("GET", `/api/v1/orders/${fillOid}`);
-        filled = Math.floor(Number(o?.dealSize || 0) / c.lotSize) * c.lotSize;
-        log({ kind: "entry-state", symbol: p.symbol, dealSize: filled, status: o?.status, cap: capPx });
-        if (o?.status === "done") break;
-      } catch (e) {
-        log({ kind: "entry-state-fail", err: String(e) });
-      }
-    }
-    if (!(filled > 0)) {
-      const qty = await absPosQty(c.symbol);
-      if (qty > 0) filled = Math.floor(qty / c.lotSize) * c.lotSize;
-    }
-    if (!(filled > 0)) {
-      await cancel(mode, fillOid);
-      const qty = await absPosQty(c.symbol);
-      if (qty > 0) filled = Math.floor(qty / c.lotSize) * c.lotSize;
-    }
-    if (!(filled > 0)) {
-      push(s, `LIVE skip ${p.symbol} · this bar never traded ${capPx} · no chase`, "warn");
-      releasePaper(s, p, "not filled");
       return;
     }
-    if (filled < lots) await cancel(mode, fillOid);
   }
 
   const tpLots = Math.floor(filled / c.lotSize) * c.lotSize;
@@ -515,6 +527,87 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   push(
     s,
     `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · entry ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · ${lev}x · full @ ${tgtR}R stop ${tpPx} · SL ${slPx}`,
+    "up",
+  );
+}
+
+/** The limit was posted last tick. Attach the stop when it fills. Cancel it when the bar ends empty. */
+async function armPending(s: EngineState, mode: LiveMode, book: LiveBook, seat: LiveSeat) {
+  if (!seat.pending || !seat.entryOid) return;
+  const c = await contractFor(seat.symbol);
+  if (!c) return;
+  let filled = 0;
+  let done = false;
+  try {
+    const o = await kucoin<{ dealSize?: number; status?: string }>("GET", `/api/v1/orders/${seat.entryOid}`);
+    filled = Math.floor(Number(o?.dealSize || 0) / c.lotSize) * c.lotSize;
+    done = o?.status === "done";
+    log({ kind: "entry-state", symbol: seat.symbol, dealSize: filled, status: o?.status });
+  } catch (e) {
+    log({ kind: "entry-state-fail", err: String(e) });
+    return;
+  }
+  const expired = Date.now() >= (seat.deadline || 0);
+  if (!(filled > 0) && !expired && !done) return;
+  if (!(filled > 0)) {
+    await cancel(mode, seat.entryOid);
+    const qty = await absPosQty(c.symbol);
+    if (qty > 0) filled = Math.floor(qty / c.lotSize) * c.lotSize;
+  }
+  const paper = s.open.find((p) => p.id === seat.paperId || (p.origin === "ict" && p.symbol === seat.symbol));
+  if (!(filled > 0)) {
+    book.seats = book.seats.filter((x) => x.paperId !== seat.paperId);
+    saveBook(book);
+    if (paper) releasePaper(s, paper, "not filled");
+    else push(s, `LIVE skip ${seat.symbol} · this bar never traded the entry · no chase`, "warn");
+    return;
+  }
+  if (filled < seat.lots) await cancel(mode, seat.entryOid);
+  const tpPx = pxStr(seat.tp || seat.entry, c.tickSize);
+  const slPx = pxStr(seat.stop, c.tickSize);
+  const tpLots = Math.floor(filled / c.lotSize) * c.lotSize;
+  const bracket = ictBracket(seat.side, tpPx, slPx, filled);
+  const slOid = await placeStop(mode, { clientOid: oid("sl"), symbol: c.symbol, ...bracket.sl });
+  if (!slOid) {
+    log({ kind: "sl-naked", symbol: seat.symbol });
+    try {
+      await place(mode, {
+        clientOid: oid("x"),
+        symbol: c.symbol,
+        side: seat.side === "long" ? "sell" : "buy",
+        type: "market",
+        size: filled,
+        reduceOnly: true,
+        closeOrder: true,
+        marginMode: "ISOLATED",
+      });
+    } catch (e) {
+      log({ kind: "sl-flatten-fail", symbol: seat.symbol, err: String(e) });
+    }
+    book.seats = book.seats.filter((x) => x.paperId !== seat.paperId);
+    saveBook(book);
+    push(s, `LIVE flatten ${seat.symbol} · stop did not stick`, "down");
+    if (paper) releasePaper(s, paper, "flattened, no stop");
+    return;
+  }
+  let tpOid = "";
+  if (tpLots >= c.lotSize) {
+    try {
+      tpOid = String((await place(mode, { clientOid: oid("tp"), symbol: c.symbol, ...bracket.tp, size: tpLots })).orderId || "");
+    } catch (e) {
+      log({ kind: "tp-fail", err: String(e) });
+    }
+  }
+  seat.pending = false;
+  seat.lots = filled;
+  seat.lotsLeft = filled;
+  seat.slOid = slOid;
+  seat.tpOid = tpOid;
+  seat.stop = Number(slPx);
+  saveBook(book);
+  push(
+    s,
+    `LIVE ${seat.side} ${seat.symbol} ${filled} lots · filled ${pxStr(seat.entry, c.tickSize)} · full @ stop ${tpPx} · SL ${slPx}`,
     "up",
   );
 }
@@ -601,8 +694,12 @@ export async function syncKucoinLive(s: EngineState) {
   }
   const book = loadBook();
   if (mode === "on") {
-    await cancelStrayEntries(mode);
+    const keep = new Set(book.seats.map((x) => x.entryOid).filter((id): id is string => Boolean(id)));
+    await cancelStrayEntries(mode, keep);
     await flattenUnknown(mode, book, s);
+    for (const seat of [...book.seats]) {
+      if (seat.pending) await armPending(s, mode, book, seat);
+    }
   }
   const qty = await positionQty(mode);
   const paperOpen = s.open.filter((p) => p.origin === "ict");
@@ -619,7 +716,11 @@ export async function syncKucoinLive(s: EngineState) {
       continue;
     }
     if (seen.has(p.id + p.symbol) || book.seats.some((x) => x.paperId === p.id || x.symbol === p.symbol)) continue;
-    if (!queued.includes(p) && Date.now() - p.openedAt > 5 * 60_000) continue;
+    const tfMs = p.note.includes("15m") ? 15 * 60_000 : 5 * 60_000;
+    const born = p.liveAt || p.openedAt;
+    const limit = p.liveAt ? tfMs : 2 * tfMs;
+    if (!queued.includes(p) && Date.now() - born > limit) continue;
+    const seats = book.seats.length;
     try {
       await enter(s, p, mode, book);
     } catch (e) {
@@ -627,10 +728,20 @@ export async function syncKucoinLive(s: EngineState) {
       push(s, `LIVE dry FAIL ${p.symbol} · ${String(e).slice(0, 80)}`, "down");
     }
     seen.add(p.id + p.symbol);
-    break;
+    if (book.seats.length > seats) break;
   }
 
   for (const seat of [...book.seats]) {
+    if (seat.pending) {
+      const still = paperOpen.find((p) => p.id === seat.paperId || p.symbol === seat.symbol);
+      if (!still && Date.now() - seat.openedAt >= 25_000) {
+        await cancel(mode, seat.entryOid);
+        book.seats = book.seats.filter((x) => x.paperId !== seat.paperId);
+        saveBook(book);
+        push(s, `LIVE skip ${seat.symbol} · paper closed before the fill`, "warn");
+      }
+      continue;
+    }
     if (positionIsFlat(qty, seat.inst, Date.now() - seat.openedAt)) {
       await cancel(mode, seat.tpOid);
       await cancel(mode, seat.slOid);
@@ -642,6 +753,7 @@ export async function syncKucoinLive(s: EngineState) {
     const paper = paperOpen.find((p) => p.id === seat.paperId || p.symbol === seat.symbol);
     if (!paper) {
       if (Date.now() - seat.openedAt < 25_000) continue;
+      await cancel(mode, seat.entryOid);
       await flatten(mode, seat, "paper-closed");
       book.seats = book.seats.filter((x) => x.paperId !== seat.paperId);
       saveBook(book);

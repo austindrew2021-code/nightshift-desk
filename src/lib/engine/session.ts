@@ -1537,8 +1537,9 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             continue;
           }
         }
-        const deadSeries = (b.candles5 && b.candles5.length > 8 ? b.candles5 : b.candles15) ?? [];
-        const prior = deadSeries.filter((bar) => bar.t > t.openedAt + 30_000).slice(0, -1);
+        const deadSeries = (on15 ? b.candles15 : b.candles5) ?? [];
+        const tfMs = on15 ? 15 * 60_000 : 5 * 60_000;
+        const prior = deadSeries.filter((bar) => bar.t >= t.openedAt + tfMs && bar.t + tfMs <= now);
         if (prior.length >= 2) {
           const lastTwo = prior.slice(-2);
           const against = lastTwo.every((bar) => (t.side === "long" ? bar.c < t.entryUsd : bar.c > t.entryUsd));
