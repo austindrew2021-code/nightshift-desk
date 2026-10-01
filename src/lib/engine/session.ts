@@ -37,7 +37,7 @@ import {
   type TapeEvent,
 } from "./types";
 import { agentLine, regimeScore, scoreLive } from "./pipeline";
-import { fadingAcceptedBreak, inKill, isFillWindow, isPlainA, isWaveRide, lockRFromMfe, nyHour, nyParts, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows, exitTells } from "./ict";
+import { fadingAcceptedBreak, inKill, isFillWindow, isWaveRide, lockRFromMfe, nyHour, readRegime, scan5mCisd, scanIct, scanPlayback, scanSmt, scanSwingNative, scanWeekly, simulateIct, styleAllows, exitTells } from "./ict";
 import { fillQuality, modelBuy, modelSell } from "./execution";
 import { ICT_ASSETS, type IctBook } from "./universe";
 import { queueLiveOpen } from "./live-pend";
@@ -980,7 +980,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
               t: Date.now(),
               kind: "note",
               symbol: p.symbol,
-              text: `stop to entry ${p.symbol} · 0.5R tagged · full 1.25R still on`,
+              text: `stop to entry ${p.symbol} · 0.5R tagged · a reverse from here is flat · 1.25R limit stays`,
               tone: "info",
             });
           }
@@ -1465,25 +1465,6 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           now - c.closedAt < 12 * 60_000,
       );
       if (cooled) continue;
-      if (s.ictStyle === "cisd" && isPlainA(t.note)) {
-        const today = nyParts(now).day;
-        const used =
-          s.open.some((p) => p.origin === "ict" && isPlainA(p.note)) ||
-          s.closed.some((c) => c.origin === "ict" && isPlainA(c.note) && nyParts(c.closedAt).day === today);
-        if (used) {
-          const last = s.tape.find((ev) => ev.text?.startsWith("plain A one"));
-          if (!last || now - last.t > 30 * 60_000) {
-            pushTape(s, {
-              t: now,
-              kind: "note",
-              symbol: "ICT",
-              text: `plain A one a day · OTE Unicorn A+ still on · not Reset`,
-              tone: "warn",
-            });
-          }
-          continue;
-        }
-      }
       const sameSideOpen = s.open.filter((p) => p.origin === "ict" && p.side === t.side);
       const rangeFade = t.setup === "daily" || t.setup === "weekly" || t.setup === "sweep";
       if (rangeFade && sameSideOpen.length >= 1) continue;
@@ -1637,6 +1618,15 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           text: `live ${t.side} ${t.symbol} @ ${t.entryUsd.toFixed(t.entryUsd < 0.01 ? 8 : t.entryUsd < 2 ? 5 : 2)} · LIQ ${clamped.liq.toFixed(t.entryUsd < 0.01 ? 8 : t.entryUsd < 2 ? 5 : 2)} (${liqPct}%)${clamped.capped ? " · SL capped" : " · SL inside"} · ${t.note}`,
           tone: "up",
         });
+        if (holdOpen) {
+          pushTape(s, {
+            t: s.simT,
+            kind: "note",
+            symbol: t.symbol,
+            text: `read ${t.symbol} · take · closed inside 0.5R · a reverse after 0.5R stops at entry · 1.25R limit stays`,
+            tone: "info",
+          });
+        }
         added += 1;
         continue;
       }
@@ -1931,7 +1921,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 1.25R · limit at entry · stop to entry after 0.5R · flat 90m · one plain A a day · half size until $64 · 4h after two stops" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
+      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 1.25R · limit at entry · stop to entry after 0.5R · flat 90m · plain A on · half size until $64 · 4h after two stops" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
       tone: "mute",
     });
   }
