@@ -1,6 +1,6 @@
 /**
  * KuCoin USDT-M isolated live probe. Off unless ICT_LIVE=1 and keys exist.
- * Paper book is untouched. 1 seat, 18% of the working balance.
+ * Paper book is untouched. 1 seat. 9% until the wallet reaches $64, then 18% of the working balance.
  * The working balance compounds until $200, then the rest is banked
  * and is not sized into the next trade, so a fill stays possible.
  */
@@ -334,7 +334,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
       if (wallet > WORK_CAP + 1) {
         push(
           s,
-          `banked $${(wallet - WORK_CAP).toFixed(0)} · trading $${WORK_CAP} · 18% of the working balance`,
+          `banked $${(wallet - WORK_CAP).toFixed(0)} · trading $${WORK_CAP} · ${eq < 64 ? "9%" : "18%"} of the working balance`,
           "up",
         );
       }
@@ -345,7 +345,8 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
       return;
     }
   }
-  const riskUsd = eq * ICT_HARD_RISK_PCT;
+  const riskPct = eq < 64 ? 0.09 : ICT_HARD_RISK_PCT;
+  const riskUsd = eq * riskPct;
   const stopPct = Math.max(1e-6, p.stopPct || Math.abs(p.entryUsd - (p.stopUsd || p.entryUsd)) / p.entryUsd);
   if (eq < 20 || riskUsd < 2) {
     log({ kind: "skip", why: "no-funds", eq, riskUsd });

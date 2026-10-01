@@ -142,9 +142,11 @@ export function tradableUsd(s: EngineState): number {
   return Math.max(0, finite(s.equityUsd, s.startUsd) - finite(s.bankedUsd));
 }
 
-/** 18% chip stays 18%. Expand used to bump to 22% and overnight 1Rs became $80–$105. */
+/** 9% until the account has doubled a $32 start. 18% after the lead. */
 export function liveRiskPct(s: EngineState): number {
-  return s.ictRiskPct || ICT_MAX_RISK_PCT;
+  const base = s.ictRiskPct || ICT_MAX_RISK_PCT;
+  if (finite(s.equityUsd, s.startUsd) < 64) return Math.min(base, 0.09);
+  return base;
 }
 
 /** 20× on 50% is the default 10× notional. 1R follows liveRiskPct. Hard cap = that 1R. */
@@ -167,7 +169,7 @@ export function ictRiskUsd(s: EngineState, stopPct = 0.01, levOverride?: number,
   return { risk: Math.max(1, risk * k), notional: notional * k };
 }
 
-/** Two losing closes in a row: no new entry for 2 hours. An open trade still runs. */
+/** Two full stops in a row: no new entry for 4 hours. An open trade still runs. */
 function lossPauseUntil(s: EngineState): number {
   const closed = s.closed
     .filter((c) => c.origin === "ict")
@@ -177,10 +179,10 @@ function lossPauseUntil(s: EngineState): number {
   let until = 0;
   for (const c of closed) {
     if (c.closedAt < until) continue;
-    if (finite(c.pnlUsd) < 0) {
+    if (c.reason === "stop") {
       streak++;
       if (streak >= 2) {
-        until = c.closedAt + 2 * 3600_000;
+        until = c.closedAt + 4 * 3600_000;
         streak = 0;
       }
     } else streak = 0;
@@ -1465,17 +1467,17 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       if (cooled) continue;
       if (s.ictStyle === "cisd" && isPlainA(t.note)) {
         const today = nyParts(now).day;
-        const stopped = s.closed.some(
-          (c) => c.origin === "ict" && c.reason === "stop" && nyParts(c.closedAt).day === today,
-        );
-        if (stopped) {
-          const last = s.tape.find((ev) => ev.text?.startsWith("plain A off"));
+        const used =
+          s.open.some((p) => p.origin === "ict" && isPlainA(p.note)) ||
+          s.closed.some((c) => c.origin === "ict" && isPlainA(c.note) && nyParts(c.closedAt).day === today);
+        if (used) {
+          const last = s.tape.find((ev) => ev.text?.startsWith("plain A one"));
           if (!last || now - last.t > 30 * 60_000) {
             pushTape(s, {
               t: now,
               kind: "note",
               symbol: "ICT",
-              text: `plain A off for the day · a full stop already printed · OTE Unicorn A+ still on · not Reset`,
+              text: `plain A one a day · OTE Unicorn A+ still on · not Reset`,
               tone: "warn",
             });
           }
@@ -1494,7 +1496,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             t: now,
             kind: "note",
             symbol: "ICT",
-            text: `loss pause · 2 losses · back in ${mins}m · not a halt · not Reset`,
+            text: `loss pause · 2 full stops · back in ${mins}m · not a halt · not Reset`,
             tone: "warn",
           });
         }
@@ -1928,7 +1930,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 1.25R · limit at entry · stop to entry after 0.5R · flat 90m · plain A off after a full stop" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
+      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 1.25R · limit at entry · stop to entry after 0.5R · flat 90m · one plain A a day · half size until $64 · 4h after two stops" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
       tone: "mute",
     });
   }
