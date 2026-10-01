@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ictBracket, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
+import { ictBracket, keepWorkingExit, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
 
 test("long target is a resting limit and the stop stays a stop-market", () => {
   const { sl, tp, tpStop } = ictBracket("long", "10.924", "10.746", 64);
@@ -50,6 +50,16 @@ test("short brackets are the mirror", () => {
   assert.equal(tp.side, "buy");
   assert.equal(tpStop.stop, "down");
   assert.equal(tpStop.stopPrice, "0.15");
+});
+test("a working target is not cancelled to sell the pullback", () => {
+  assert.equal(keepWorkingExit("target", true, true, 26), true);
+  assert.equal(keepWorkingExit("target", true, false, 26), true);
+  assert.equal(keepWorkingExit("stop", false, true, 26), true);
+  assert.equal(keepWorkingExit("time", true, true, 26), false);
+  assert.equal(keepWorkingExit("target", false, false, 26), false);
+  assert.equal(keepWorkingExit("target", true, true, 0), false);
+  assert.equal(keepWorkingExit("target", true, true, -1), true);
+  assert.equal(keepWorkingExit("time", true, true, -1), false);
 });
 test("KAS maintenance drops 40x so the wick stop is inside the real liquidation", () => {
   const stopPct = (0.045919 - 0.045074) / 0.045919;

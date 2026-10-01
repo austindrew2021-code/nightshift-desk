@@ -182,6 +182,14 @@ export function positionIsFlat(qty: Map<string, number> | null, inst: string, ag
   if (!qty.has(inst)) return false;
   return Math.abs(qty.get(inst) || 0) === 0;
 }
+
+/** A working target or stop is doing the job. Do not cancel it and sell the pullback. A time exit still flattens. qty 0 means the position is confirmed flat. */
+export function keepWorkingExit(reason: string | undefined, tpOpen: boolean, slOpen: boolean, qty: number): boolean {
+  if (reason === "time") return false;
+  if (!(tpOpen || slOpen)) return false;
+  if (qty === 0) return false;
+  return true;
+}
 export function ictBracket(side: Side, tpPx: string, slPx: string, size: number) {
   const exitSide = side === "long" ? "sell" : "buy";
   const sl = {
@@ -279,6 +287,17 @@ async function placeTp(mode: LiveMode, symbol: string, bracket: ReturnType<typeo
   } catch (e) {
     log({ kind: "tp-fail", err: String(e) });
     return "";
+  }
+}
+
+async function orderIsOpen(mode: LiveMode, id?: string): Promise<boolean> {
+  if (mode !== "on" || !id || id.startsWith("dry-")) return false;
+  try {
+    const o = await kucoin<{ status?: string }>("GET", `/api/v1/orders/${id}`);
+    return o?.status === "open";
+  } catch (e) {
+    log({ kind: "order-state-fail", id, err: String(e) });
+    return false;
   }
 }
 
@@ -782,6 +801,18 @@ export async function syncKucoinLive(s: EngineState) {
     const paper = paperOpen.find((p) => p.id === seat.paperId || p.symbol === seat.symbol);
     if (!paper) {
       if (Date.now() - seat.openedAt < 25_000) continue;
+      const done = s.closed.find((c) => c.origin === "ict" && (c.id === seat.paperId || c.symbol === seat.symbol));
+      const qtyNow = qty == null ? -1 : Math.abs(qty.get(seat.inst) || 0);
+      const tpOpen = await orderIsOpen(mode, seat.tpOid);
+      const slOpen = await orderIsOpen(mode, seat.slOid);
+      if (keepWorkingExit(done?.reason, tpOpen, slOpen, qtyNow)) {
+        const note = `limit still ${seat.symbol}`;
+        const last = s.tape.find((ev) => ev.text?.includes(note));
+        if (!last || Date.now() - last.t > 5 * 60_000) {
+          push(s, `LIVE ${note} · target or stop is working · not selling the pullback`, "mute");
+        }
+        continue;
+      }
       await cancel(mode, seat.entryOid);
       await flatten(mode, seat, "paper-closed");
       book.seats = book.seats.filter((x) => x.paperId !== seat.paperId);
