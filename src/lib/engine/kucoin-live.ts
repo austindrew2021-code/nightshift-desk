@@ -1,8 +1,9 @@
 /**
  * KuCoin USDT-M isolated live probe. Off unless ICT_LIVE=1 and keys exist.
- * Paper book is untouched. 1 seat. 9% until the wallet reaches $64, then 18% of the working balance.
- * The working balance compounds until $200, then the rest is banked
- * and is not sized into the next trade, so a fill stays possible.
+ * Paper book is untouched. 1 seat. 9% until the bet base is under $64, then 18%.
+ * Prime bank: vault only grows. 60% of anything above the working cap is locked once
+ * per equity change and is never sized. The cap steps up only after that vault is
+ * already there. Tested Jun–Sep 2026, ceiling $500, 1R $90. A loss hits working only.
  */
 import { createHmac } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
@@ -36,8 +37,65 @@ function liveUsd() {
   return Math.max(20, Math.min(200, Number(process.env.KUCOIN_LIVE_USD || 50)));
 }
 
-/** Above this, extra futures equity is banked and not risked. Keeps a 1% stop near a $3,600 fill. */
-const WORK_CAP = 200;
+/**
+ * Working cap steps only after the vault already holds the gate.
+ * 1R at the ceiling is 18% of $500 = $90. Lock is 60% of the excess, once per equity change.
+ */
+const PRIME_GATES: ReadonlyArray<readonly [number, number]> = [
+  [0, 200],
+  [80, 280],
+  [250, 360],
+  [600, 440],
+  [1000, 500],
+];
+const PRIME_LOCK = 0.6;
+
+function primeCap(vault: number): number {
+  let cap = PRIME_GATES[0][1];
+  for (const [need, c] of PRIME_GATES) if (vault + 1e-9 >= need) cap = c;
+  return cap;
+}
+
+function bookVault(book: LiveBook): number {
+  const v = Number(book.vault);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+function money2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+type Prime = { vault: number; working: number; cap: number; locked: number; capWas: number; dirty: boolean; cut: boolean };
+
+/** One lock per equity change. Does not refill the vault. A withdraw (wallet under the vault) cuts the vault to the cash that is actually there. */
+function settlePrime(book: LiveBook, wallet: number): Prime {
+  const capWas = primeCap(bookVault(book));
+  let vault = bookVault(book);
+  const prevVault = money2(vault);
+  const prevMark = book.markedEquity;
+  let cut = false;
+  if (wallet + 1 < vault) {
+    vault = Math.max(0, wallet);
+    cut = true;
+  }
+  const seen = book.markedEquity;
+  const changed = seen == null || !Number.isFinite(Number(seen)) || Math.abs(wallet - Number(seen)) >= 1;
+  let cap = primeCap(vault);
+  let working = wallet - vault;
+  let locked = 0;
+  if (changed && working > cap + 0.5) {
+    locked = (working - cap) * PRIME_LOCK;
+    vault += locked;
+    working -= locked;
+    cap = primeCap(vault);
+  }
+  book.vault = money2(vault);
+  book.markedEquity = money2(wallet);
+  const dirty =
+    book.vault !== prevVault ||
+    book.markedEquity !== (prevMark == null || !Number.isFinite(Number(prevMark)) ? null : money2(Number(prevMark)));
+  return { vault: book.vault, working: wallet - book.vault, cap, locked, capWas, dirty, cut };
+}
 
 function liveSeats() {
   return 1;
@@ -64,12 +122,21 @@ type LiveSeat = {
   tp?: number;
 };
 
-type LiveBook = { seats: LiveSeat[] };
+type LiveBook = {
+  seats: LiveSeat[];
+  /** Cash that is never sized. Only grows, unless the wallet itself was withdrawn. */
+  vault?: number;
+  /** Last exchange equity we already settled. Stops the 60% lock from grinding the cushion every tick. */
+  markedEquity?: number;
+};
 
 function loadBook(): LiveBook {
   if (!existsSync(LIVE_FILE)) return { seats: [] };
   try {
-    return JSON.parse(readFileSync(LIVE_FILE, "utf8")) as LiveBook;
+    const b = JSON.parse(readFileSync(LIVE_FILE, "utf8")) as LiveBook;
+    if (!Array.isArray(b.seats)) b.seats = [];
+    if (!(Number(b.vault) > 0)) b.vault = 0;
+    return b;
   } catch {
     return { seats: [] };
   }
@@ -385,18 +452,19 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     return;
   }
   let eq = liveUsd();
+  let vaultUsd = 0;
+  let workingUsd = eq;
+  let capUsd = 200;
   if (mode === "on") {
     try {
       const wallet = await usdtEquity();
       if (!(wallet > 0)) throw new Error("wallet 0");
-      eq = Math.min(wallet, WORK_CAP);
-      if (wallet > WORK_CAP + 1) {
-        push(
-          s,
-          `banked $${(wallet - WORK_CAP).toFixed(0)} · trading $${WORK_CAP} · ${eq < 64 ? "9%" : "18%"} of the working balance`,
-          "up",
-        );
-      }
+      const prime = settlePrime(book, wallet);
+      saveBook(book);
+      vaultUsd = prime.vault;
+      workingUsd = prime.working;
+      capUsd = prime.cap;
+      eq = Math.min(Math.max(0, prime.working), prime.cap);
     } catch (e) {
       log({ kind: "equity-fail", err: String(e) });
       push(s, `LIVE equity fail · ${String(e).slice(0, 80)}`, "down");
@@ -408,10 +476,25 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   const riskUsd = eq * riskPct;
   const stopPct = Math.max(1e-6, p.stopPct || Math.abs(p.entryUsd - (p.stopUsd || p.entryUsd)) / p.entryUsd);
   if (eq < 20 || riskUsd < 2) {
-    log({ kind: "skip", why: "no-funds", eq, riskUsd });
-    push(s, `LIVE skip ${p.symbol} · wallet $${eq.toFixed(2)} (need ≥$20 on futures)`, "warn");
+    log({ kind: "skip", why: "no-funds", eq, riskUsd, vault: vaultUsd, working: workingUsd });
+    if (vaultUsd >= 1) {
+      push(
+        s,
+        `prime bank · vault $${vaultUsd.toFixed(0)} stays · working $${workingUsd.toFixed(0)} · too small to trade`,
+        "warn",
+      );
+    } else {
+      push(s, `LIVE skip ${p.symbol} · wallet $${eq.toFixed(2)} (need ≥$20 on futures)`, "warn");
+    }
     if (mode === "on") releasePaper(s, p, "wallet");
     return;
+  }
+  if (mode === "on") {
+    push(
+      s,
+      `prime bank · vault $${vaultUsd.toFixed(0)} · working $${workingUsd.toFixed(0)} · cap $${capUsd} · 1R $${riskUsd.toFixed(0)}`,
+      "up",
+    );
   }
   const asked = Math.min(40, Math.max(1, Number(String(p.note.match(/(\d+)x/)?.[1] || 40))));
   const mmr = c.maintainMargin > 0 ? c.maintainMargin : 0.005;
@@ -740,7 +823,12 @@ async function flattenUnknown(mode: LiveMode, book: LiveBook, s: EngineState) {
   }
 }
 
-/** Call after paper tick. Paper book unchanged. */
+/** Open contracts or a filled seat: equity includes the trade. Don't bank that. */
+function accountIsFlat(book: LiveBook, qty: Map<string, number> | null): boolean {
+  if (!qty) return false;
+  for (const q of qty.values()) if (Math.abs(q) > 0) return false;
+  return !book.seats.some((seat) => !seat.pending);
+}
 export async function syncKucoinLive(s: EngineState) {
   const mode = liveMode();
   const { key, secret, pass } = keys();
@@ -759,6 +847,31 @@ export async function syncKucoinLive(s: EngineState) {
     }
   }
   const qty = await positionQty(mode);
+  if (mode === "on" && accountIsFlat(book, qty)) {
+    try {
+      const wallet = await usdtEquity();
+      if (wallet > 0) {
+        const p = settlePrime(book, wallet);
+        if (p.dirty) saveBook(book);
+        if (p.cut) {
+          push(
+            s,
+            `prime bank · wallet is under the vault · vault now $${p.vault.toFixed(0)} · working $${p.working.toFixed(0)}`,
+            "warn",
+          );
+        } else if (p.locked >= 1 || p.cap > p.capWas + 1) {
+          const tier = p.cap > p.capWas + 1 ? ` · tier cap $${p.cap}` : "";
+          push(
+            s,
+            `prime bank · locked $${p.locked.toFixed(0)}${tier} · vault $${p.vault.toFixed(0)} · working $${p.working.toFixed(0)} · not for the next loss`,
+            "up",
+          );
+        }
+      }
+    } catch (e) {
+      log({ kind: "prime-fail", err: String(e) });
+    }
+  }
   const paperOpen = s.open.filter((p) => p.origin === "ict");
   const queued = [...(s.ictLivePend || []), ...ictLivePend.splice(0)];
   s.ictLivePend = [];
