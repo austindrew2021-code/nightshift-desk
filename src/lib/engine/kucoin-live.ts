@@ -184,18 +184,38 @@ export function positionIsFlat(qty: Map<string, number> | null, inst: string, ag
 }
 export function ictBracket(side: Side, tpPx: string, slPx: string, size: number) {
   const exitSide = side === "long" ? "sell" : "buy";
-  const base = {
+  const sl = {
     side: exitSide,
     type: "market" as const,
     stopPriceType: "TP",
     size,
     reduceOnly: true,
     marginMode: "ISOLATED",
+    stop: side === "long" ? "down" : "up",
+    stopPrice: slPx,
   };
-  return {
-    sl: { ...base, stop: side === "long" ? "down" : "up", stopPrice: slPx },
-    tp: { ...base, stop: side === "long" ? "up" : "down", stopPrice: tpPx },
+  // Resting limit. A wick through 1.25R fills here. A stop-market sells the pullback.
+  const tp = {
+    side: exitSide,
+    type: "limit" as const,
+    price: tpPx,
+    size,
+    reduceOnly: true,
+    marginMode: "ISOLATED",
+    timeInForce: "GTC",
+    postOnly: true,
   };
+  const tpStop = {
+    side: exitSide,
+    type: "market" as const,
+    stopPriceType: "TP",
+    size,
+    reduceOnly: true,
+    marginMode: "ISOLATED",
+    stop: side === "long" ? "up" : "down",
+    stopPrice: tpPx,
+  };
+  return { sl, tp, tpStop };
 }
 function lotsFor(notional: number, px: number, c: Contract) {
   const raw = notional / Math.max(1e-12, px * c.multiplier);
@@ -244,6 +264,22 @@ async function placeStop(mode: LiveMode, body: Record<string, unknown>): Promise
     if (i < 2) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
   }
   return "";
+}
+
+/** Limit at the target. If the exchange rejects it, the old stop-market is the backup. */
+async function placeTp(mode: LiveMode, symbol: string, bracket: ReturnType<typeof ictBracket>, tpLots: number): Promise<string> {
+  try {
+    const id = String((await place(mode, { clientOid: oid("tp"), symbol, ...bracket.tp, size: tpLots })).orderId || "");
+    if (id) return id;
+  } catch (e) {
+    log({ kind: "tp-limit-fail", err: String(e) });
+  }
+  try {
+    return String((await place(mode, { clientOid: oid("tp"), symbol, ...bracket.tpStop, size: tpLots })).orderId || "");
+  } catch (e) {
+    log({ kind: "tp-fail", err: String(e) });
+    return "";
+  }
 }
 
 async function cancel(mode: LiveMode, id?: string) {
@@ -455,12 +491,6 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     symbol: c.symbol,
     ...bracket.sl,
   };
-  const tpBody: Record<string, unknown> = {
-    clientOid: oid("tp"),
-    symbol: c.symbol,
-    ...bracket.tp,
-    size: tpLots,
-  };
 
   let slOid = "";
   slOid = await placeStop(mode, slBody);
@@ -485,13 +515,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     return;
   }
   let tpOid = "";
-  if (tpLots >= c.lotSize) {
-    try {
-      tpOid = String((await place(mode, tpBody)).orderId || "");
-    } catch (e) {
-      log({ kind: "tp-fail", err: String(e) });
-    }
-  }
+  if (tpLots >= c.lotSize) tpOid = await placeTp(mode, c.symbol, bracket, tpLots);
 
   book.seats.push({
     paperId: p.id,
@@ -512,7 +536,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   saveBook(book);
   push(
     s,
-    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · entry ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · ${lev}x · full @ ${tgtR}R stop ${tpPx} · SL ${slPx}`,
+    `${mode === "on" ? "LIVE" : "LIVE dry"} ${p.side} ${p.symbol} ${filled} lots · entry ${capPx} · 1R $${riskUsd.toFixed(2)} of $${eq.toFixed(0)} · ${lev}x · full @ ${tgtR}R limit ${tpPx} · SL ${slPx}`,
     "up",
   );
 }
@@ -593,13 +617,7 @@ async function armPending(s: EngineState, mode: LiveMode, book: LiveBook, seat: 
     return;
   }
   let tpOid = "";
-  if (tpLots >= c.lotSize) {
-    try {
-      tpOid = String((await place(mode, { clientOid: oid("tp"), symbol: c.symbol, ...bracket.tp, size: tpLots })).orderId || "");
-    } catch (e) {
-      log({ kind: "tp-fail", err: String(e) });
-    }
-  }
+  if (tpLots >= c.lotSize) tpOid = await placeTp(mode, c.symbol, bracket, tpLots);
   seat.pending = false;
   seat.lots = filled;
   seat.lotsLeft = filled;
@@ -609,7 +627,7 @@ async function armPending(s: EngineState, mode: LiveMode, book: LiveBook, seat: 
   saveBook(book);
   push(
     s,
-    `LIVE ${seat.side} ${seat.symbol} ${filled} lots · filled ${pxStr(seat.entry, c.tickSize)} · full @ stop ${tpPx} · SL ${slPx}`,
+    `LIVE ${seat.side} ${seat.symbol} ${filled} lots · filled ${pxStr(seat.entry, c.tickSize)} · full @ limit ${tpPx} · SL ${slPx}`,
     "up",
   );
 }
@@ -630,16 +648,34 @@ async function positionQty(mode: LiveMode): Promise<Map<string, number> | null> 
 }
 
 async function flatten(mode: LiveMode, seat: LiveSeat, why: string) {
+  let qty: number | null = null;
+  if (mode === "on") {
+    try {
+      const data = await kucoin<{ symbol?: string; currentQty?: string | number }[] | { items?: { symbol?: string; currentQty?: string | number }[] }>("GET", "/api/v1/positions");
+      const rows = Array.isArray(data) ? data : data?.items || [];
+      const row = rows.find((r) => r.symbol === seat.inst);
+      qty = row ? Math.abs(Number(row.currentQty || 0)) : 0;
+    } catch (e) {
+      log({ kind: "flatten-qty-fail", err: String(e) });
+    }
+  }
+  if (qty === 0) {
+    await cancel(mode, seat.tpOid);
+    await cancel(mode, seat.slOid);
+    log({ kind: "flatten", symbol: seat.symbol, why, already: "flat" });
+    return;
+  }
   await cancel(mode, seat.tpOid);
   await cancel(mode, seat.slOid);
-  if (seat.lotsLeft > 0) {
+  const size = qty && qty > 0 ? qty : seat.lotsLeft;
+  if (size > 0) {
     try {
       await place(mode, {
         clientOid: oid("x"),
         symbol: seat.inst,
         side: seat.side === "long" ? "sell" : "buy",
         type: "market",
-        size: seat.lotsLeft,
+        size,
         reduceOnly: true,
         closeOrder: true,
         marginMode: "ISOLATED",

@@ -2,12 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ictBracket, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
 
-test("long 1R sell sits above and the stop sits below, neither locks the position", () => {
-  const { sl, tp } = ictBracket("long", "10.924", "10.746", 64);
+test("long target is a resting limit and the stop stays a stop-market", () => {
+  const { sl, tp, tpStop } = ictBracket("long", "10.924", "10.746", 64);
   assert.equal(sl.stop, "down");
   assert.equal(sl.stopPrice, "10.746");
-  assert.equal(tp.stop, "up");
-  assert.equal(tp.stopPrice, "10.924");
+  assert.equal(sl.type, "market");
+  assert.equal(tp.type, "limit");
+  assert.equal(tp.price, "10.924");
+  assert.equal(tp.postOnly, true);
+  assert.equal(tp.timeInForce, "GTC");
+  assert.equal("stop" in tp, false);
+  assert.equal(tpStop.stop, "up");
+  assert.equal(tpStop.stopPrice, "10.924");
   assert.equal(sl.side, "sell");
   assert.equal(tp.side, "sell");
   assert.equal(sl.size, 64);
@@ -16,7 +22,6 @@ test("long 1R sell sits above and the stop sits below, neither locks the positio
   assert.equal(tp.reduceOnly, true);
   assert.equal("closeOrder" in sl, false);
   assert.equal("closeOrder" in tp, false);
-  assert.equal("postOnly" in tp, false);
 });
 
 test("a missing symbol is not a flat position", () => {
@@ -37,12 +42,14 @@ test("ONE at the 4am price is not sent once the futures price has left", () => {
   assert.equal(orderPastMark("short", 0.24595, 0.2464, 0.00495, 30), false);
 });
 test("short brackets are the mirror", () => {
-  const { sl, tp } = ictBracket("short", "0.15", "0.16", 10);
+  const { sl, tp, tpStop } = ictBracket("short", "0.15", "0.16", 10);
   assert.equal(sl.stop, "up");
   assert.equal(sl.stopPrice, "0.16");
-  assert.equal(tp.stop, "down");
-  assert.equal(tp.stopPrice, "0.15");
+  assert.equal(tp.type, "limit");
+  assert.equal(tp.price, "0.15");
   assert.equal(tp.side, "buy");
+  assert.equal(tpStop.stop, "down");
+  assert.equal(tpStop.stopPrice, "0.15");
 });
 test("KAS maintenance drops 40x so the wick stop is inside the real liquidation", () => {
   const stopPct = (0.045919 - 0.045074) / 0.045919;
