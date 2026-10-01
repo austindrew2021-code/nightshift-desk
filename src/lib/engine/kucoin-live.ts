@@ -248,6 +248,17 @@ export function orderPastMark(side: Side, entry: number, mark: number, riskPx: n
   const band = (entry * 0.85) / Math.max(2, lev);
   return adverse > 0 && Math.abs(mark - entry) > band;
 }
+
+/**
+ * Price has already gone 0.05R the right way. Resting the entry after that
+ * only fills the pullback, and those pullbacks are what end a small July.
+ * A gap already past 0.05R is not a fill.
+ */
+export function alreadyLeft(side: Side, entry: number, mark: number, riskPx: number): boolean {
+  if (!(mark > 0) || !(entry > 0) || !(riskPx > 0)) return false;
+  const fav = side === "long" ? (mark - entry) / riskPx : (entry - mark) / riskPx;
+  return fav > 0.05;
+}
 export function positionIsFlat(qty: Map<string, number> | null, inst: string, ageMs: number): boolean {
   if (!qty || ageMs < 8_000) return false;
   if (!qty.has(inst)) return false;
@@ -531,6 +542,12 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
       log({ kind: "skip", why: "past-mark", symbol: p.symbol, mark, entry: p.entryUsd, cap: capPx });
       push(s, `LIVE skip ${p.symbol} · live ${mark} is past the entry · no chase`, "warn");
       releasePaper(s, p, "past the live price");
+      return;
+    }
+    if (alreadyLeft(p.side, p.entryUsd, mark, riskPx)) {
+      log({ kind: "skip", why: "already-left", symbol: p.symbol, mark, entry: p.entryUsd });
+      push(s, `LIVE skip ${p.symbol} · live ${mark} is already 0.05R through · a pullback is not the fill`, "warn");
+      releasePaper(s, p, "already left");
       return;
     }
   }

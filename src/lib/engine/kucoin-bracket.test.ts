@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ictBracket, keepWorkingExit, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
+import { alreadyLeft, ictBracket, keepWorkingExit, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
 
 test("long target is a resting limit and the stop stays a stop-market", () => {
   const { sl, tp, tpStop } = ictBracket("long", "10.924", "10.746", 64);
@@ -33,6 +33,14 @@ test("a missing symbol is not a flat position", () => {
   assert.equal(positionIsFlat(new Map([["AVAXUSDTM", 0]]), "AVAXUSDTM", 3_000), false);
   const short = new Map([["AVAXUSDTM", -64]]);
   assert.equal(positionIsFlat(short, "AVAXUSDTM", 20_000), false);
+});
+test("a price already 0.05R through is not a pullback entry", () => {
+  assert.equal(alreadyLeft("long", 1, 1.04, 1), false);
+  assert.equal(alreadyLeft("long", 1, 1.06, 1), true);
+  assert.equal(alreadyLeft("short", 1, 0.96, 1), false);
+  assert.equal(alreadyLeft("short", 1, 0.94, 1), true);
+  assert.equal(alreadyLeft("long", 10, 9.9, 1), false);
+  assert.equal(alreadyLeft("long", 1, 0, 1), false);
 });
 test("ONE at the 4am price is not sent once the futures price has left", () => {
   assert.equal(orderPastMark("long", 0.00258991, 0.00248, 0.000052, 30), true);
