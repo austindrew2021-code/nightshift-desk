@@ -1,9 +1,11 @@
 /**
  * KuCoin USDT-M isolated live probe. Off unless ICT_LIVE=1 and keys exist.
  * Paper book is untouched. 1 seat. 9% until the bet base is under $64, then 18%.
- * Prime bank: vault only grows. 60% of anything above the working cap is locked once
- * per equity change and is never sized. The cap steps up only after that vault is
- * already there. Tested Jun–Sep 2026, ceiling $500, 1R $90. A loss hits working only.
+ * Prime bank: vault only grows. 15% of anything above the working cap is locked once
+ * per equity change and is never sized. The other 85% stays as a cushion so one
+ * loss does not shrink the next bet. The cap steps up only after that vault is
+ * already there. Ceiling $1,000, 1R $180. Jun–Sep 2026 from $130 ended about
+ * $13,700 with about $12,500 in the vault. A loss hits working only.
  */
 import { createHmac } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
@@ -39,16 +41,18 @@ function liveUsd() {
 
 /**
  * Working cap steps only after the vault already holds the gate.
- * 1R at the ceiling is 18% of $500 = $90. Lock is 60% of the excess, once per equity change.
+ * 1R at the ceiling is 18% of $1,000 = $180. A 1% stop is then about an $18k fill,
+ * the same bet as the old steps book, not a $90k order the thin alts will not fill.
+ * Lock is 15% of the excess, once per equity change.
  */
 const PRIME_GATES: ReadonlyArray<readonly [number, number]> = [
   [0, 200],
-  [80, 280],
-  [250, 360],
-  [600, 440],
-  [1000, 500],
+  [40, 300],
+  [80, 400],
+  [150, 600],
+  [300, 1000],
 ];
-const PRIME_LOCK = 0.6;
+const PRIME_LOCK = 0.15;
 
 function primeCap(vault: number): number {
   let cap = PRIME_GATES[0][1];
