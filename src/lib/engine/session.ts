@@ -1456,6 +1456,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         ? bodies.reduce((a, c) => a + c.c, 0) / bodies.length
         : b.last || t.entryUsd;
       if (mid > 0 && Math.abs(t.entryUsd / mid - 1) > 0.02) continue;
+      if (b.last > 0 && Math.abs(t.entryUsd / b.last - 1) > 0.02) continue;
       if (enterable && volDried(b.candles5)) continue;
       const cooled = s.closed.some(
         (c) =>

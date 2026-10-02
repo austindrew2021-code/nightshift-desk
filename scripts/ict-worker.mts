@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from "node:fs";
 import { ICT_ASSETS, type IctAssetDef, type IctBook } from "../src/lib/engine/universe.ts";
 import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "../src/lib/market/kucoin-hot.ts";
-import { createEngine, tick, buryResurrected, ingestIct, type EngineState } from "../src/lib/engine/session.ts";
+import { createEngine, tick, buryResurrected, ingestIct, markIct, type EngineState } from "../src/lib/engine/session.ts";
 import { syncKucoinLive, liveMode } from "../src/lib/engine/kucoin-live.ts";
 import type { Candle, ClosedTrade, MarketSnapshot } from "../src/lib/engine/types.ts";
 
@@ -348,56 +348,50 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   const giveUp = Date.now() + 8_000;
   let pending = missing;
   let left = missed15;
-  const retry5 = async () => {
-    while (pending.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp) {
-      await new Promise((r) => setTimeout(r, 400));
-      const again = pending;
-      pending = [];
-      const retry = async () => {
-        while (again.length && !s.open.some((p) => p.origin === "ict")) {
-          const a = again.shift();
-          if (!a) return;
-          try {
-            const { b5, b15 } = await loadPair(a);
-            if (!take5(a, b5)) {
-              pending.push(a);
-              continue;
-            }
-            if (is15 && !take15(b5, b15)) left.push(a);
-          } catch {
+  while (pending.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp) {
+    await new Promise((r) => setTimeout(r, 400));
+    const again = pending;
+    pending = [];
+    const retry = async () => {
+      while (again.length && !s.open.some((p) => p.origin === "ict")) {
+        const a = again.shift();
+        if (!a) return;
+        try {
+          const { b5, b15 } = await loadPair(a);
+          if (!take5(a, b5)) {
             pending.push(a);
+            continue;
           }
+          if (is15 && !take15(b5, b15)) left.push(a);
+        } catch {
+          pending.push(a);
         }
-      };
-      await Promise.all(Array.from({ length: 12 }, () => retry()));
-      await sending;
-    }
-  };
-  const retry15 = async () => {
-    if (!is15) return;
-    while (left.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp) {
-      await new Promise((r) => setTimeout(r, 400));
-      const again = left;
-      left = [];
-      const retry = async () => {
-        while (again.length && !s.open.some((p) => p.origin === "ict")) {
-          const a = again.shift();
-          if (!a) return;
-          try {
-            const b5 = five.get(a.id) ?? (await fastBook(a));
-            if ((b5.candles5?.length ?? 0) >= 48) five.set(a.id, b5);
-            const b15 = await fastBook15(a);
-            if (!take15(five.get(a.id) ?? null, b15)) left.push(a);
-          } catch {
-            left.push(a);
-          }
+      }
+    };
+    await Promise.all(Array.from({ length: 12 }, () => retry()));
+    await sending;
+  }
+  while (is15 && left.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp) {
+    await new Promise((r) => setTimeout(r, 400));
+    const again = left;
+    left = [];
+    const retry = async () => {
+      while (again.length && !s.open.some((p) => p.origin === "ict")) {
+        const a = again.shift();
+        if (!a) return;
+        try {
+          const b5 = five.get(a.id) ?? (await fastBook(a));
+          if ((b5.candles5?.length ?? 0) >= 48) five.set(a.id, b5);
+          const b15 = await fastBook15(a);
+          if (!take15(five.get(a.id) ?? null, b15)) left.push(a);
+        } catch {
+          left.push(a);
         }
-      };
-      await Promise.all(Array.from({ length: 12 }, () => retry()));
-      await sending;
-    }
-  };
-  await Promise.all([retry5(), retry15()]);
+      }
+    };
+    await Promise.all(Array.from({ length: 12 }, () => retry()));
+    await sending;
+  }
   if (saw) caught.t = closedOpen;
 }
 
@@ -440,12 +434,30 @@ async function main() {
   try {
     buryResurrected(s, readLedger());
     const caught = { t: 0 };
-    await scanFreshClose(s, assets, caught);
+    await scanFreshClose(s, ICT_ASSETS, caught);
+    const held = s.open.filter((p) => p.origin === "ict" && Date.now() - (p.liveAt || p.openedAt) > 60_000);
+    if (held.length) {
+      const managed: IctBook[] = [];
+      for (const p of held) {
+        const a = ICT_ASSETS.find((x) => x.id === p.symbol);
+        if (!a) continue;
+        try {
+          managed.push(await fastBook(a));
+        } catch {
+          /* the next tick retries the open trade */
+        }
+      }
+      if (managed.length) markIct(s, snapshot(managed));
+    }
+    try {
+      await syncKucoinLive(s);
+    } catch (e) {
+      console.error("kucoin-live-fast", e);
+    }
+    writeFileSync(STATE, JSON.stringify(slim(s)));
     const sinceClose = Date.now() % (5 * 60 * 1000);
     const untilNext = 5 * 60 * 1000 - sinceClose;
-    // The fill is decided in the first minutes after the close. A chart download
-    // started in that window holds the lock and the next scan finds the price already gone.
-    fastOnly = (sinceClose < 180_000 || untilNext < 150_000) && !s.open.some((p) => p.origin === "ict");
+    fastOnly = sinceClose < 180_000 || untilNext < 150_000;
     if (fastOnly) {
       console.log(JSON.stringify({ t: Date.now(), fast: true, sinceClose }));
     } else {
@@ -457,17 +469,11 @@ async function main() {
     }
     for (let i = 0; i < assets.length; i += 6) {
       if (5 * 60 * 1000 - (Date.now() % (5 * 60 * 1000)) < 25_000) break;
-      await scanFreshClose(s, assets, caught);
       const chunk = assets.slice(i, i + 6);
       const got = await Promise.allSettled(chunk.map(book));
-      const fresh: IctBook[] = [];
       for (const r of got) {
-        if (r.status === "fulfilled" && r.value.candles15.length > 20) {
-          books.push(r.value);
-          fresh.push(r.value);
-        }
+        if (r.status === "fulfilled" && r.value.candles15.length > 20) books.push(r.value);
       }
-      await sendEarly(s, fresh);
     }
     const sol = books.find((b) => b.id === "SOL");
     const btc = books.find((b) => b.id === "BTC");
