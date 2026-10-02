@@ -269,31 +269,12 @@ async function sendEarly(s: EngineState, books: IctBook[]) {
   writeFileSync(STATE, JSON.stringify(slim(s)));
 }
 
-/** KuCoin often prints the closed 5m candle a few seconds after the minute. Wait for that print, then send. */
-async function waitUntilBar(closedOpen: number): Promise<boolean> {
-  const deadline = Date.now() + 8_000;
-  const probe = ICT_ASSETS.find((a) => a.id === "BTC") ?? ICT_ASSETS[0];
-  if (!probe) return false;
-  while (Date.now() < deadline) {
-    try {
-      const b = await fastBook(probe);
-      if (b.candles5?.some((c) => c.t === closedOpen)) return true;
-    } catch {
-      /* one miss, then try again */
-    }
-    await new Promise((r) => setTimeout(r, 400));
-  }
-  return false;
-}
-
 /** One pass for this 5m close. On a 15m close the 15m book goes out in the same pass, not after it. */
 async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number][], caught: { t: number }) {
   const period = 5 * 60 * 1000;
   const closedOpen = Math.floor(Date.now() / period) * period - period;
   if (caught.t === closedOpen) return;
   if (s.open.some((p) => p.origin === "ict")) return;
-  const age = Date.now() - (closedOpen + period);
-  if (age < 12_000) await waitUntilBar(closedOpen);
   const closeTs = closedOpen + period;
   const is15 = closeTs % (15 * 60 * 1000) === 0;
   const closed15 = closeTs - 15 * 60 * 1000;

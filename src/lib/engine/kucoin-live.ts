@@ -459,6 +459,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     if (mode === "on") releasePaper(s, p, "seat full");
     return;
   }
+  const markP = mode === "on" ? markPrice(instOf(p.symbol)) : Promise.resolve(0);
   const c = await contractFor(p.symbol);
   if (!c) {
     log({ kind: "skip", why: "no-contract", symbol: p.symbol });
@@ -537,7 +538,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   const slPx = pxStr(slRaw, c.tickSize);
   const capPx = pxStr(p.entryUsd, c.tickSize);
   if (mode === "on") {
-    const mark = await markPrice(c.symbol);
+    const mark = await markP;
     if (orderPastMark(p.side, p.entryUsd, mark, riskPx, lev)) {
       log({ kind: "skip", why: "past-mark", symbol: p.symbol, mark, entry: p.entryUsd, cap: capPx });
       push(s, `LIVE skip ${p.symbol} · live ${mark} is past the entry · no chase`, "warn");
