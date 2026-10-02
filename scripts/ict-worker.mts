@@ -399,6 +399,12 @@ async function main() {
   const period = 5 * 60 * 1000;
   const hotP: Promise<IctAssetDef[]> = fetchKucoinHotAssets().catch(() => []);
   const untilClose = period - (Date.now() % period);
+  // A tick that starts in this gap holds the lock through the close, and the
+  // close tick then skips. Leave the gap so the close tick can wait and send.
+  if (untilClose > 25_000 && untilClose < 45_000) {
+    console.log(JSON.stringify({ t: Date.now(), skip: "close coming", untilClose }));
+    return;
+  }
   if (untilClose <= 25_000 && untilClose > 500) {
     await new Promise((r) => setTimeout(r, untilClose + 300));
   }
@@ -449,10 +455,14 @@ async function main() {
       }
       if (managed.length) markIct(s, snapshot(managed));
     }
-    try {
-      await syncKucoinLive(s);
-    } catch (e) {
-      console.error("kucoin-live-fast", e);
+    const closeIn = period - (Date.now() % period);
+    const flat = !s.open.some((p) => p.origin === "ict");
+    if (!(flat && closeIn < 20_000)) {
+      try {
+        await syncKucoinLive(s);
+      } catch (e) {
+        console.error("kucoin-live-fast", e);
+      }
     }
     writeFileSync(STATE, JSON.stringify(slim(s)));
     const sinceClose = Date.now() % (5 * 60 * 1000);
