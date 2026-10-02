@@ -269,22 +269,7 @@ async function sendEarly(s: EngineState, books: IctBook[]) {
   writeFileSync(STATE, JSON.stringify(slim(s)));
 }
 
-/** KuCoin often prints the closed 15m candle a few seconds after the quarter hour. */
-async function waitUntil15(closedOpen: number): Promise<boolean> {
-  const deadline = Date.now() + 10_000;
-  const probe = ICT_ASSETS.find((a) => a.id === "BTC") ?? ICT_ASSETS[0];
-  if (!probe) return false;
-  while (Date.now() < deadline) {
-    try {
-      const b = await fastBook15(probe);
-      if (b.candles15?.some((c) => c.t === closedOpen)) return true;
-    } catch {
-      /* one miss, then try again */
-    }
-    await new Promise((r) => setTimeout(r, 400));
-  }
-  return false;
-}
+/** KuCoin often prints the closed 5m candle a few seconds after the minute. Wait for that print, then send. */
 async function waitUntilBar(closedOpen: number): Promise<boolean> {
   const deadline = Date.now() + 8_000;
   const probe = ICT_ASSETS.find((a) => a.id === "BTC") ?? ICT_ASSETS[0];
@@ -301,7 +286,7 @@ async function waitUntilBar(closedOpen: number): Promise<boolean> {
   return false;
 }
 
-/** One pass for this 5m close. A missing alt candle is retried for 15s, not once. */
+/** One pass for this 5m close. On a 15m close the 15m book goes out in the same pass, not after it. */
 async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number][], caught: { t: number }) {
   const period = 5 * 60 * 1000;
   const closedOpen = Math.floor(Date.now() / period) * period - period;
@@ -309,113 +294,110 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   if (s.open.some((p) => p.origin === "ict")) return;
   const age = Date.now() - (closedOpen + period);
   if (age < 12_000) await waitUntilBar(closedOpen);
+  const closeTs = closedOpen + period;
+  const is15 = closeTs % (15 * 60 * 1000) === 0;
+  const closed15 = closeTs - 15 * 60 * 1000;
   const queue = [...assets];
   const missing: (typeof ICT_ASSETS)[number][] = [];
+  const missed15: (typeof ICT_ASSETS)[number][] = [];
   const five = new Map<string, IctBook>();
   let sending: Promise<void> = Promise.resolve();
   let saw = false;
+  const loadPair = async (a: (typeof ICT_ASSETS)[number]) => {
+    const [r5, r15] = await Promise.allSettled([
+      fastBook(a),
+      is15 ? fastBook15(a) : Promise.resolve(null),
+    ]);
+    return {
+      b5: r5.status === "fulfilled" ? r5.value : null,
+      b15: r15.status === "fulfilled" ? r15.value : null,
+    };
+  };
+  const take5 = (a: (typeof ICT_ASSETS)[number], b5: IctBook | null) => {
+    if (!b5 || (b5.candles5?.length ?? 0) < 48) return false;
+    if (!b5.candles5.some((c) => c.t === closedOpen)) return false;
+    saw = true;
+    five.set(a.id, b5);
+    sending = sending.then(() => sendEarly(s, [b5]));
+    return true;
+  };
+  const take15 = (b5: IctBook | null, b15: IctBook | null) => {
+    if (!is15) return true;
+    if (s.open.some((p) => p.origin === "ict")) return true;
+    if (!b5 || !b15?.candles15?.some((c) => c.t === closed15) || b15.candles15.length < 80) return false;
+    const merged = { ...b5, candles15: b15.candles15 };
+    sending = sending.then(() => sendEarly(s, [merged]));
+    return true;
+  };
   const worker = async () => {
     while (queue.length && !s.open.some((p) => p.origin === "ict")) {
       const a = queue.shift();
       if (!a) return;
       try {
-        const b = await fastBook(a);
-        if ((b.candles5?.length ?? 0) < 48) continue;
-        if (b.candles5.some((c) => c.t === closedOpen)) {
-          saw = true;
-          five.set(a.id, b);
-          sending = sending.then(() => sendEarly(s, [b]));
-        } else missing.push(a);
+        const { b5, b15 } = await loadPair(a);
+        if (!take5(a, b5)) missing.push(a);
+        if (is15 && !take15(b5, b15)) missed15.push(a);
       } catch {
         missing.push(a);
+        if (is15) missed15.push(a);
       }
     }
   };
   await Promise.all(Array.from({ length: 12 }, () => worker()));
   await sending;
-  const giveUp = Date.now() + 15_000;
+  const giveUp = Date.now() + 8_000;
   let pending = missing;
-  while (pending.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp) {
-    await new Promise((r) => setTimeout(r, 1000));
-    const again = pending;
-    pending = [];
-    const retry = async () => {
-      while (again.length && !s.open.some((p) => p.origin === "ict")) {
-        const a = again.shift();
-        if (!a) return;
-        try {
-          const b = await fastBook(a);
-          if (!b.candles5?.some((c) => c.t === closedOpen)) {
-            pending.push(a);
-            continue;
-          }
-          saw = true;
-          five.set(a.id, b);
-          sending = sending.then(() => sendEarly(s, [b]));
-          await sending;
-        } catch {
-          pending.push(a);
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: 12 }, () => retry()));
-    await sending;
-  }
-  const closeTs = closedOpen + period;
-  const is15 = closeTs % (15 * 60 * 1000) === 0;
-  if (is15 && !s.open.some((p) => p.origin === "ict")) {
-    const closed15 = closeTs - 15 * 60 * 1000;
-    const age15 = Date.now() - closeTs;
-    if (age15 < 20_000) await waitUntil15(closed15);
-    const q15 = [...assets];
-    const missed15: (typeof ICT_ASSETS)[number][] = [];
-    const send15 = async (a: (typeof ICT_ASSETS)[number]): Promise<boolean> => {
-      let b5 = five.get(a.id);
-      if (!b5 || (b5.candles5?.length ?? 0) < 48) {
-        b5 = await fastBook(a);
-        if ((b5.candles5?.length ?? 0) < 48) return false;
-        five.set(a.id, b5);
-      }
-      const b15 = await fastBook15(a);
-      if (!b15.candles15?.some((c) => c.t === closed15) || b15.candles15.length < 80) return false;
-      if (s.open.some((p) => p.origin === "ict")) return true;
-      const merged = { ...b5, candles15: b15.candles15 };
-      sending = sending.then(() => sendEarly(s, [merged]));
-      await sending;
-      return true;
-    };
-    const wave = async () => {
-      while (q15.length && !s.open.some((p) => p.origin === "ict")) {
-        const a = q15.shift();
-        if (!a) return;
-        try {
-          if (!(await send15(a))) missed15.push(a);
-        } catch {
-          missed15.push(a);
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: 12 }, () => wave()));
-    const giveUp15 = Date.now() + 15_000;
-    let left = missed15;
-    while (left.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp15) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const again = left;
-      left = [];
-      const retry15 = async () => {
+  let left = missed15;
+  const retry5 = async () => {
+    while (pending.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp) {
+      await new Promise((r) => setTimeout(r, 400));
+      const again = pending;
+      pending = [];
+      const retry = async () => {
         while (again.length && !s.open.some((p) => p.origin === "ict")) {
           const a = again.shift();
           if (!a) return;
           try {
-            if (!(await send15(a))) left.push(a);
+            const { b5, b15 } = await loadPair(a);
+            if (!take5(a, b5)) {
+              pending.push(a);
+              continue;
+            }
+            if (is15 && !take15(b5, b15)) left.push(a);
+          } catch {
+            pending.push(a);
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: 12 }, () => retry()));
+      await sending;
+    }
+  };
+  const retry15 = async () => {
+    if (!is15) return;
+    while (left.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp) {
+      await new Promise((r) => setTimeout(r, 400));
+      const again = left;
+      left = [];
+      const retry = async () => {
+        while (again.length && !s.open.some((p) => p.origin === "ict")) {
+          const a = again.shift();
+          if (!a) return;
+          try {
+            const b5 = five.get(a.id) ?? (await fastBook(a));
+            if ((b5.candles5?.length ?? 0) >= 48) five.set(a.id, b5);
+            const b15 = await fastBook15(a);
+            if (!take15(five.get(a.id) ?? null, b15)) left.push(a);
           } catch {
             left.push(a);
           }
         }
       };
-      await Promise.all(Array.from({ length: 12 }, () => retry15()));
+      await Promise.all(Array.from({ length: 12 }, () => retry()));
+      await sending;
     }
-  }
+  };
+  await Promise.all([retry5(), retry15()]);
   if (saw) caught.t = closedOpen;
 }
 
