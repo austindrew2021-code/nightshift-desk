@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } f
 import { ICT_ASSETS, type IctAssetDef, type IctBook } from "../src/lib/engine/universe.ts";
 import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "../src/lib/market/kucoin-hot.ts";
 import { createEngine, tick, buryResurrected, ingestIct, markIct, type EngineState } from "../src/lib/engine/session.ts";
-import { syncKucoinLive, liveMode } from "../src/lib/engine/kucoin-live.ts";
+import { syncKucoinLive, expireDue, liveMode } from "../src/lib/engine/kucoin-live.ts";
 import type { Candle, ClosedTrade, MarketSnapshot } from "../src/lib/engine/types.ts";
 
 const STATE = process.env.ICT_STATE_PATH || "ict-state.json";
@@ -334,9 +334,14 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
       const a = queue.shift();
       if (!a) return;
       try {
-        const { b5, b15 } = await loadPair(a);
+        const p5 = fastBook(a);
+        const p15 = is15 ? fastBook15(a) : Promise.resolve(null);
+        const b5 = await p5.catch(() => null);
         if (!take5(a, b5)) missing.push(a);
-        if (is15 && !take15(b5, b15)) missed15.push(a);
+        if (is15) {
+          const b15 = await p15.catch(() => null);
+          if (!take15(b5, b15)) missed15.push(a);
+        }
       } catch {
         missing.push(a);
         if (is15) missed15.push(a);
@@ -439,6 +444,11 @@ async function main() {
   let fastOnly = false;
   try {
     buryResurrected(s, readLedger());
+    try {
+      await expireDue(s);
+    } catch (e) {
+      console.error("expire-due", e);
+    }
     const caught = { t: 0 };
     await scanFreshClose(s, ICT_ASSETS, caught);
     const held = s.open.filter((p) => p.origin === "ict" && Date.now() - (p.liveAt || p.openedAt) > 60_000);

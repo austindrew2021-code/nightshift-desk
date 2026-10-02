@@ -674,14 +674,18 @@ function touchLock() {
   }
 }
 
-/** Watch a resting limit every second until the bar ends. The stop goes on as soon as it fills. */
+/** One look at a resting limit. A fill gets its stop. The bar ending cancels it. Otherwise return so the next close can scan. */
 async function armPending(s: EngineState, mode: LiveMode, book: LiveBook, seat: LiveSeat) {
   if (!seat.pending || !seat.entryOid) return;
   const c = await contractFor(seat.symbol);
   if (!c) return;
   const paper = s.open.find((p) => p.id === seat.paperId || (p.origin === "ict" && p.symbol === seat.symbol));
   let filled = 0;
-  while (Date.now() < (seat.deadline || 0)) {
+  const started = Date.now();
+  let expired = Date.now() >= (seat.deadline || 0);
+  while (!expired) {
+    const untilClose = 5 * 60 * 1000 - (Date.now() % (5 * 60 * 1000));
+    if (Date.now() - started > 8_000 || untilClose < 12_000) return;
     touchLock();
     let done = false;
     try {
@@ -698,7 +702,9 @@ async function armPending(s: EngineState, mode: LiveMode, book: LiveBook, seat: 
     }
     if (filled > 0 || done) break;
     await new Promise((r) => setTimeout(r, 1000));
+    expired = Date.now() >= (seat.deadline || 0);
   }
+  if (!(filled > 0) && !expired) return;
   if (!(filled > 0)) {
     await cancel(mode, seat.entryOid);
     const qty = await absPosQty(c.symbol);
@@ -850,6 +856,16 @@ function accountIsFlat(book: LiveBook, qty: Map<string, number> | null): boolean
   for (const q of qty.values()) if (Math.abs(q) > 0) return false;
   return !book.seats.some((seat) => !seat.pending);
 }
+/** A limit whose bar has ended is cleared before the next scan, so the new close is not skipped. */
+export async function expireDue(s: EngineState): Promise<void> {
+  if (liveMode() !== "on") return;
+  const book = loadBook();
+  for (const seat of [...book.seats]) {
+    if (!seat.pending || Date.now() < (seat.deadline || 0)) continue;
+    await armPending(s, liveMode(), book, seat);
+  }
+}
+
 export async function syncKucoinLive(s: EngineState) {
   const mode = liveMode();
   const { key, secret, pass } = keys();
@@ -859,7 +875,11 @@ export async function syncKucoinLive(s: EngineState) {
     return;
   }
   const book = loadBook();
-  if (mode === "on") {
+  const paperOpen = s.open.filter((p) => p.origin === "ict");
+  const queued = [...(s.ictLivePend || []), ...ictLivePend.splice(0)];
+  s.ictLivePend = [];
+  const rush = mode === "on" && book.seats.length === 0 && queued.length > 0;
+  if (mode === "on" && !rush) {
     const keep = new Set(book.seats.map((x) => x.entryOid).filter((id): id is string => Boolean(id)));
     await cancelStrayEntries(mode, keep);
     await flattenUnknown(mode, book, s);
@@ -867,8 +887,8 @@ export async function syncKucoinLive(s: EngineState) {
       if (seat.pending) await armPending(s, mode, book, seat);
     }
   }
-  const qty = await positionQty(mode);
-  if (mode === "on" && accountIsFlat(book, qty)) {
+  const qty = rush ? null : await positionQty(mode);
+  if (mode === "on" && !rush && accountIsFlat(book, qty)) {
     try {
       const wallet = await usdtEquity();
       if (wallet > 0) {
@@ -893,9 +913,6 @@ export async function syncKucoinLive(s: EngineState) {
       log({ kind: "prime-fail", err: String(e) });
     }
   }
-  const paperOpen = s.open.filter((p) => p.origin === "ict");
-  const queued = [...(s.ictLivePend || []), ...ictLivePend.splice(0)];
-  s.ictLivePend = [];
   const seen = new Set(book.seats.map((x) => x.paperId + x.symbol));
   for (const p of [...queued, ...paperOpen]) {
     if (p.origin !== "ict") continue;
@@ -920,6 +937,10 @@ export async function syncKucoinLive(s: EngineState) {
     }
     seen.add(p.id + p.symbol);
     if (book.seats.length > seats) break;
+  }
+  if (rush && mode === "on") {
+    const keep = new Set(book.seats.map((x) => x.entryOid).filter((id): id is string => Boolean(id)));
+    await cancelStrayEntries(mode, keep);
   }
 
   for (const seat of [...book.seats]) {
