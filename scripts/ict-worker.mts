@@ -442,7 +442,8 @@ async function main() {
     const caught = { t: 0 };
     await scanFreshClose(s, assets, caught);
     const sinceClose = Date.now() % (5 * 60 * 1000);
-    fastOnly = sinceClose < 45_000 && !s.open.some((p) => p.origin === "ict");
+    const untilNext = 5 * 60 * 1000 - sinceClose;
+    fastOnly = (sinceClose < 45_000 || untilNext < 90_000) && !s.open.some((p) => p.origin === "ict");
     if (fastOnly) {
       console.log(JSON.stringify({ t: Date.now(), fast: true, sinceClose }));
     } else {
@@ -453,6 +454,7 @@ async function main() {
       assets.push(a);
     }
     for (let i = 0; i < assets.length; i += 6) {
+      if (5 * 60 * 1000 - (Date.now() % (5 * 60 * 1000)) < 25_000) break;
       await scanFreshClose(s, assets, caught);
       const chunk = assets.slice(i, i + 6);
       const got = await Promise.allSettled(chunk.map(book));
