@@ -681,13 +681,12 @@ async function armPending(s: EngineState, mode: LiveMode, book: LiveBook, seat: 
   if (!c) return;
   const paper = s.open.find((p) => p.id === seat.paperId || (p.origin === "ict" && p.symbol === seat.symbol));
   let filled = 0;
+  let done = false;
   const started = Date.now();
   let expired = Date.now() >= (seat.deadline || 0);
   while (!expired) {
-    const untilClose = 5 * 60 * 1000 - (Date.now() % (5 * 60 * 1000));
-    if (Date.now() - started > 8_000 || untilClose < 12_000) return;
     touchLock();
-    let done = false;
+    done = false;
     try {
       const o = await kucoin<{ dealSize?: number; status?: string }>("GET", `/api/v1/orders/${seat.entryOid}`);
       filled = Math.floor(Number(o?.dealSize || 0) / c.lotSize) * c.lotSize;
@@ -701,10 +700,12 @@ async function armPending(s: EngineState, mode: LiveMode, book: LiveBook, seat: 
       if (qty > 0) filled = Math.floor(qty / c.lotSize) * c.lotSize;
     }
     if (filled > 0 || done) break;
+    const untilClose = 5 * 60 * 1000 - (Date.now() % (5 * 60 * 1000));
+    if (Date.now() - started > 8_000 || untilClose < 12_000) return;
     await new Promise((r) => setTimeout(r, 1000));
     expired = Date.now() >= (seat.deadline || 0);
   }
-  if (!(filled > 0) && !expired) return;
+  if (!(filled > 0) && !expired && !done) return;
   if (!(filled > 0)) {
     await cancel(mode, seat.entryOid);
     const qty = await absPosQty(c.symbol);
