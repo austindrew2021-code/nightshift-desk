@@ -443,7 +443,9 @@ async function main() {
     await scanFreshClose(s, assets, caught);
     const sinceClose = Date.now() % (5 * 60 * 1000);
     const untilNext = 5 * 60 * 1000 - sinceClose;
-    fastOnly = (sinceClose < 45_000 || untilNext < 90_000) && !s.open.some((p) => p.origin === "ict");
+    // The fill is decided in the first minutes after the close. A chart download
+    // started in that window holds the lock and the next scan finds the price already gone.
+    fastOnly = (sinceClose < 180_000 || untilNext < 150_000) && !s.open.some((p) => p.origin === "ict");
     if (fastOnly) {
       console.log(JSON.stringify({ t: Date.now(), fast: true, sinceClose }));
     } else {
