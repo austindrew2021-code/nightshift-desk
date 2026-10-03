@@ -1183,8 +1183,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
   const riskFlat = ictRiskUsd(s, 0.01).risk;
   const now = Date.now();
   // The limit goes at the entry, not through it. A signal candle that already
-  // wicked 0.5R is still not an entry. The order may be sent any time until the
-  // next bar closes, which is the same window the test counts as a fill.
+  // wicked 0.5R is still an entry when the next bar is back at the entry.
+  // The order may be sent any time until the next bar closes.
   const liveFromOpen = now - 2 * 5 * 60_000;
   const liveFromOpen15 = now - 2 * 15 * 60_000;
   const liveFromClosed = now - 15 * 60_000;
@@ -1198,16 +1198,6 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         kind: "note",
         symbol: "ICT",
         text: `15m CISD live · bar close is accepted for 30m · same A+ rules · not Reset`,
-        tone: "info",
-      });
-    }
-    const dryNote = s.tape.find((t) => t.text?.startsWith("wick already at"));
-    if (!dryNote) {
-      pushTape(s, {
-        t: now,
-        kind: "note",
-        symbol: "ICT",
-        text: `wick already at 0.5R is not an entry · same-second close is not a fill · not Reset`,
         tone: "info",
       });
     }
@@ -1248,16 +1238,6 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         kind: "note",
         symbol: "ICT",
         text: `scanner is awake before the close · 15m goes in the same pass · same trades, sooner · not Reset`,
-        tone: "info",
-      });
-    }
-    const priorWick = s.tape.find((t) => t.text?.startsWith("only the signal candle"));
-    if (!priorWick) {
-      pushTape(s, {
-        t: now,
-        kind: "note",
-        symbol: "ICT",
-        text: `only the signal candle can be already at 0.5R · the bar before it does not count · not Reset`,
         tone: "info",
       });
     }
@@ -1509,15 +1489,6 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         if (stopDist0 > 0) {
           const adverse = t.side === "long" ? t.entryUsd - fill : fill - t.entryUsd;
           if (adverse > 0.35 * stopDist0) continue;
-          const frame = (on15 ? b.candles15 : b.candles5) ?? [];
-          const signalBar = frame.find((w) => Math.abs(w.t - t.openedAt) < 60_000);
-          const already = signalBar
-            ? (t.side === "long" ? signalBar.h - t.entryUsd : t.entryUsd - signalBar.l) >= ICT_PARTIAL_R * stopDist0
-            : false;
-          if (already) {
-            s.ictSeen = [...s.ictSeen, key];
-            continue;
-          }
         }
         const deadSeries = (on15 ? b.candles15 : b.candles5) ?? [];
         const tfMs = on15 ? 15 * 60_000 : 5 * 60_000;
