@@ -385,13 +385,9 @@ async function main() {
   const period = 5 * 60 * 1000;
   const hotP: Promise<IctAssetDef[]> = fetchKucoinHotAssets().catch(() => []);
   const untilClose = period - (Date.now() % period);
-  // A tick that starts in this gap holds the lock through the close, and the
-  // close tick then skips. Leave the gap so the close tick can wait and send.
-  if (untilClose > 25_000 && untilClose < 45_000) {
-    console.log(JSON.stringify({ t: Date.now(), skip: "close coming", untilClose }));
-    return;
-  }
-  if (untilClose <= 25_000 && untilClose > 500) {
+  // A tick that starts in the last 50s waits for the bar. Returning here used
+  // to push the scan 15–40s past the close, and the ticker had already left.
+  if (untilClose <= 50_000 && untilClose > 500) {
     await new Promise((r) => setTimeout(r, untilClose + 300));
   }
   const s = load();

@@ -1486,9 +1486,14 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
         const fill = b.last || t.entryUsd;
         const stopDist0 = Math.abs(t.entryUsd - t.stop);
-        if (stopDist0 > 0) {
+        if (stopDist0 > 0 && fill > 0) {
           const adverse = t.side === "long" ? t.entryUsd - fill : fill - t.entryUsd;
           if (adverse > 0.35 * stopDist0) continue;
+          // Same 0.05R rule as the live check, on the candle close, before the ticker.
+          if (-adverse / stopDist0 > 0.05) {
+            s.ictSeen = [...s.ictSeen, key];
+            continue;
+          }
         }
         const deadSeries = (on15 ? b.candles15 : b.candles5) ?? [];
         const tfMs = on15 ? 15 * 60_000 : 5 * 60_000;
@@ -1595,7 +1600,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             t: s.simT,
             kind: "note",
             symbol: t.symbol,
-            text: `read ${t.symbol} · take · closed inside 0.5R · a reverse after 0.5R stops at entry · 1.25R limit stays`,
+            text: `read ${t.symbol} · take · close is within 0.05R of the entry · a reverse after 0.5R stops at entry · 1.25R limit stays`,
             tone: "info",
           });
         }

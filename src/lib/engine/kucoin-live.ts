@@ -259,6 +259,30 @@ export function alreadyLeft(side: Side, entry: number, mark: number, riskPx: num
   const fav = side === "long" ? (mark - entry) / riskPx : (entry - mark) / riskPx;
   return fav > 0.05;
 }
+
+/**
+ * The candle close is the desk price. The ticker is read a moment later.
+ * left: the candle itself finished more than 0.05R through.
+ * late: the candle was still at the entry, but the ticker is already past 0.05R,
+ * so the two prices are not the same and the order is not sent.
+ * take: the close and the ticker are both within 0.05R.
+ */
+export function entryWindow(
+  side: Side,
+  entry: number,
+  closePx: number,
+  mark: number,
+  riskPx: number,
+): "take" | "left" | "late" {
+  if (!(entry > 0) || !(riskPx > 0)) return "late";
+  const close = closePx > 0 ? closePx : mark;
+  if (alreadyLeft(side, entry, close, riskPx)) return "left";
+  if (mark > 0) {
+    const fav = side === "long" ? (mark - entry) / riskPx : (entry - mark) / riskPx;
+    if (fav > 0.05) return "late";
+  }
+  return "take";
+}
 export function positionIsFlat(qty: Map<string, number> | null, inst: string, ageMs: number): boolean {
   if (!qty || ageMs < 8_000) return false;
   if (!qty.has(inst)) return false;
@@ -539,16 +563,23 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   const capPx = pxStr(p.entryUsd, c.tickSize);
   if (mode === "on") {
     const mark = await markP;
+    const window = entryWindow(p.side, p.entryUsd, p.markUsd, mark, riskPx);
     if (orderPastMark(p.side, p.entryUsd, mark, riskPx, lev)) {
       log({ kind: "skip", why: "past-mark", symbol: p.symbol, mark, entry: p.entryUsd, cap: capPx });
       push(s, `LIVE skip ${p.symbol} · live ${mark} is past the entry · no chase`, "warn");
       releasePaper(s, p, "past the live price");
       return;
     }
-    if (alreadyLeft(p.side, p.entryUsd, mark, riskPx)) {
-      log({ kind: "skip", why: "already-left", symbol: p.symbol, mark, entry: p.entryUsd });
-      push(s, `LIVE skip ${p.symbol} · live ${mark} is already 0.05R through · a pullback is not the fill`, "warn");
+    if (window === "left") {
+      log({ kind: "skip", why: "already-left", symbol: p.symbol, mark, close: p.markUsd, entry: p.entryUsd });
+      push(s, `LIVE skip ${p.symbol} · close ${p.markUsd} is already 0.05R through · a pullback is not the fill`, "warn");
       releasePaper(s, p, "already left");
+      return;
+    }
+    if (window === "late") {
+      log({ kind: "skip", why: "ticker-late", symbol: p.symbol, mark, close: p.markUsd, entry: p.entryUsd });
+      push(s, `LIVE skip ${p.symbol} · ticker ${mark} ran past the close ${p.markUsd} · not the same price`, "warn");
+      releasePaper(s, p, "ticker ran");
       return;
     }
   }

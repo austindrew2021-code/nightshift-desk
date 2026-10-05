@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alreadyLeft, ictBracket, keepWorkingExit, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
+import { alreadyLeft, entryWindow, ictBracket, keepWorkingExit, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
 
 test("long target is a resting limit and the stop stays a stop-market", () => {
   const { sl, tp, tpStop } = ictBracket("long", "10.924", "10.746", 64);
@@ -41,6 +41,14 @@ test("a price already 0.05R through is not a pullback entry", () => {
   assert.equal(alreadyLeft("short", 1, 0.94, 1), true);
   assert.equal(alreadyLeft("long", 10, 9.9, 1), false);
   assert.equal(alreadyLeft("long", 1, 0, 1), false);
+});
+test("the candle close and the ticker are one decision", () => {
+  assert.equal(entryWindow("long", 1, 1.03, 1.04, 1), "take");
+  assert.equal(entryWindow("long", 1, 1.02, 1.06, 1), "late");
+  assert.equal(entryWindow("long", 1, 1.02, 1.25, 1), "late");
+  assert.equal(entryWindow("long", 1, 1.08, 1.08, 1), "left");
+  assert.equal(entryWindow("short", 1, 0.99, 0.7, 1), "late");
+  assert.equal(entryWindow("long", 1, 0, 1.02, 1), "take");
 });
 test("ONE at the 4am price is not sent once the futures price has left", () => {
   assert.equal(orderPastMark("long", 0.00258991, 0.00248, 0.000052, 30), true);
