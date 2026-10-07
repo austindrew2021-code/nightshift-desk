@@ -269,15 +269,17 @@ async function sendEarly(s: EngineState, books: IctBook[]) {
   writeFileSync(STATE, JSON.stringify(slim(s)));
 }
 
-/** One pass for this 5m close. On a 15m close the 15m book goes out in the same pass, not after it. */
+/** One pass for this 5m close. The 15m entry stays valid for the whole next
+ *  15 minutes, so the 15m book is read on the close and again at +5m and +10m.
+ *  A price already 0.05R through is still not a fill. */
 async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number][], caught: { t: number }) {
   const period = 5 * 60 * 1000;
+  const fifteen = 15 * 60 * 1000;
   const closedOpen = Math.floor(Date.now() / period) * period - period;
   if (caught.t === closedOpen) return;
   if (s.open.some((p) => p.origin === "ict")) return;
-  const closeTs = closedOpen + period;
-  const is15 = closeTs % (15 * 60 * 1000) === 0;
-  const closed15 = closeTs - 15 * 60 * 1000;
+  const closed15 = Math.floor(Date.now() / fifteen) * fifteen - fifteen;
+  const is15 = true;
   const queue = [...assets];
   const missing: (typeof ICT_ASSETS)[number][] = [];
   const missed15: (typeof ICT_ASSETS)[number][] = [];
