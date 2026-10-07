@@ -1483,7 +1483,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
           }
         }
         if (clamped.capped) continue;
-        if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
+        if (s.ictStyle !== "cisd" && fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
         const fill = b.last || t.entryUsd;
         const stopDist0 = Math.abs(t.entryUsd - t.stop);
         const bornBar = ((on15 ? b.candles15 : b.candles5) ?? []).find((bar) => Math.abs(bar.t - t.openedAt) < 60_000);
