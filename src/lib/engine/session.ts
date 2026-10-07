@@ -1486,6 +1486,15 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         if (fadingAcceptedBreak(b.candles15, t.side, b.last || t.entryUsd)) continue;
         const fill = b.last || t.entryUsd;
         const stopDist0 = Math.abs(t.entryUsd - t.stop);
+        const bornBar = ((on15 ? b.candles15 : b.candles5) ?? []).find((bar) => Math.abs(bar.t - t.openedAt) < 60_000);
+        if (bornBar && stopDist0 > 0) {
+          const through = t.side === "long" ? (bornBar.c - t.entryUsd) / stopDist0 : (t.entryUsd - bornBar.c) / stopDist0;
+          // The signal bar itself finished through. A later pullback is not the fill.
+          if (through > 0.05) {
+            s.ictSeen = [...s.ictSeen, key];
+            continue;
+          }
+        }
         if (stopDist0 > 0 && fill > 0) {
           const adverse = t.side === "long" ? t.entryUsd - fill : fill - t.entryUsd;
           if (adverse > 0.35 * stopDist0) continue;
