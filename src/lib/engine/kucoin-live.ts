@@ -308,7 +308,7 @@ export function ictBracket(side: Side, tpPx: string, slPx: string, size: number)
     stop: side === "long" ? "down" : "up",
     stopPrice: slPx,
   };
-  // Resting limit. A wick through 1.25R fills here. A stop-market sells the pullback.
+  // Resting limit at the CISD full target. A wick through it fills here. A stop-market sells the pullback.
   const tp = {
     side: exitSide,
     type: "limit" as const,
@@ -1048,7 +1048,7 @@ export async function syncKucoinLive(s: EngineState) {
           seat.slOid = id;
           seat.stop = Number(slPx);
           saveBook(book);
-          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · 1.25R still on`, "up");
+          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · 2R still on`, "up");
         }
       }
     }

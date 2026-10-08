@@ -266,6 +266,8 @@ export const ICT_HARD_RISK_PCT = 0.18;
 export const ICT_MMR = 0.005;
 /** Bank ¾ here (5m wick or 20s last). 0.75 left too many 0.50–0.70R INJ/ZEC deaths. */
 export const ICT_PARTIAL_R = 0.5;
+/** CISD sells the whole position here. 1.25R left money on the same legal fills; 2R paid more in both halves. */
+export const CISD_FULL_R = 2;
 
 /** Isolated liq distance: 1/lev − maintenance. 40× ≈ 2.0%. */
 export function ictLiqPct(lev = ICT_LEVERAGE): number {
