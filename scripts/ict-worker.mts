@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from "node:fs";
 import { ICT_ASSETS, type IctAssetDef, type IctBook } from "../src/lib/engine/universe.ts";
 import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "../src/lib/market/kucoin-hot.ts";
-import { createEngine, tick, buryResurrected, ingestIct, markIct, type EngineState } from "../src/lib/engine/session.ts";
+import { createEngine, tick, buryResurrected, ingestIct, markIct, scanPullSeat, type EngineState } from "../src/lib/engine/session.ts";
 import { syncKucoinLive, expireDue, liveMode } from "../src/lib/engine/kucoin-live.ts";
 import type { Candle, ClosedTrade, MarketSnapshot } from "../src/lib/engine/types.ts";
 
@@ -257,7 +257,7 @@ function snapshot(books: IctBook[]): MarketSnapshot {
 /** First valid coin sends before the rest of the list is downloaded. */
 async function sendEarly(s: EngineState, books: IctBook[]) {
   if (!books.length) return;
-  if (s.open.some((p) => p.origin === "ict")) return;
+  if (cisdBusy(s)) return;
   const before = (s.ictLivePend || []).length;
   ingestIct(s, snapshot(books));
   if ((s.ictLivePend || []).length === before) return;
@@ -269,6 +269,87 @@ async function sendEarly(s: EngineState, books: IctBook[]) {
   writeFileSync(STATE, JSON.stringify(slim(s)));
 }
 
+function cisdBusy(s: EngineState): boolean {
+  return s.open.some((p) => p.origin === "ict" && !String(p.id).startsWith("pull"));
+}
+
+function pullWaitFresh(seen: string[], closedOpen: number): boolean {
+  const prefix = `pull-wait:${closedOpen}:`;
+  let at = 0;
+  for (const k of seen) {
+    if (!k.startsWith(prefix)) continue;
+    const n = Number(k.slice(prefix.length));
+    if (n > at) at = n;
+  }
+  return at > 0 && Date.now() - at < 15_000;
+}
+
+/** CISD for this coin has already looked. Send the pull now, not after the rest of the list. */
+async function sendPull(s: EngineState, book: IctBook): Promise<void> {
+  const period = 5 * 60 * 1000;
+  const closedOpen = Math.floor(Date.now() / period) * period - period;
+  const sawKey = `pull-saw:${book.id}:${closedOpen}`;
+  if (!s.ictSeen.includes(sawKey)) s.ictSeen = [...s.ictSeen, sawKey].slice(-500);
+  if (s.open.some((p) => String(p.id).startsWith("pull"))) return;
+  const before = s.open.length;
+  scanPullSeat(s, snapshot([book]));
+  if (s.open.length === before) return;
+  console.log(JSON.stringify({ t: Date.now(), pull: book.id, sinceClose: Date.now() % period }));
+  try {
+    await syncKucoinLive(s);
+  } catch (e) {
+    console.error("kucoin-live-pull", e);
+  }
+  writeFileSync(STATE, JSON.stringify(slim(s)));
+}
+
+/** The 20s hunter never reaches tick(). Arm the second seat on the close path it actually runs. */
+async function armPullSeat(s: EngineState, assets: (typeof ICT_ASSETS)[number][]) {
+  if (s.ictStyle !== "cisd") return;
+  if (s.open.some((p) => String(p.id).startsWith("pull"))) return;
+  const period = 5 * 60 * 1000;
+  const closedOpen = Math.floor(Date.now() / period) * period - period;
+  const stamp = `pull-scan:${closedOpen}`;
+  const sawOf = (id: string) => `pull-saw:${id}:${closedOpen}`;
+  if (s.ictSeen.includes(stamp)) return;
+  const queue = assets.filter((a) => !s.ictSeen.includes(sawOf(a.id)));
+  if (!queue.length) {
+    s.ictSeen = [...s.ictSeen, stamp].slice(-500);
+    return;
+  }
+  if (queue.length === assets.length && pullWaitFresh(s.ictSeen, closedOpen)) return;
+  const books: IctBook[] = [];
+  let saw = false;
+  const puller = async () => {
+    while (queue.length) {
+      const a = queue.shift();
+      if (!a) return;
+      try {
+        const b = await fastBook(a);
+        if ((b.candles5?.length ?? 0) < 80) {
+          if (!s.ictSeen.includes(sawOf(a.id))) s.ictSeen = [...s.ictSeen, sawOf(a.id)].slice(-500);
+          continue;
+        }
+        if (b.candles5.some((c) => c.t === closedOpen)) saw = true;
+        books.push(b);
+      } catch {
+        /* the next pass retries this close */
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 8 }, () => puller()));
+  if (!saw) {
+    s.ictSeen = [...s.ictSeen, `pull-wait:${closedOpen}:${Date.now()}`].slice(-500);
+    return;
+  }
+  for (const b of books) {
+    if (s.open.some((p) => String(p.id).startsWith("pull"))) break;
+    await sendPull(s, b);
+  }
+  const left = assets.some((a) => !s.ictSeen.includes(sawOf(a.id)));
+  if (!left) s.ictSeen = [...s.ictSeen, stamp].slice(-500);
+}
+
 /** One pass for this 5m close. The 15m entry stays valid for the whole next
  *  15 minutes, so the 15m book is read on the close and again at +5m and +10m.
  *  A price already 0.05R through is still not a fill. */
@@ -277,7 +358,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   const fifteen = 15 * 60 * 1000;
   const closedOpen = Math.floor(Date.now() / period) * period - period;
   if (caught.t === closedOpen) return;
-  if (s.open.some((p) => p.origin === "ict")) return;
+  if (cisdBusy(s)) return;
   const closed15 = Math.floor(Date.now() / fifteen) * fifteen - fifteen;
   const is15 = true;
   const queue = [...assets];
@@ -286,6 +367,11 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   const five = new Map<string, IctBook>();
   let sending: Promise<void> = Promise.resolve();
   let saw = false;
+  const queuePull = (book: IctBook | null) => {
+    if (!book?.candles5?.some((c) => c.t === closedOpen)) return;
+    const held = book;
+    sending = sending.then(() => sendPull(s, held));
+  };
   const loadPair = async (a: (typeof ICT_ASSETS)[number]) => {
     const [r5, r15] = await Promise.allSettled([
       fastBook(a),
@@ -306,25 +392,29 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   };
   const take15 = (b5: IctBook | null, b15: IctBook | null) => {
     if (!is15) return true;
-    if (s.open.some((p) => p.origin === "ict")) return true;
+    if (cisdBusy(s)) return true;
     if (!b5 || !b15?.candles15?.some((c) => c.t === closed15) || b15.candles15.length < 80) return false;
     const merged = { ...b5, candles15: b15.candles15 };
     sending = sending.then(() => sendEarly(s, [merged]));
     return true;
   };
   const worker = async () => {
-    while (queue.length && !s.open.some((p) => p.origin === "ict")) {
+    while (queue.length && !cisdBusy(s)) {
       const a = queue.shift();
       if (!a) return;
       try {
         const p5 = fastBook(a);
         const p15 = is15 ? fastBook15(a) : Promise.resolve(null);
         const b5 = await p5.catch(() => null);
-        if (!take5(a, b5)) missing.push(a);
+        const fiveOk = !!b5 && take5(a, b5);
+        if (!fiveOk) missing.push(a);
+        let fifteenOk = !is15;
         if (is15) {
           const b15 = await p15.catch(() => null);
-          if (!take15(b5, b15)) missed15.push(a);
+          fifteenOk = take15(b5, b15);
+          if (!fifteenOk) missed15.push(a);
         }
+        if (fiveOk && fifteenOk) queuePull(b5);
       } catch {
         missing.push(a);
         if (is15) missed15.push(a);
@@ -336,12 +426,12 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   const giveUp = Date.now() + 8_000;
   let pending = missing;
   let left = missed15;
-  while (pending.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp) {
+  while (pending.length && !cisdBusy(s) && Date.now() < giveUp) {
     await new Promise((r) => setTimeout(r, 400));
     const again = pending;
     pending = [];
     const retry = async () => {
-      while (again.length && !s.open.some((p) => p.origin === "ict")) {
+      while (again.length && !cisdBusy(s)) {
         const a = again.shift();
         if (!a) return;
         try {
@@ -350,7 +440,11 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
             pending.push(a);
             continue;
           }
-          if (is15 && !take15(b5, b15)) left.push(a);
+          if (is15 && !take15(b5, b15)) {
+            left.push(a);
+            continue;
+          }
+          queuePull(b5);
         } catch {
           pending.push(a);
         }
@@ -359,19 +453,21 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
     await Promise.all(Array.from({ length: 12 }, () => retry()));
     await sending;
   }
-  while (is15 && left.length && !s.open.some((p) => p.origin === "ict") && Date.now() < giveUp) {
+  while (is15 && left.length && !cisdBusy(s) && Date.now() < giveUp) {
     await new Promise((r) => setTimeout(r, 400));
     const again = left;
     left = [];
     const retry = async () => {
-      while (again.length && !s.open.some((p) => p.origin === "ict")) {
+      while (again.length && !cisdBusy(s)) {
         const a = again.shift();
         if (!a) return;
         try {
           const b5 = five.get(a.id) ?? (await fastBook(a));
           if ((b5.candles5?.length ?? 0) >= 48) five.set(a.id, b5);
           const b15 = await fastBook15(a);
-          if (!take15(five.get(a.id) ?? null, b15)) left.push(a);
+          const book = five.get(a.id) ?? null;
+          if (!take15(book, b15)) left.push(a);
+          else queuePull(book);
         } catch {
           left.push(a);
         }
@@ -430,11 +526,12 @@ async function main() {
     }
     const caught = { t: 0 };
     await scanFreshClose(s, ICT_ASSETS, caught);
+    await armPullSeat(s, assets);
     const held = s.open.filter((p) => p.origin === "ict" && Date.now() - (p.liveAt || p.openedAt) > 60_000);
     if (held.length) {
       const managed: IctBook[] = [];
       for (const p of held) {
-        const a = ICT_ASSETS.find((x) => x.id === p.symbol);
+        const a = assets.find((x) => x.id === p.symbol || x.symbol === p.symbol);
         if (!a) continue;
         try {
           managed.push(await fastBook(a));

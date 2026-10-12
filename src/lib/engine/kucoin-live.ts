@@ -12,6 +12,7 @@ import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs
 import type { EngineState, Position, Side } from "./types";
 import { ICT_HARD_RISK_PCT } from "./types";
 import { ictLivePend } from "./live-pend";
+import { settlePullExit } from "./session";
 
 const BASE = "https://api-futures.kucoin.com";
 const LIVE_FILE = process.env.ICT_LIVE_STATE || "ict-live-orders.json";
@@ -262,9 +263,9 @@ export function alreadyLeft(side: Side, entry: number, mark: number, riskPx: num
 
 /**
  * The candle close is the desk price. The ticker is read a moment later.
- * left: the candle itself finished more than 0.05R through.
- * late: the candle was still at the entry, but the ticker is already past 0.05R,
- * so the two prices are not the same and the order is not sent.
+ * left: the candle itself finished more than 0.05R through. That order is not sent.
+ * late: the candle was still at the entry, but the ticker is already past 0.05R.
+ * The limit is still sent, at the entry. It cannot fill at a worse price.
  * take: the close and the ticker are both within 0.05R.
  */
 export function entryWindow(
@@ -308,7 +309,7 @@ export function ictBracket(side: Side, tpPx: string, slPx: string, size: number)
     stop: side === "long" ? "down" : "up",
     stopPrice: slPx,
   };
-  // Resting limit at the CISD full target. A wick through it fills here. A stop-market sells the pullback.
+  // Resting limit. A wick through 1.25R fills here. A stop-market sells the pullback.
   const tp = {
     side: exitSide,
     type: "limit" as const,
@@ -478,8 +479,17 @@ function releasePaper(s: EngineState, p: Position, why: string) {
 }
 
 async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook) {
-  if (book.seats.length >= liveSeats()) {
-    push(s, `LIVE skip ${p.symbol} · seat already full`, "warn");
+  const pull = String(p.id || "").startsWith("pull") || String(p.note || "").includes("3green");
+  const held = book.seats.find((x) => x.symbol === p.symbol);
+  if (held) {
+    push(s, `LIVE skip ${p.symbol} · ${String(held.paperId).startsWith("pull") ? "pull" : "CISD"} already in this coin`, "warn");
+    if (mode === "on") releasePaper(s, p, "coin taken");
+    return;
+  }
+  const pullOpen = book.seats.filter((x) => String(x.paperId).startsWith("pull")).length;
+  const cisdOpen = book.seats.length - pullOpen;
+  if (pull ? pullOpen >= 1 : cisdOpen >= liveSeats()) {
+    push(s, `LIVE skip ${p.symbol} · ${pull ? "pull" : "CISD"} seat already full`, "warn");
     if (mode === "on") releasePaper(s, p, "seat full");
     return;
   }
@@ -512,7 +522,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
       return;
     }
   }
-  const riskPct = eq < 64 ? 0.09 : ICT_HARD_RISK_PCT;
+  const riskPct = pull ? 0.09 : eq < 64 ? 0.09 : ICT_HARD_RISK_PCT;
   const riskUsd = eq * riskPct;
   const stopPct = Math.max(1e-6, p.stopPct || Math.abs(p.entryUsd - (p.stopUsd || p.entryUsd)) / p.entryUsd);
   if (eq < 20 || riskUsd < 2) {
@@ -563,24 +573,27 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   const capPx = pxStr(p.entryUsd, c.tickSize);
   if (mode === "on") {
     const mark = await markP;
-    const window = entryWindow(p.side, p.entryUsd, p.markUsd, mark, riskPx);
-    if (orderPastMark(p.side, p.entryUsd, mark, riskPx, lev)) {
-      log({ kind: "skip", why: "past-mark", symbol: p.symbol, mark, entry: p.entryUsd, cap: capPx });
+    const closePx = p.quotedEntryUsd && p.quotedEntryUsd > 0 ? p.quotedEntryUsd : p.markUsd;
+    const window = entryWindow(p.side, p.entryUsd, closePx, mark, riskPx);
+    const throughStop = pull && mark > 0 && (p.side === "long" ? mark <= Number(slPx) : mark >= Number(slPx));
+    if (throughStop || (!pull && orderPastMark(p.side, p.entryUsd, mark, riskPx, lev))) {
+      log({ kind: "skip", why: throughStop ? "through-stop" : "past-mark", symbol: p.symbol, mark, entry: p.entryUsd, cap: capPx });
       push(s, `LIVE skip ${p.symbol} · live ${mark} is past the entry · no chase`, "warn");
-      releasePaper(s, p, "past the live price");
+      releasePaper(s, p, throughStop ? "already through the stop" : "past the live price");
       return;
     }
-    if (window === "left") {
+    if (window === "left" && !pull) {
       log({ kind: "skip", why: "already-left", symbol: p.symbol, mark, close: p.markUsd, entry: p.entryUsd });
       push(s, `LIVE skip ${p.symbol} · close ${p.markUsd} is already 0.05R through · a pullback is not the fill`, "warn");
       releasePaper(s, p, "already left");
       return;
     }
+    // The close was a take. A ticker that stepped past while the scan finished
+    // does not cancel it. The order is still a limit at the entry, so it cannot
+    // fill at a worse price. It fills only if this next bar trades the entry.
     if (window === "late") {
-      log({ kind: "skip", why: "ticker-late", symbol: p.symbol, mark, close: p.markUsd, entry: p.entryUsd });
-      push(s, `LIVE skip ${p.symbol} · ticker ${mark} ran past the close ${p.markUsd} · not the same price`, "warn");
-      releasePaper(s, p, "ticker ran");
-      return;
+      log({ kind: "rest-late", symbol: p.symbol, mark, close: p.markUsd, entry: p.entryUsd });
+      push(s, `LIVE ${p.symbol} · close was on the entry · ticker ${mark} stepped past · limit stays at the entry`, "up");
     }
   }
 
@@ -969,7 +982,10 @@ export async function syncKucoinLive(s: EngineState) {
       push(s, `LIVE dry FAIL ${p.symbol} · ${String(e).slice(0, 80)}`, "down");
     }
     seen.add(p.id + p.symbol);
-    if (book.seats.length > seats) break;
+    if (book.seats.length > seats) {
+      const pullN = book.seats.filter((x) => String(x.paperId).startsWith("pull")).length;
+      if (pullN >= 1 && book.seats.length - pullN >= liveSeats()) break;
+    }
   }
   if (rush && mode === "on") {
     const keep = new Set(book.seats.map((x) => x.entryOid).filter((id): id is string => Boolean(id)));
@@ -979,11 +995,21 @@ export async function syncKucoinLive(s: EngineState) {
   for (const seat of [...book.seats]) {
     if (seat.pending) continue;
     if (positionIsFlat(qty, seat.inst, Date.now() - seat.openedAt)) {
+      const paper = s.open.find((p) => p.id === seat.paperId);
+      const pull = paper && String(paper.id).startsWith("pull") ? paper : null;
+      const tpOpen = pull ? await orderIsOpen(mode, seat.tpOid) : false;
+      const slOpen = pull ? await orderIsOpen(mode, seat.slOid) : false;
       await cancel(mode, seat.tpOid);
       await cancel(mode, seat.slOid);
       book.seats = book.seats.filter((x) => x.paperId !== seat.paperId);
       saveBook(book);
       push(s, `LIVE ${seat.symbol} flat · canceled the other order`, "up");
+      if (pull) {
+        const mark = pull.markUsd || seat.entry;
+        const reason = !tpOpen && slOpen ? "target" : !slOpen && tpOpen ? "stop" : "time";
+        const px = reason === "target" ? seat.tp || mark : reason === "stop" ? seat.stop : mark;
+        settlePullExit(s, pull.id, px, reason);
+      }
       continue;
     }
     const paper = paperOpen.find((p) => p.id === seat.paperId || p.symbol === seat.symbol);
@@ -1048,7 +1074,7 @@ export async function syncKucoinLive(s: EngineState) {
           seat.slOid = id;
           seat.stop = Number(slPx);
           saveBook(book);
-          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · 2R still on`, "up");
+          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · 1.25R still on`, "up");
         }
       }
     }

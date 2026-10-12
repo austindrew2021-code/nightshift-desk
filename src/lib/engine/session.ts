@@ -7,7 +7,6 @@ import {
   ICT_MAX_RISK_PCT,
   ICT_HARD_RISK_PCT,
   ICT_PARTIAL_R,
-  CISD_FULL_R,
   BANK_EVERY_USD,
   BANK_RATE,
   SCALE_USD,
@@ -173,7 +172,7 @@ export function ictRiskUsd(s: EngineState, stopPct = 0.01, levOverride?: number,
 /** Two full stops in a row: no new entry for 4 hours. An open trade still runs. */
 function lossPauseUntil(s: EngineState): number {
   const closed = s.closed
-    .filter((c) => c.origin === "ict")
+    .filter((c) => c.origin === "ict" && !String(c.note || "").includes("3green"))
     .slice()
     .sort((a, b) => a.closedAt - b.closedAt);
   let streak = 0;
@@ -917,6 +916,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       (p.side === "long" ? p.entryUsd + risk * p.targetR : p.entryUsd - risk * p.targetR);
     const trail = trailSet.has(p.setup);
     let dead = false;
+    const pullBar = String(p.id).startsWith("pull") || String(p.note || "").includes("3green");
     // Empty path must NOT replay the ¾ bar (fallback [c] was closing the ¼ at BE the next tick).
     const bars = path.length ? path : !thru && c ? [c] : [];
     if (!bars.length) {
@@ -937,7 +937,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         if (!forming) p.markThru = bar.t;
         continue;
       }
-      if (born > 0 && bar.t <= born && born < bar.t + dt) {
+      if (!pullBar && born > 0 && bar.t <= born && born < bar.t + dt) {
         hi = last;
         lo = last;
       }
@@ -969,7 +969,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         break;
       }
       if (!forming) p.markThru = bar.t;
-      if (!forming && s.ictStyle === "cisd") {
+      if ((!forming || pullBar) && s.ictStyle === "cisd") {
         const mfe = p.side === "long" ? hi - p.entryUsd : p.entryUsd - lo;
         if (mfe >= risk * ICT_PARTIAL_R) {
           const be = p.entryUsd;
@@ -981,7 +981,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
               t: Date.now(),
               kind: "note",
               symbol: p.symbol,
-              text: `stop to entry ${p.symbol} · 0.5R tagged · a reverse from here is flat · ${CISD_FULL_R}R limit stays`,
+              text: `stop to entry ${p.symbol} · 0.5R tagged · a reverse from here is flat · 1.25R limit stays`,
               tone: "info",
             });
           }
@@ -1001,7 +1001,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         p.targetUsd = tgtPx;
         p.targetR = far;
       } else if (trail && !p.partialed) {
-        const tgtR = s.ictStyle === "cisd" ? CISD_FULL_R : 1;
+        const tgtR = s.ictStyle === "cisd" ? 1.25 : 1;
         tgtPx = p.side === "long" ? p.entryUsd + risk * tgtR : p.entryUsd - risk * tgtR;
         p.targetUsd = tgtPx;
         p.targetR = tgtR;
@@ -1020,6 +1020,21 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       }
     }
     if (dead) continue;
+    if (String(p.note || "").includes("3green") && (p.stopUsd ?? 0) < p.entryUsd) {
+      const dip = series.find((bar) => Math.abs(bar.t - ((p.openedAt || 0) + 5 * 60_000)) < 60_000);
+      if (dip && dip.t + dt <= Date.now() && dip.c <= p.entryUsd) {
+        s.open = s.open.filter((x) => x.id !== p.id);
+        closePos(s, p, last, "time");
+        pushTape(s, {
+          t: Date.now(),
+          kind: "note",
+          symbol: p.symbol,
+          text: `pull ${p.symbol} · the next bar closed back under the entry · not a hold`,
+          tone: "warn",
+        });
+        continue;
+      }
+    }
     const heldMs = Date.now() - (p.openedAt || 0);
     const hour = nyHour(c?.t ?? Date.now());
     const openedH = nyHour(p.openedAt || 0);
@@ -1050,7 +1065,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
           t: Date.now(),
           kind: "note",
           symbol: p.symbol,
-          text: `90m ${p.symbol} · ${CISD_FULL_R}R not tagged · flat`,
+          text: `90m ${p.symbol} · 1.25R not tagged · flat`,
           tone: "info",
         });
         continue;
@@ -1425,6 +1440,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         s.closed.some(
           (c) =>
             c.origin === "ict" &&
+            !String(c.id).startsWith("pull") &&
+            !String(c.note || "").includes("3green") &&
             c.symbol === t.symbol &&
             Math.abs(c.openedAt - t.openedAt) < 45 * 60_000,
         )
@@ -1442,12 +1459,14 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       const cooled = s.closed.some(
         (c) =>
           c.origin === "ict" &&
+          !String(c.id).startsWith("pull") &&
+          !String(c.note || "").includes("3green") &&
           c.symbol === t.symbol &&
           c.reason === "stop" &&
           now - c.closedAt < 12 * 60_000,
       );
       if (cooled) continue;
-      const sameSideOpen = s.open.filter((p) => p.origin === "ict" && p.side === t.side);
+      const sameSideOpen = s.open.filter((p) => p.origin === "ict" && p.side === t.side && !String(p.id).startsWith("pull"));
       const rangeFade = t.setup === "daily" || t.setup === "weekly" || t.setup === "sweep";
       if (rangeFade && sameSideOpen.length >= 1) continue;
       if (!rangeFade && sameSideOpen.length >= 2) continue;
@@ -1545,8 +1564,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const holdOpen = s.ictStyle === "cisd";
         const targetUsd = holdOpen
           ? t.side === "long"
-            ? t.entryUsd + stopDist * CISD_FULL_R
-            : t.entryUsd - stopDist * CISD_FULL_R
+            ? t.entryUsd + stopDist * 1.25
+            : t.entryUsd - stopDist * 1.25
           : trail
             ? t.side === "long"
               ? t.entryUsd + stopDist * 5
@@ -1569,14 +1588,14 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             sizeSol: sizeUsd / Math.max(1e-6, s.solUsd),
             sizeUsd,
             stopPct,
-            targetR: holdOpen ? CISD_FULL_R : trail ? 5 : Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
+            targetR: holdOpen ? 1.25 : trail ? 5 : Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
             markUsd: mark,
             pnlSol: pnlUsd / Math.max(1e-6, s.solUsd),
             pnlUsd,
             peakUsd: mark,
             agent: "timing",
             note: holdOpen
-              ? `${t.note} · full @ ${CISD_FULL_R}R · flat 90m · ${lev}x${liqNote}`
+              ? `${t.note} · full @ 1.25R · flat 90m · ${lev}x${liqNote}`
               : trail
                 ? `${t.note} · ¾@${ICT_PARTIAL_R}R trail 5R · ${lev}x${liqNote}`
                 : `${t.note} · ${lev}x${liqNote}`,
@@ -1610,7 +1629,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             t: s.simT,
             kind: "note",
             symbol: t.symbol,
-            text: `read ${t.symbol} · take · close is within 0.05R of the entry · a reverse after 0.5R stops at entry · ${CISD_FULL_R}R limit stays`,
+            text: `read ${t.symbol} · take · close is within 0.05R of the entry · a reverse after 0.5R stops at entry · 1.25R limit stays`,
             tone: "info",
           });
         }
@@ -1822,6 +1841,114 @@ export function buryResurrected(s: EngineState, kept: ClosedTrade[]): void {
   }
 }
 
+
+export function settlePullExit(s: EngineState, id: string, exitUsd: number, reason: "stop" | "target" | "time") {
+  const p = s.open.find((x) => x.id === id);
+  if (!p || !String(p.id).startsWith("pull")) return;
+  s.open = s.open.filter((x) => x.id !== id);
+  closePos(s, p, exitUsd, reason);
+  s.stats.openCount = s.open.length;
+}
+
+export function scanPullSeat(s: EngineState, market: MarketSnapshot | null) {
+  if (s.ictStyle !== "cisd") return;
+  if (s.open.some((p) => String(p.id).startsWith("pull"))) return;
+  const now = Date.now();
+  for (const b of market?.books ?? []) {
+    const symbol = b.symbol || b.id;
+    if (!symbol) continue;
+    if (s.open.some((p) => p.symbol === symbol)) continue;
+    const raw = b.candles5 || [];
+    if (raw.length < 80) continue;
+    const tail = raw[raw.length - 1];
+    const closed = tail && tail.t + 5 * 60_000 > now ? raw.slice(0, -1) : raw.slice();
+    if (closed.length < 80) continue;
+    const i = closed.length - 1;
+    const bar = closed[i]!;
+    // Arm while the bar after the third green close is still open. Later is a pullback, not the fill.
+    if (now < bar.t + 5 * 60_000 || now >= bar.t + 10 * 60_000) continue;
+    const key = `pull:${symbol}:${bar.t}`;
+    if (s.ictSeen.includes(key)) continue;
+    if (s.closed.some((c) => String(c.id).startsWith("pull") && c.symbol === symbol && now - c.closedAt < 60 * 60_000)) continue;
+    let e20 = closed[0]!.c;
+    let e50 = closed[0]!.c;
+    for (let k = 1; k <= i; k++) {
+      const px = closed[k]!.c;
+      e20 = e20 + (2 / 21) * (px - e20);
+      e50 = e50 + (2 / 51) * (px - e50);
+    }
+    if (!(bar.c > e50 && e20 > e50)) continue;
+    const a = closed[i - 2]!;
+    const mid = closed[i - 1]!;
+    if (!(a.c > a.o && mid.c > mid.o && bar.c > bar.o && mid.c > a.c && bar.c > mid.c)) continue;
+    const entry = bar.c;
+    const stop = a.l;
+    const risk = entry - stop;
+    if (!(risk > 0)) continue;
+    const pct = risk / entry;
+    if (pct < 0.008 || pct > 0.021) continue;
+    s.ictSeen = [...s.ictSeen, key].slice(-500);
+    let lev = s.ictLev || ICT_LEVERAGE;
+    let clamped = clampStopToLiq("long", entry, stop, lev);
+    if (clamped.capped) {
+      const drop = levForStop(pct, lev);
+      if (drop >= 20 && drop < lev) {
+        lev = drop;
+        clamped = clampStopToLiq("long", entry, stop, lev);
+      }
+    }
+    if (clamped.capped) continue;
+    const sized = ictRiskUsd(s, pct, lev, 0.5);
+    const stopPx = clamped.stop;
+    const stopDist = Math.abs(entry - stopPx);
+    const id = `pull-${symbol}-${bar.t}`;
+    const opened: Position = {
+      id,
+      symbol,
+      name: b.name || symbol,
+      mint: `ict:${symbol}`,
+      setup: "swing",
+      side: "long",
+      openedAt: bar.t,
+      entryUsd: entry,
+      sizeSol: sized.notional / Math.max(1e-6, s.solUsd),
+      sizeUsd: sized.notional,
+      stopPct: stopDist / Math.max(1e-9, entry),
+      targetR: 1.25,
+      markUsd: entry,
+      pnlSol: 0,
+      pnlUsd: 0,
+      peakUsd: entry,
+      agent: "timing",
+      note: `3green · full @ 1.25R · flat 90m · ${lev}x · second seat`,
+      origin: "ict",
+      stopUsd: stopPx,
+      targetUsd: entry + stopDist * 1.25,
+      liqUsd: clamped.liq,
+      liqCapped: clamped.capped,
+      quotedEntryUsd: entry,
+      liveAt: now,
+    };
+    s.open = [...s.open, opened];
+    queueLiveOpen(opened);
+    s.ictLivePend = [...(s.ictLivePend || []), { ...opened }];
+    s.stats.taken += 1;
+    s.stats.openCount = s.open.length;
+    const openFee = Math.max(0, sized.notional * 0.0006);
+    s.cashUsd = finite(s.cashUsd) - openFee;
+    s.stats.feesUsd = finite(s.stats.feesUsd) + openFee;
+    pushTape(s, {
+      t: s.simT || now,
+      kind: "open",
+      agent: "timing",
+      symbol,
+      text: `pull seat long ${symbol} @ ${entry.toFixed(entry < 2 ? 5 : 2)} · limit for this next bar · CISD seat stays free`,
+      tone: "up",
+    });
+    return;
+  }
+}
+
 export function tick(s: EngineState, market: MarketSnapshot | null): EngineState {
   if (!s.running) return s;
   s.tickN += 1;
@@ -1844,6 +1971,7 @@ export function tick(s: EngineState, market: MarketSnapshot | null): EngineState
   if (s.mode === "zostaff") tickZostaff(s);
   else if (s.mode === "ict") {
     tickIct(s, market);
+    scanPullSeat(s, market);
     repairIctCash(s);
   } else tickMeme(s, market);
 
@@ -1908,7 +2036,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? `full @ ${CISD_FULL_R}R · limit at entry · stop to entry after 0.5R · flat 90m · plain A on · half size until $64 · 4h after two stops` : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
+      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 1.25R · limit at entry · stop to entry after 0.5R · flat 90m · plain A on · half size until $64 · 4h after two stops" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
       tone: "mute",
     });
   }
