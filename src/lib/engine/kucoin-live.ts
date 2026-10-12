@@ -1074,7 +1074,7 @@ export async function syncKucoinLive(s: EngineState) {
           seat.slOid = id;
           seat.stop = Number(slPx);
           saveBook(book);
-          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · 1.25R still on`, "up");
+          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · ${paper.targetR || 2}R still on`, "up");
         }
       }
     }
