@@ -1851,6 +1851,10 @@ export function settlePullExit(s: EngineState, id: string, exitUsd: number, reas
 }
 
 export function scanPullSeat(s: EngineState, market: MarketSnapshot | null) {
+  // The dip fill is not an edge. Bars that close back above are +428R and no red month.
+  // Bars that close under are -1479R and red every month. A live limit gets both.
+  // No stop width, hour, or EMA filter fixes it. Leave the seat off.
+  return;
   if (s.ictStyle !== "cisd") return;
   if (s.open.some((p) => String(p.id).startsWith("pull"))) return;
   const now = Date.now();
