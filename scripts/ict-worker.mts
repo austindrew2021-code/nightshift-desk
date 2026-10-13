@@ -367,11 +367,6 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   const five = new Map<string, IctBook>();
   let sending: Promise<void> = Promise.resolve();
   let saw = false;
-  const queuePull = (book: IctBook | null) => {
-    if (!book?.candles5?.some((c) => c.t === closedOpen)) return;
-    const held = book;
-    sending = sending.then(() => sendPull(s, held));
-  };
   const loadPair = async (a: (typeof ICT_ASSETS)[number]) => {
     const [r5, r15] = await Promise.allSettled([
       fastBook(a),
@@ -414,7 +409,6 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
           fifteenOk = take15(b5, b15);
           if (!fifteenOk) missed15.push(a);
         }
-        if (fiveOk && fifteenOk) queuePull(b5);
       } catch {
         missing.push(a);
         if (is15) missed15.push(a);
@@ -444,7 +438,6 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
             left.push(a);
             continue;
           }
-          queuePull(b5);
         } catch {
           pending.push(a);
         }
@@ -467,7 +460,6 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
           const b15 = await fastBook15(a);
           const book = five.get(a.id) ?? null;
           if (!take15(book, b15)) left.push(a);
-          else queuePull(book);
         } catch {
           left.push(a);
         }
@@ -526,7 +518,6 @@ async function main() {
     }
     const caught = { t: 0 };
     await scanFreshClose(s, ICT_ASSETS, caught);
-    await armPullSeat(s, assets);
     const held = s.open.filter((p) => p.origin === "ict" && Date.now() - (p.liveAt || p.openedAt) > 60_000);
     if (held.length) {
       const managed: IctBook[] = [];
