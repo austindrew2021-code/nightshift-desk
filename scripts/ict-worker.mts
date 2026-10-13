@@ -398,17 +398,10 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
       const a = queue.shift();
       if (!a) return;
       try {
-        const p5 = fastBook(a);
-        const p15 = is15 ? fastBook15(a) : Promise.resolve(null);
-        const b5 = await p5.catch(() => null);
+        const b5 = await fastBook(a).catch(() => null);
         const fiveOk = !!b5 && take5(a, b5);
         if (!fiveOk) missing.push(a);
-        let fifteenOk = !is15;
-        if (is15) {
-          const b15 = await p15.catch(() => null);
-          fifteenOk = take15(b5, b15);
-          if (!fifteenOk) missed15.push(a);
-        }
+        if (is15 && !cisdBusy(s)) missed15.push(a);
       } catch {
         missing.push(a);
         if (is15) missed15.push(a);
@@ -517,7 +510,6 @@ async function main() {
       console.error("expire-due", e);
     }
     const caught = { t: 0 };
-    await scanFreshClose(s, ICT_ASSETS, caught);
     const held = s.open.filter((p) => p.origin === "ict" && Date.now() - (p.liveAt || p.openedAt) > 60_000);
     if (held.length) {
       const managed: IctBook[] = [];
@@ -531,7 +523,14 @@ async function main() {
         }
       }
       if (managed.length) markIct(s, snapshot(managed));
+      try {
+        await syncKucoinLive(s);
+      } catch (e) {
+        console.error("kucoin-live-exit", e);
+      }
+      writeFileSync(STATE, JSON.stringify(slim(s)));
     }
+    if (!cisdBusy(s)) await scanFreshClose(s, ICT_ASSETS, caught);
     const closeIn = period - (Date.now() % period);
     const flat = !s.open.some((p) => p.origin === "ict");
     if (!(flat && closeIn < 20_000)) {
