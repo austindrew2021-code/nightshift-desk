@@ -1517,7 +1517,6 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         }
         if (stopDist0 > 0 && fill > 0) {
           const adverse = t.side === "long" ? t.entryUsd - fill : fill - t.entryUsd;
-          if (adverse > 0.35 * stopDist0) continue;
           // Same 0.05R rule as the live check, on the candle close, before the ticker.
           if (-adverse / stopDist0 > 0.05) {
             s.ictSeen = [...s.ictSeen, key];
@@ -1975,7 +1974,6 @@ export function tick(s: EngineState, market: MarketSnapshot | null): EngineState
   if (s.mode === "zostaff") tickZostaff(s);
   else if (s.mode === "ict") {
     tickIct(s, market);
-    scanPullSeat(s, market);
     repairIctCash(s);
   } else tickMeme(s, market);
 
