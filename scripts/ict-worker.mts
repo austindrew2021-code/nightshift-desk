@@ -408,7 +408,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
       }
     }
   };
-  await Promise.all(Array.from({ length: 12 }, () => worker()));
+  await Promise.all(Array.from({ length: Math.max(1, queue.length) }, () => worker()));
   await sending;
   const giveUp = Date.now() + 8_000;
   let pending = missing;
@@ -436,7 +436,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
         }
       }
     };
-    await Promise.all(Array.from({ length: 12 }, () => retry()));
+    await Promise.all(Array.from({ length: Math.max(1, again.length) }, () => retry()));
     await sending;
   }
   while (is15 && left.length && !cisdBusy(s) && Date.now() < giveUp) {
@@ -458,7 +458,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
         }
       }
     };
-    await Promise.all(Array.from({ length: 12 }, () => retry()));
+    await Promise.all(Array.from({ length: Math.max(1, again.length) }, () => retry()));
     await sending;
   }
   if (saw) caught.t = closedOpen;
