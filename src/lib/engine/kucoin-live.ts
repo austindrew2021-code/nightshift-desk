@@ -245,7 +245,6 @@ function pxStr(px: number, tick: number): string {
 export function orderPastMark(side: Side, entry: number, mark: number, riskPx: number, lev: number): boolean {
   if (!(mark > 0) || !(entry > 0) || !(riskPx > 0)) return false;
   const adverse = side === "long" ? entry - mark : mark - entry;
-  if (adverse > riskPx * 0.35) return true;
   const band = (entry * 0.85) / Math.max(2, lev);
   return adverse > 0 && Math.abs(mark - entry) > band;
 }
