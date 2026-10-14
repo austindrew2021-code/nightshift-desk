@@ -1453,18 +1453,21 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
       const mid = bodies.length
         ? bodies.reduce((a, c) => a + c.c, 0) / bodies.length
         : b.last || t.entryUsd;
-      if (mid > 0 && Math.abs(t.entryUsd / mid - 1) > 0.02) continue;
+      // CISD: the four closes before the signal are the sweep. A 2% gap there is the move.
+      if (s.ictStyle !== "cisd" && mid > 0 && Math.abs(t.entryUsd / mid - 1) > 0.02) continue;
       if (b.last > 0 && Math.abs(t.entryUsd / b.last - 1) > 0.02) continue;
-      if (enterable && volDried(b.candles5)) continue;
-      const cooled = s.closed.some(
-        (c) =>
-          c.origin === "ict" &&
-          !String(c.id).startsWith("pull") &&
-          !String(c.note || "").includes("3green") &&
-          c.symbol === t.symbol &&
-          c.reason === "stop" &&
-          now - c.closedAt < 12 * 60_000,
-      );
+      if (enterable && s.ictStyle !== "cisd" && volDried(b.candles5)) continue;
+      const cooled =
+        s.ictStyle !== "cisd" &&
+        s.closed.some(
+          (c) =>
+            c.origin === "ict" &&
+            !String(c.id).startsWith("pull") &&
+            !String(c.note || "").includes("3green") &&
+            c.symbol === t.symbol &&
+            c.reason === "stop" &&
+            now - c.closedAt < 12 * 60_000,
+        );
       if (cooled) continue;
       const sameSideOpen = s.open.filter((p) => p.origin === "ict" && p.side === t.side && !String(p.id).startsWith("pull"));
       const rangeFade = t.setup === "daily" || t.setup === "weekly" || t.setup === "sweep";
