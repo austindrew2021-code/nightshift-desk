@@ -420,7 +420,6 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   const is15 = true;
   const queue = [...assets];
   const missing: (typeof ICT_ASSETS)[number][] = [];
-  const missed15: (typeof ICT_ASSETS)[number][] = [];
   const five = new Map<string, IctBook>();
   let sending: Promise<void> = Promise.resolve();
   let saw = false;
@@ -458,10 +457,8 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
         const b5 = await fastBook(a).catch(() => null);
         const fiveOk = !!b5 && take5(a, b5);
         if (!fiveOk) missing.push(a);
-        if (is15 && !cisdBusy(s)) missed15.push(a);
       } catch {
         missing.push(a);
-        if (is15) missed15.push(a);
       }
     }
   };
@@ -472,7 +469,18 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   // be up inside that minute. Retry until 4s, and send the instant it appears.
   const giveUp = Date.now() + 4_000;
   let pending = missing;
-  let left = missed15;
+  // Four seconds is enough to reprint a missing 5m candle. It is not enough
+  // for a 15m read of all 65. Each tick takes the next 18, so the whole list
+  // is covered inside a few minutes, while a 15m signal is still valid.
+  const cursorKey = s.ictSeen.find((k) => k.startsWith("m15cursor:"));
+  const cursor = cursorKey ? Number(cursorKey.slice("m15cursor:".length)) || 0 : 0;
+  const slice = 18;
+  const rotated: (typeof ICT_ASSETS)[number][] = [];
+  for (let i = 0; i < slice && i < assets.length; i++) rotated.push(assets[(cursor + i) % assets.length]!);
+  const nextCursor = assets.length ? (cursor + rotated.length) % assets.length : 0;
+  s.ictSeen = [...s.ictSeen.filter((k) => !k.startsWith("m15cursor:")), `m15cursor:${nextCursor}`].slice(-500);
+  let left = rotated;
+  const m15Until = Date.now() + 12_000;
   while (pending.length && !cisdBusy(s) && Date.now() < giveUp) {
     await new Promise((r) => setTimeout(r, 150));
     const again = pending;
@@ -499,7 +507,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
     await Promise.all(Array.from({ length: Math.min(6, Math.max(1, again.length)) }, () => retry()));
     await sending;
   }
-  while (is15 && left.length && !cisdBusy(s) && Date.now() < giveUp) {
+  while (is15 && left.length && !cisdBusy(s) && Date.now() < m15Until) {
     await new Promise((r) => setTimeout(r, 150));
     const again = left;
     left = [];
@@ -597,7 +605,7 @@ async function main() {
       if (!cisdBusy(s)) {
         await Promise.race([
           scanFreshClose(s, ICT_ASSETS, caught),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("scan timeout")), 25_000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("scan timeout")), 45_000)),
         ]);
       }
       say({ stage: "scanned", busy: cisdBusy(s) });
