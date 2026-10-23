@@ -592,7 +592,9 @@ async function main() {
       }
       writeFileSync(STATE, JSON.stringify(slim(s)));
     }
+    say({ stage: "scan" });
     if (!cisdBusy(s)) await scanFreshClose(s, ICT_ASSETS, caught);
+    say({ stage: "scanned", busy: cisdBusy(s) });
     const closeIn = period - (Date.now() % period);
     const flat = !s.open.some((p) => p.origin === "ict");
     if (!(flat && closeIn < 20_000)) {
@@ -696,6 +698,11 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(e);
+  const err = e instanceof Error ? e.stack || e.message : String(e);
+  try {
+    writeSync(1, JSON.stringify({ t: Date.now(), fail: err.slice(0, 500) }) + "\n");
+  } catch {
+    console.error(e);
+  }
   process.exit(1);
 });
