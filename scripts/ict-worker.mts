@@ -541,14 +541,24 @@ async function main() {
     assets.push(a);
   }
   const lock = `${STATE}.lock`;
-  if (existsSync(lock)) {
-    const age = Date.now() - Number(readFileSync(lock, "utf8") || 0);
-    if (age >= 0 && age < 120_000) {
-      console.log(JSON.stringify({ t: Date.now(), skip: "tick already running" }));
-      return;
+  const heldByOther = () => {
+    if (!existsSync(lock)) return false;
+    const pid = Number(readFileSync(lock, "utf8"));
+    // A leftover lock used to store a clock time. That is not a process, and it
+    // was making the next tick skip the close.
+    if (!pid || pid > 1_000_000) return false;
+    try {
+      process.kill(pid, 0);
+      return pid !== process.pid;
+    } catch {
+      return false;
     }
+  };
+  if (heldByOther()) {
+    console.log(JSON.stringify({ t: Date.now(), skip: "tick already running" }));
+    return;
   }
-  writeFileSync(lock, String(Date.now()));
+  writeFileSync(lock, String(process.pid));
   const books: IctBook[] = [];
   let livePx: Record<string, number> = {};
   let fastOnly = false;
