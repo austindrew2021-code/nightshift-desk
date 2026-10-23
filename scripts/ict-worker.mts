@@ -129,7 +129,7 @@ function mergeCandles(pages: Candle[][]): Candle[] {
 }
 
 function warmPriors(assets: { id: string }[]) {
-  for (const a of assets) {
+  for (const a of assets.slice(0, 8)) {
     const sym = futInst(a.id);
     for (const g of [5, 15]) {
       const key = `${sym}:${g}`;
@@ -465,7 +465,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, queue.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(6, Math.max(1, queue.length)) }, () => worker()));
   await sending;
   // KuCoin often prints the closed candle 2–4s after the bar, not at 1.5s.
   // 57% of fills first trade the entry during minute 1, so the limit has to
@@ -496,7 +496,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.max(1, again.length) }, () => retry()));
+    await Promise.all(Array.from({ length: Math.min(6, Math.max(1, again.length)) }, () => retry()));
     await sending;
   }
   while (is15 && left.length && !cisdBusy(s) && Date.now() < giveUp) {
@@ -518,7 +518,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.max(1, again.length) }, () => retry()));
+    await Promise.all(Array.from({ length: Math.min(6, Math.max(1, again.length)) }, () => retry()));
     await sending;
   }
   if (saw) caught.t = closedOpen;
@@ -592,9 +592,18 @@ async function main() {
       }
       writeFileSync(STATE, JSON.stringify(slim(s)));
     }
-    say({ stage: "scan" });
-    if (!cisdBusy(s)) await scanFreshClose(s, ICT_ASSETS, caught);
-    say({ stage: "scanned", busy: cisdBusy(s) });
+    say({ stage: "scan", n: ICT_ASSETS.length });
+    try {
+      if (!cisdBusy(s)) {
+        await Promise.race([
+          scanFreshClose(s, ICT_ASSETS, caught),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("scan timeout")), 25_000)),
+        ]);
+      }
+      say({ stage: "scanned", busy: cisdBusy(s) });
+    } catch (e) {
+      say({ fail: String(e instanceof Error ? e.message : e).slice(0, 300) });
+    }
     const closeIn = period - (Date.now() % period);
     const flat = !s.open.some((p) => p.origin === "ict");
     if (!(flat && closeIn < 20_000)) {

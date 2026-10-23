@@ -71,6 +71,7 @@ async function main() {
     const now = Date.now();
     const period = 5 * 60 * 1000;
     const untilClose = period - (now % period);
+    console.error("tick exit", code, "ms", now - t0);
     if (code !== 0) console.error("tick failed", code);
     else if (untilClose > 90_000) await pushLive();
     const lead = 20_000;
