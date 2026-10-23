@@ -94,13 +94,61 @@ function futCandles(data: unknown): Candle[] {
   return parsed.slice(-200);
 }
 
+/** Latest 200 bars decide the entry and are never held for the older page.
+ *  The prior 200 (yesterday's high and low, Asia) are used if they are
+ *  already back, or if they were fetched while this tick waited for the
+ *  close. A slow older page does not delay the order. */
+const priorCache = new Map<string, Candle[]>();
+
+function klineUrl(symbol: string, granularityMin: number, older: boolean): string {
+  const base = `https://api-futures.kucoin.com/api/v1/kline/query?symbol=${encodeURIComponent(symbol)}&granularity=${granularityMin}`;
+  if (!older) return base;
+  const step = granularityMin * 60 * 1000;
+  const to = Date.now() - 200 * step;
+  const from = to - 200 * step;
+  return `${base}&from=${from}&to=${to}`;
+}
+
+function mergeCandles(pages: Candle[][]): Candle[] {
+  const byT = new Map<number, Candle>();
+  for (const rows of pages) for (const c of rows) byT.set(c.t, c);
+  return [...byT.values()].sort((a, b) => a.t - b.t).slice(-400);
+}
+
+function warmPriors(assets: { id: string }[]) {
+  for (const a of assets) {
+    const sym = futInst(a.id);
+    for (const g of [5, 15]) {
+      const key = `${sym}:${g}`;
+      void getJson(klineUrl(sym, g, true), 4000)
+        .then(futCandles)
+        .then((rows) => {
+          if (rows.length) priorCache.set(key, rows);
+        })
+        .catch(() => {});
+    }
+  }
+}
+
+async function futPages(symbol: string, granularityMin: number): Promise<Candle[]> {
+  const key = `${symbol}:${granularityMin}`;
+  const latestP = getJson(klineUrl(symbol, granularityMin, false), 4000).then(futCandles).catch(() => [] as Candle[]);
+  const olderP = getJson(klineUrl(symbol, granularityMin, true), 4000).then(futCandles).catch(() => [] as Candle[]);
+  const cached = priorCache.get(key) ?? [];
+  const latest = await latestP;
+  const older = await Promise.race([
+    olderP,
+    new Promise<Candle[]>((resolve) => setTimeout(() => resolve(cached), cached.length ? 0 : 200)),
+  ]);
+  void olderP.then((rows) => {
+    if (rows.length) priorCache.set(key, rows);
+  });
+  return mergeCandles([cached, older, latest]);
+}
+
 /** One futures request. The order uses this. Spot 15m and 1h are for the chart and can wait. */
 async function fastBook(a: (typeof ICT_ASSETS)[number]): Promise<IctBook> {
-  const raw = await getJson(
-    `https://api-futures.kucoin.com/api/v1/kline/query?symbol=${encodeURIComponent(futInst(a.id))}&granularity=5`,
-    4000,
-  );
-  const c5 = futCandles(raw).filter((c) => c.t + 5 * 60 * 1000 <= Date.now() + 1500);
+  const c5 = (await futPages(futInst(a.id), 5)).filter((c) => c.t + 5 * 60 * 1000 <= Date.now() + 1500);
   const last = c5.length ? c5[c5.length - 1]!.c : 0;
   return {
     id: a.id,
@@ -117,11 +165,7 @@ async function fastBook(a: (typeof ICT_ASSETS)[number]): Promise<IctBook> {
 
 /** 15m candle, fetched only after the 5m orders are already on their way. */
 async function fastBook15(a: (typeof ICT_ASSETS)[number]): Promise<IctBook> {
-  const raw = await getJson(
-    `https://api-futures.kucoin.com/api/v1/kline/query?symbol=${encodeURIComponent(futInst(a.id))}&granularity=15`,
-    4000,
-  );
-  const c15 = futCandles(raw).filter((c) => c.t + 15 * 60 * 1000 <= Date.now() + 1500);
+  const c15 = (await futPages(futInst(a.id), 15)).filter((c) => c.t + 15 * 60 * 1000 <= Date.now() + 1500);
   const last = c15.length ? c15[c15.length - 1]!.c : 0;
   return {
     id: a.id,
@@ -410,11 +454,14 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
   };
   await Promise.all(Array.from({ length: Math.max(1, queue.length) }, () => worker()));
   await sending;
-  const giveUp = Date.now() + 8_000;
+  // KuCoin often prints the closed candle 2–4s after the bar, not at 1.5s.
+  // 57% of fills first trade the entry during minute 1, so the limit has to
+  // be up inside that minute. Retry until 4s, and send the instant it appears.
+  const giveUp = Date.now() + 4_000;
   let pending = missing;
   let left = missed15;
   while (pending.length && !cisdBusy(s) && Date.now() < giveUp) {
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 150));
     const again = pending;
     pending = [];
     const retry = async () => {
@@ -440,7 +487,7 @@ async function scanFreshClose(s: EngineState, assets: (typeof ICT_ASSETS)[number
     await sending;
   }
   while (is15 && left.length && !cisdBusy(s) && Date.now() < giveUp) {
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 150));
     const again = left;
     left = [];
     const retry = async () => {
@@ -468,6 +515,9 @@ async function main() {
   const period = 5 * 60 * 1000;
   const hotP: Promise<IctAssetDef[]> = fetchKucoinHotAssets().catch(() => []);
   const untilClose = period - (Date.now() % period);
+  // Pull yesterday's bars while waiting for this close, so the order itself
+  // only waits on the latest page.
+  warmPriors(ICT_ASSETS);
   // A tick that starts in the last 50s waits for the bar. Returning here used
   // to push the scan 15–40s past the close, and the ticker had already left.
   if (untilClose <= 50_000 && untilClose > 500) {
