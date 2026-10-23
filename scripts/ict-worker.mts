@@ -1,7 +1,7 @@
 /**
  * Headless ICT tick for GitHub Actions. Phone is a viewer of ict-state.json.
  */
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, writeSync, existsSync, appendFileSync, unlinkSync } from "node:fs";
 import { ICT_ASSETS, type IctAssetDef, type IctBook } from "../src/lib/engine/universe.ts";
 import { fetchKucoinHotAssets, fetchKucoinAllLast, applyLiveLast } from "../src/lib/market/kucoin-hot.ts";
 import { createEngine, tick, buryResurrected, ingestIct, markIct, scanPullSeat, type EngineState } from "../src/lib/engine/session.ts";
@@ -50,6 +50,19 @@ async function getJson(url: string, timeout = 8000): Promise<unknown> {
   }
 }
 
+function say(row: Record<string, unknown>) {
+  writeSync(1, JSON.stringify({ t: Date.now(), ...row }) + "\n");
+}
+
+function workerStillRunning(pid: number): boolean {
+  if (!pid || pid > 1_000_000 || pid === process.pid) return false;
+  try {
+    const cmd = readFileSync(`/proc/${pid}/cmdline`);
+    return cmd.includes("ict-worker");
+  } catch {
+    return false;
+  }
+}
 function kucoinCandles(data: unknown): Candle[] {
   const rows = (data as { data?: unknown })?.data;
   if (!Array.isArray(rows)) return [];
@@ -541,24 +554,13 @@ async function main() {
     assets.push(a);
   }
   const lock = `${STATE}.lock`;
-  const heldByOther = () => {
-    if (!existsSync(lock)) return false;
-    const pid = Number(readFileSync(lock, "utf8"));
-    // A leftover lock used to store a clock time. That is not a process, and it
-    // was making the next tick skip the close.
-    if (!pid || pid > 1_000_000) return false;
-    try {
-      process.kill(pid, 0);
-      return pid !== process.pid;
-    } catch {
-      return false;
-    }
-  };
-  if (heldByOther()) {
-    console.log(JSON.stringify({ t: Date.now(), skip: "tick already running" }));
+  const held = Number(existsSync(lock) ? readFileSync(lock, "utf8") : 0);
+  if (workerStillRunning(held)) {
+    say({ skip: "tick already running", pid: held });
     return;
   }
   writeFileSync(lock, String(process.pid));
+  say({ tick: "start", pid: process.pid });
   const books: IctBook[] = [];
   let livePx: Record<string, number> = {};
   let fastOnly = false;
@@ -605,7 +607,7 @@ async function main() {
     const untilNext = 5 * 60 * 1000 - sinceClose;
     fastOnly = sinceClose < 180_000 || untilNext < 150_000;
     if (fastOnly) {
-      console.log(JSON.stringify({ t: Date.now(), fast: true, sinceClose }));
+      say({ fast: true, sinceClose });
     } else {
     const hotRest = await hotP;
     for (const a of hotRest) {
@@ -683,17 +685,14 @@ async function main() {
   writeFileSync(lastPath, JSON.stringify({ t: Date.now(), src: "kucoin-fut", px: livePx }));
   }
   const open = s.open.filter((p) => p.origin === "ict");
-  console.log(
-    JSON.stringify({
-      t: Date.now(),
-      eq: Math.round(s.equityUsd * 100) / 100,
-      cash: Math.round(s.cashUsd * 100) / 100,
-      open: open.map((p) => `${p.side} ${p.symbol}`),
-      lastTape: s.tape[0]?.text ?? "",
-      books: books.length,
-      live: liveMode(),
-    }),
-  );
+  say({
+    eq: Math.round(s.equityUsd * 100) / 100,
+    cash: Math.round(s.cashUsd * 100) / 100,
+    open: open.map((p) => `${p.side} ${p.symbol}`),
+    lastTape: s.tape[0]?.text ?? "",
+    books: books.length,
+    live: liveMode(),
+  });
 }
 
 main().catch((e) => {
