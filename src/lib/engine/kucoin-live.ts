@@ -486,8 +486,10 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     return;
   }
   const pullOpen = book.seats.filter((x) => String(x.paperId).startsWith("pull")).length;
-  const cisdOpen = book.seats.length - pullOpen;
-  if (pull ? pullOpen >= 1 : cisdOpen >= liveSeats()) {
+  const cisdSeats = book.seats.filter((x) => !String(x.paperId).startsWith("pull"));
+  const young = cisdSeats.filter((x) => Date.now() - (x.openedAt || 0) < 90 * 60 * 1000);
+  const seatFull = pull ? pullOpen >= 1 : cisdSeats.length >= 2 || young.length >= liveSeats();
+  if (seatFull) {
     push(s, `LIVE skip ${p.symbol} · ${pull ? "pull" : "CISD"} seat already full`, "warn");
     if (mode === "on") releasePaper(s, p, "seat full");
     return;

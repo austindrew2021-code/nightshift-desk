@@ -1056,20 +1056,16 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       p.note = `${p.note} · runner`;
     }
     const hold1 = s.ictStyle === "cisd";
-    if (hold1 && !p.partialed) {
-      const closed = series.filter((bar) => bar.t > opened + 30_000).slice(0, -1);
-      if (closed.length >= 18) {
-        s.open = s.open.filter((x) => x.id !== p.id);
-        closePos(s, p, last, "time");
-        pushTape(s, {
-          t: Date.now(),
-          kind: "note",
-          symbol: p.symbol,
-          text: `90m ${p.symbol} · ${p.targetR}R not tagged · flat`,
-          tone: "info",
-        });
-        continue;
-      }
+    // 90m does not flatten. The trade stays for 2R or the stop. The seat opens for one fresh trade.
+    if (hold1 && !p.partialed && Date.now() - (p.openedAt || 0) >= 90 * 60_000 && !String(p.note || "").includes("seat free")) {
+      p.note = `${p.note} · seat free`;
+      pushTape(s, {
+        t: Date.now(),
+        kind: "note",
+        symbol: p.symbol,
+        text: `90m ${p.symbol} · stays until 2R or the stop · second seat is open`,
+        tone: "info",
+      });
     }
     // TAO-class: +1R on last, then giveback to SL. If the peak was real, fade = momentum died.
     if (!hold1 && peakMfe >= risk * 0.75 && lastMfe <= risk * 0.25) {
@@ -1597,7 +1593,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             peakUsd: mark,
             agent: "timing",
             note: holdOpen
-              ? `${t.note} · full @ 2R · flat 90m · ${lev}x${liqNote}`
+              ? `${t.note} · full @ 2R · seat frees at 90m · ${lev}x${liqNote}`
               : trail
                 ? `${t.note} · ¾@${ICT_PARTIAL_R}R trail 5R · ${lev}x${liqNote}`
                 : `${t.note} · ${lev}x${liqNote}`,
@@ -2041,7 +2037,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 2R · limit at entry · stop to entry after 0.5R · flat 90m · plain A on · half size until $64 · 4h after two stops" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
+      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 2R · limit at entry · stop to entry after 0.5R · seat frees at 90m · trade stays · plain A on · half size until $64 · 4h after two stops" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
       tone: "mute",
     });
   }
