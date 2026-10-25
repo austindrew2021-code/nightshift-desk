@@ -1057,8 +1057,8 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
     }
     const hold1 = s.ictStyle === "cisd";
     // 90m does not flatten. The trade stays for 2R or the stop. The seat opens for one fresh trade.
-    if (hold1 && !p.partialed && Date.now() - (p.openedAt || 0) >= 90 * 60_000 && !String(p.note || "").includes("seat free")) {
-      p.note = `${p.note} · seat free`;
+    if (hold1 && !p.partialed && (p.openedAt || 0) > 0 && Date.now() - p.openedAt >= 90 * 60_000 && !String(p.note || "").includes("2nd open")) {
+      p.note = `${p.note} · 2nd open`;
       pushTape(s, {
         t: Date.now(),
         kind: "note",

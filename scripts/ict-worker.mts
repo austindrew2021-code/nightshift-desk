@@ -329,7 +329,7 @@ async function sendEarly(s: EngineState, books: IctBook[]) {
 function cisdBusy(s: EngineState): boolean {
   const cisd = s.open.filter((p) => p.origin === "ict" && !String(p.id).startsWith("pull"));
   if (cisd.length >= 2) return true;
-  return cisd.some((p) => Date.now() - (p.openedAt || 0) < 90 * 60 * 1000);
+  return cisd.some((p) => !(p.openedAt > 0) || Date.now() - p.openedAt < 90 * 60 * 1000);
 }
 
 function pullWaitFresh(seen: string[], closedOpen: number): boolean {

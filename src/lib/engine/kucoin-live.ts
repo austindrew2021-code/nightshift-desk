@@ -338,11 +338,19 @@ function lotsFor(notional: number, px: number, c: Contract) {
 }
 
 async function usdtEquity(): Promise<number> {
+  const d = await usdtBalances();
+  return d.equity || d.available;
+}
+
+async function usdtBalances(): Promise<{ equity: number; available: number }> {
   const d = await kucoin<{ availableBalance?: string; accountEquity?: string }>(
     "GET",
     "/api/v1/account-overview?currency=USDT",
   );
-  return Number(d?.accountEquity || d?.availableBalance || 0);
+  return {
+    equity: Number(d?.accountEquity || 0),
+    available: Number(d?.availableBalance || 0),
+  };
 }
 
 async function markPrice(symbol: string): Promise<number> {
@@ -490,6 +498,7 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   const young = cisdSeats.filter((x) => {
     const paper = s.open.find((p) => p.id === x.paperId);
     const born = paper?.openedAt || x.openedAt || 0;
+    if (!(born > 0)) return true;
     return Date.now() - born < 90 * 60 * 1000;
   });
   const seatFull = pull ? pullOpen >= 1 : cisdSeats.length >= 2 || young.length >= liveSeats();
@@ -520,6 +529,14 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
       workingUsd = prime.working;
       capUsd = prime.cap;
       eq = Math.min(Math.max(0, prime.working), prime.cap);
+      if (cisdSeats.length > 0) {
+        const free = (await usdtBalances()).available;
+        const room = Math.max(0, free * 0.9);
+        if (room + 1 < eq) {
+          push(s, `LIVE ${p.symbol} · second seat sized on $${room.toFixed(0)} free · first seat still on`, "up");
+          eq = room;
+        }
+      }
     } catch (e) {
       log({ kind: "equity-fail", err: String(e) });
       push(s, `LIVE equity fail · ${String(e).slice(0, 80)}`, "down");
