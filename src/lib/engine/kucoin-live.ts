@@ -487,7 +487,11 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
   }
   const pullOpen = book.seats.filter((x) => String(x.paperId).startsWith("pull")).length;
   const cisdSeats = book.seats.filter((x) => !String(x.paperId).startsWith("pull"));
-  const young = cisdSeats.filter((x) => Date.now() - (x.openedAt || 0) < 90 * 60 * 1000);
+  const young = cisdSeats.filter((x) => {
+    const paper = s.open.find((p) => p.id === x.paperId);
+    const born = paper?.openedAt || x.openedAt || 0;
+    return Date.now() - born < 90 * 60 * 1000;
+  });
   const seatFull = pull ? pullOpen >= 1 : cisdSeats.length >= 2 || young.length >= liveSeats();
   if (seatFull) {
     push(s, `LIVE skip ${p.symbol} · ${pull ? "pull" : "CISD"} seat already full`, "warn");
