@@ -7,6 +7,7 @@ import {
   ICT_MAX_RISK_PCT,
   ICT_HARD_RISK_PCT,
   ICT_PARTIAL_R,
+  CISD_FULL_R,
   BANK_EVERY_USD,
   BANK_RATE,
   SCALE_USD,
@@ -1001,7 +1002,7 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
         p.targetUsd = tgtPx;
         p.targetR = far;
       } else if (trail && !p.partialed) {
-        const tgtR = s.ictStyle === "cisd" ? 2 : 1;
+        const tgtR = s.ictStyle === "cisd" ? CISD_FULL_R : 1;
         tgtPx = p.side === "long" ? p.entryUsd + risk * tgtR : p.entryUsd - risk * tgtR;
         p.targetUsd = tgtPx;
         p.targetR = tgtR;
@@ -1056,14 +1057,14 @@ export function markIct(s: EngineState, market: MarketSnapshot | null) {
       p.note = `${p.note} · runner`;
     }
     const hold1 = s.ictStyle === "cisd";
-    // 90m does not flatten. The trade stays for 2R or the stop. The seat opens for one fresh trade.
+    // 90m does not flatten. The trade stays for the full target or the stop. The seat opens for one fresh trade.
     if (hold1 && !p.partialed && (p.openedAt || 0) > 0 && Date.now() - p.openedAt >= 90 * 60_000 && !String(p.note || "").includes("2nd open")) {
       p.note = `${p.note} · 2nd open`;
       pushTape(s, {
         t: Date.now(),
         kind: "note",
         symbol: p.symbol,
-        text: `90m ${p.symbol} · stays until 2R or the stop · second seat is open`,
+        text: `90m ${p.symbol} · stays until ${CISD_FULL_R}R or the stop · second seat is open`,
         tone: "info",
       });
     }
@@ -1562,8 +1563,8 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
         const holdOpen = s.ictStyle === "cisd";
         const targetUsd = holdOpen
           ? t.side === "long"
-            ? t.entryUsd + stopDist * 2
-            : t.entryUsd - stopDist * 2
+            ? t.entryUsd + stopDist * CISD_FULL_R
+            : t.entryUsd - stopDist * CISD_FULL_R
           : trail
             ? t.side === "long"
               ? t.entryUsd + stopDist * 5
@@ -1586,14 +1587,14 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             sizeSol: sizeUsd / Math.max(1e-6, s.solUsd),
             sizeUsd,
             stopPct,
-            targetR: holdOpen ? 2 : trail ? 5 : Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
+            targetR: holdOpen ? CISD_FULL_R : trail ? 5 : Math.abs(t.target - t.entryUsd) / Math.max(1e-9, stopDist),
             markUsd: mark,
             pnlSol: pnlUsd / Math.max(1e-6, s.solUsd),
             pnlUsd,
             peakUsd: mark,
             agent: "timing",
             note: holdOpen
-              ? `${t.note} · full @ 2R · seat frees at 90m · ${lev}x${liqNote}`
+              ? `${t.note} · full @ ${CISD_FULL_R}R · seat frees at 90m · ${lev}x${liqNote}`
               : trail
                 ? `${t.note} · ¾@${ICT_PARTIAL_R}R trail 5R · ${lev}x${liqNote}`
                 : `${t.note} · ${lev}x${liqNote}`,
@@ -1627,7 +1628,7 @@ export function ingestIct(s: EngineState, market: MarketSnapshot) {
             t: s.simT,
             kind: "note",
             symbol: t.symbol,
-            text: `read ${t.symbol} · take · close is within 0.05R of the entry · a reverse after 0.5R stops at entry · 2R limit stays`,
+            text: `read ${t.symbol} · take · close is within 0.05R of the entry · a reverse after 0.5R stops at entry · ${CISD_FULL_R}R limit stays`,
             tone: "info",
           });
         }
@@ -2037,7 +2038,7 @@ export function resetEngine(
       t: s.simT,
       kind: "note",
       symbol: "ICT",
-      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? "full @ 2R · limit at entry · stop to entry after 0.5R · seat frees at 90m · trade stays · plain A on · half size until $64 · 4h after two stops" : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
+      text: `ICT ${ictFilter} ${s.ictStyle === "cisd" ? "CISD 5m+15m A+" : s.ictStyle} ${s.ictStyle === "cisd" ? "5m+15m" : s.ictUse5m === false ? "15m" : "15m+5m"} from $${s.startUsd.toFixed(0)} · ${s.ictLev}x iso liq ${(ictLiqPct(s.ictLev) * 100).toFixed(1)}% · ${(s.ictRiskPct * 100).toFixed(0)}% 1R · ${s.ictStyle === "cisd" ? `full @ ${CISD_FULL_R}R · limit at entry · stop to entry after 0.5R · seat frees at 90m · trade stays · plain A on · half size until $64 · order capped at one minute · 4h after two stops` : `¾@${ICT_PARTIAL_R}R trail 5R`}${s.ictStyle === "cisd" ? " · no Silver · no Playback" : ""}`,
       tone: "mute",
     });
   }

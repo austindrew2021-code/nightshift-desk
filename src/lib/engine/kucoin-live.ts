@@ -10,7 +10,7 @@
 import { createHmac } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import type { EngineState, Position, Side } from "./types";
-import { ICT_HARD_RISK_PCT } from "./types";
+import { ICT_HARD_RISK_PCT, CISD_FULL_R } from "./types";
 import { ictLivePend } from "./live-pend";
 import { settlePullExit } from "./session";
 
@@ -332,14 +332,14 @@ export function ictBracket(side: Side, tpPx: string, slPx: string, size: number)
   return { sl, tp, tpStop };
 }
 
-/** Half a typical minute. The stop is a market order and has to be able to print. Fewer than three minutes is left alone. */
+/** One typical minute. The stop is a market order and has to be able to print. Fewer than three minutes is left alone. */
 export function bookNotional(wanted: number, minuteUsd: number[]): { notional: number; minute: number } {
   if (!(wanted > 0)) return { notional: 0, minute: -1 };
   if (minuteUsd.length < 3) return { notional: wanted, minute: -1 };
   const xs = [...minuteUsd].sort((a, b) => a - b);
   const minute = xs[Math.floor(xs.length / 2)] ?? 0;
   if (!(minute > 0)) return { notional: 0, minute: 0 };
-  return { notional: Math.min(wanted, minute * 0.5), minute };
+  return { notional: Math.min(wanted, minute), minute };
 }
 
 function lotsFor(notional: number, px: number, c: Contract) {
@@ -1145,7 +1145,7 @@ export async function syncKucoinLive(s: EngineState) {
           seat.slOid = id;
           seat.stop = Number(slPx);
           saveBook(book);
-          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · ${paper.targetR || 2}R still on`, "up");
+          push(s, `LIVE stop to entry ${seat.symbol} · 0.5R tagged · ${paper.targetR || CISD_FULL_R}R still on`, "up");
         }
       }
     }
