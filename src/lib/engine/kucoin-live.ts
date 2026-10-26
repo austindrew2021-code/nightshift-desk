@@ -331,6 +331,17 @@ export function ictBracket(side: Side, tpPx: string, slPx: string, size: number)
   };
   return { sl, tp, tpStop };
 }
+
+/** Half a typical minute. The stop is a market order and has to be able to print. Fewer than three minutes is left alone. */
+export function bookNotional(wanted: number, minuteUsd: number[]): { notional: number; minute: number } {
+  if (!(wanted > 0)) return { notional: 0, minute: -1 };
+  if (minuteUsd.length < 3) return { notional: wanted, minute: -1 };
+  const xs = [...minuteUsd].sort((a, b) => a - b);
+  const minute = xs[Math.floor(xs.length / 2)] ?? 0;
+  if (!(minute > 0)) return { notional: 0, minute: 0 };
+  return { notional: Math.min(wanted, minute * 0.5), minute };
+}
+
 function lotsFor(notional: number, px: number, c: Contract) {
   const raw = notional / Math.max(1e-12, px * c.multiplier);
   const n = Math.floor(raw / c.lotSize) * c.lotSize;
@@ -364,6 +375,28 @@ async function markPrice(symbol: string): Promise<number> {
     return px > 0 ? px : 0;
   } catch {
     return 0;
+  }
+}
+
+/** Completed 1m turnover, oldest first. The forming minute is dropped. Empty means the read failed. */
+async function minuteTurnover(symbol: string): Promise<number[]> {
+  try {
+    const now = Date.now();
+    const res = await fetch(
+      `${BASE}/api/v1/kline/query?symbol=${encodeURIComponent(symbol)}&granularity=1&from=${now - 16 * 60_000}&to=${now}`,
+      {
+        headers: { Accept: "application/json", "User-Agent": "NightshiftDesk/live" },
+        signal: AbortSignal.timeout(2_500),
+      },
+    );
+    const json = (await res.json()) as { data?: unknown[][] };
+    const rows = Array.isArray(json?.data) ? json.data : [];
+    return rows
+      .slice(0, -1)
+      .slice(-12)
+      .map((b) => Number(b?.[6]) || 0);
+  } catch {
+    return [];
   }
 }
 
@@ -578,7 +611,23 @@ async function enter(s: EngineState, p: Position, mode: LiveMode, book: LiveBook
     return;
   }
   const notional = Math.min(riskUsd / stopPct, eq * lev * 0.85);
-  const lots = lotsFor(notional, p.entryUsd, c);
+  const fit = mode === "on" ? bookNotional(notional, await minuteTurnover(c.symbol)) : { notional, minute: -1 };
+  const sized = fit.notional;
+  if (fit.minute >= 0 && sized * stopPct < 2) {
+    log({ kind: "skip", why: "thin-book", symbol: p.symbol, notional, minute: fit.minute, sized });
+    releasePaper(s, p, `book is $${Math.round(fit.minute)} a minute`);
+    return;
+  }
+  const lots = lotsFor(sized, p.entryUsd, c);
+  const liveNotional = lots * p.entryUsd * c.multiplier;
+  if (fit.minute >= 0 && (liveNotional * stopPct < 2 || liveNotional > sized * 1.05)) {
+    log({ kind: "skip", why: "thin-book", symbol: p.symbol, notional, minute: fit.minute, liveNotional });
+    releasePaper(s, p, liveNotional > sized * 1.25 ? "one lot is bigger than the book" : `book is $${Math.round(fit.minute)} a minute`);
+    return;
+  }
+  if (mode === "on" && fit.minute >= 0 && sized < notional * 0.98) {
+    push(s, `LIVE ${p.symbol} · book is $${Math.round(fit.minute)} a minute · size cut to $${Math.round(liveNotional)}`, "warn");
+  }
   const side = p.side === "long" ? "buy" : "sell";
   const stopPx = p.stopUsd || (p.side === "long" ? p.entryUsd * (1 - stopPct) : p.entryUsd * (1 + stopPct));
   const riskPx = Math.abs(p.entryUsd - stopPx);

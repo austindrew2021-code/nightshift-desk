@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alreadyLeft, entryWindow, ictBracket, keepWorkingExit, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
+import { alreadyLeft, bookNotional, entryWindow, ictBracket, keepWorkingExit, levInsideStop, orderPastMark, positionIsFlat, realLiqPct } from "./kucoin-live.ts";
 
 test("long target is a resting limit and the stop stays a stop-market", () => {
   const { sl, tp, tpStop } = ictBracket("long", "10.924", "10.746", 64);
@@ -85,4 +85,15 @@ test("KAS maintenance drops 40x so the wick stop is inside the real liquidation"
   const liq = 0.045919 * (1 - realLiqPct(lev, mmr));
   assert.ok(liq < 0.045074);
   assert.equal(levInsideStop(0.018, 0.004, 125, 40), 40);
+});
+test("a stop bigger than the minute is cut to half that minute", () => {
+  const npc = bookNotional(1770, [2, 5, 7, 11, 11, 24, 106, 676]);
+  assert.equal(npc.minute, 11);
+  assert.equal(npc.notional, 5.5);
+  const sol = bookNotional(1872, [40000, 45000, 50000, 52000, 56000, 60000, 70000, 90000]);
+  assert.equal(sol.notional, 1872);
+  assert.equal(bookNotional(1872, [100, 200]).notional, 1872);
+  assert.equal(bookNotional(1872, []).minute, -1);
+  assert.equal(bookNotional(1770, [5, 5, 5]).notional, 2.5);
+  assert.equal(bookNotional(1872, [0, 0, 0, 0]).notional, 0);
 });
