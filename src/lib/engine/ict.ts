@@ -683,7 +683,7 @@ function aPlus(
     entry,
     stop,
     tgt,
-    `${note} · ${raid.src} · CISD · ${zone.tag}${oteHit ? " ∩ OTE 62–79" : ""} · ${grade} · ${slTag} · ${targetMult.toFixed(1)}R`,
+    `${note} · ${raid.src} · CISD · ${zone.tag}${oteHit ? " ∩ OTE 62–79" : ""} · ${grade} · ${slTag}`,
     maxRisk,
   );
 }
