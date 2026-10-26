@@ -437,14 +437,14 @@ async function placeTp(mode: LiveMode, symbol: string, bracket: ReturnType<typeo
   }
 }
 
-async function orderIsOpen(mode: LiveMode, id?: string): Promise<boolean> {
+async function orderIsOpen(mode: LiveMode, id?: string): Promise<boolean | null> {
   if (mode !== "on" || !id || id.startsWith("dry-")) return false;
   try {
     const o = await kucoin<{ status?: string }>("GET", `/api/v1/orders/${id}`);
     return o?.status === "open";
   } catch (e) {
     log({ kind: "order-state-fail", id, err: String(e) });
-    return false;
+    return null;
   }
 }
 
@@ -1090,6 +1090,14 @@ export async function syncKucoinLive(s: EngineState) {
       const qtyNow = qty == null ? -1 : Math.abs(qty.get(seat.inst) || 0);
       const tpOpen = await orderIsOpen(mode, seat.tpOid);
       const slOpen = await orderIsOpen(mode, seat.slOid);
+      if (tpOpen == null || slOpen == null) {
+        const note = `orders unread ${seat.symbol}`;
+        const last = s.tape.find((ev) => ev.text?.includes(note));
+        if (!last || Date.now() - last.t > 5 * 60_000) {
+          push(s, `LIVE ${note} · stop and target stay · not a flatten`, "warn");
+        }
+        continue;
+      }
       if (keepWorkingExit(done?.reason, tpOpen, slOpen, qtyNow)) {
         const note = `limit still ${seat.symbol}`;
         const last = s.tape.find((ev) => ev.text?.includes(note));
